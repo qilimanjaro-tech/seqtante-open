@@ -1,0 +1,74 @@
+nodes:
+  - name: "FluxChannelsSetup"
+    experiment: "qdac_flux_channels_setup"
+    parameters:
+      qubit_idx: [3]
+      voltage_source_alias: qdac2
+      xtalk_params:
+        flux_z:
+          alias: flux_z_37A
+          name: phi_z
+          dac: 9
+          offset: -0.02523272
+        flux_x:
+          alias: flux_x_37A
+          name: phi_x
+          dac: 8
+          offset: -0.00771487
+        matrix:
+          - 0.89712274
+          - 0.48105395
+          - 0.02536326
+          - 0.47134051
+        mutual_inductance:
+          - 1
+          - 1
+  - name: "SingleTone"
+    experiment: "single_tone_frequency_vs_flux_cw_dc"
+    parameters:
+      qubit_idx: [3]
+      hw_avg: 200
+      x_axis: Flux phi_x (phi_0)
+      repetition_duration: 6000
+      frequency_sweep_values: [154e6, 156e6, 101]
+      flux_sweep_values: [0.514, 0.1, 51]
+      flux_parameter_id: xtalk_phi_z
+      xtalk_phi_z: 0.51402
+      xtalk_phi_x: 0.415
+      peak_axis: IF_frequency readoutB (MHz)
+      filter_on: True
+      filter_window_length: 5
+      filter_polyorder: 3
+      fit_lorentzian: False
+      dataprocessing: absolute
+      readout_bus: readoutB
+      sample: ConscienceWF02-3.7
+      cooldown: CD79-Mimas
+  - name: "TwoTone"
+    experiment: "two_tone_frequency_vs_flux_pulsed_dc_update_freq"
+    parameters:
+      qubit_idx: [3]
+      hw_avg: 1000
+      relax_duration: 0
+      x_axis: Flux phi_x (phi_0)
+      readout_bus: readoutB
+      drive_bus: drive_QCM_RS
+      drive_if_sweep_values: [-300e6, 300e6, 301]
+      flux_sweep_values: [0.514, 0.1, 51]
+      flux_parameter_id: xtalk_phi_z
+      xtalk_phi_z: 0.51402
+      xtalk_phi_x: 0.415
+      drive_LO: 1.8e9
+      readout_amp: 0.2
+      readout_duration: 4000
+      drive_duration: 4000
+      drive_amp: 0.1
+      overlap_time: 4000
+      ringup_time: 0
+      drive_gain: -25
+      sample: "ConscienceWF02-3.7"
+      cooldown: CD79-Mimas
+
+dependencies:
+  - ["FluxChannelsSetup", "SingleTone"]
+  - ["SingleTone", "TwoTone"]
