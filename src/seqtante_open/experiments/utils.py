@@ -18,7 +18,7 @@ import qcodes as qc
 from qililab.instruments.voltage_source import VoltageSource
 from qililab import Calibration
 
-from seqtante_open.experiments.analysis.lorentzian_fit import lorentzian
+from seqtante_open.experiments.analysis import lorentzian
 
 
 def from_parameters_to_calibration(parameters: dict[str, Any], targets: list[str] | None = None):

@@ -12,5 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from .spectroscopy import resonator_spectroscopy_cw
+from .qubit_spectroscopy import two_tone_spectroscopy
 
-__all__ = ["resonator_spectroscopy_cw"]
+__all__ = ["resonator_spectroscopy_cw", "two_tone_spectroscopy"]

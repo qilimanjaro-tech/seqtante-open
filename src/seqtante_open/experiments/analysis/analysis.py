@@ -52,6 +52,29 @@ def rotate_iq(arr: np.ndarray):
     rotated = arr * np.exp(1j * angle)
     return rotated
 
+def lorentzian(x, amplitude, center, width, offset):
+    """
+    Lorentzian function.
+
+    Parameters
+    ----------
+    x : array_like
+        Input values (typically frequency or time).
+    amplitude : float
+        Peak height (positive for a peak, negative for a dip).
+    center : float
+        Center position of the peak (x-coordinate).
+    width : float
+        Full width at half maximum (FWHM) of the peak.
+    offset : float
+        Constant baseline offset.
+
+    Returns
+    -------
+    np.ndarray
+        The Lorentzian function evaluated at `x`.
+    """
+    return amplitude / (1 + ((x - center) / (0.5 * width)) ** 2) + offset
 
 def two_tone_spectroscopy_map(S21: np.ndarray):
     """

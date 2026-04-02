@@ -11,29 +11,37 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Module for handling correction and fitting of Resonators data.
+"""Module for handling correction and fitting of Qubits data.
 
 This module provides classes and functions to correct
-and fit resonator data.
+and fit qubit data.
 
 Classes:
-    ResonatorSpectroscopyFit: Handles the correction and fitting
-    of Resonator Spectroscopy data.
+    QubitSpectroscopyFit: Handles the correction and fitting
+    of Qubit Spectroscopy data.
 
 Functions:
-    fit: fit the resonator spectroscopy data.
-    plot: plot the fitted resonator spectroscopy data.
+    fit: fit the qubit spectroscopy data.
+    plot: plot the fitted qubit spectroscopy data.
 """
+import os
+
 import matplotlib.pyplot as plt
 import numpy as np
-import os
 import plotly.graph_objects as go
-import tqdm
+import qililab as ql
 import xarray as xr
-from scipy.signal import find_peaks
 from scipy.signal import find_peaks, savgol_filter
-from qilitools.plotting import auto_plot, center_phase_around_median
-from seqtante_open.experiments.utils import lorentzian_fit_custom
+from tqdm.auto import tqdm
+
+from seqtante_open.experiments.fit import FittingClass
+from seqtante_open.experiments.plotting import (
+    auto_plot,
+    convert_plot_units,
+    get_xarray_from_meas,
+)
+from seqtante_open.experiments.analysis import rotate_iq
+from seqtante_open.experiments.analysis import lorentzian
 
 
 class QubitSpectroscopyFit:
@@ -44,6 +52,7 @@ class QubitSpectroscopyFit:
     def __init__(
         self, qubit_idx: int,
         measurement: np.ndarray,
+        loop: dict,
         path: str | None = None
     ):
         """Initialize the class
@@ -55,11 +64,69 @@ class QubitSpectroscopyFit:
         """
         self.qubit_idx = qubit_idx
         self.measurement = measurement
+        self.loop = loop
         self.path = path
-        self.readout_if_list = None
+        self.qubit_freq = None
+
+    def _find_qubit_freq(self,
+                        data: np.ndarray,
+                        x_vals: np.ndarray,
+                        ):
+        """Find qubit frequency in a 2D array"""
+        if_sweep = self.loop["frequency"]["array"]
+        flux_sweep = self.loop["flux"]["array"]
+        fitted_ifs = np.empty((len(flux_sweep)))
+        r_squareds = np.empty((len(flux_sweep)))
+        i = data[:,:,0]
+        q = data[:,:,1]
+        rotated_signal = rotate_iq(i + 1j * q)
+        
+        fit_values = np.empty((len(x_vals), len(if_sweep)))
+        fitted_ifs = np.empty((len(x_vals)))
+        r_squareds = np.empty((len(x_vals)))
+        mask_i = np.empty(len(x_vals), dtype=bool)
+
+
+        for ii in range(len(x_vals)):
+            i_fitted_if, i_fitvals, i_rsquared = lorentzian(np.real(rotated_signal[ii]), if_sweep)
+
+            if i_rsquared < 0.60:
+                i_fitted_if = np.nan
+                mask_i[ii] = False
+            else:
+                mask_i[ii] = True
+            
+            fitted_ifs[ii] = i_fitted_if
+            fit_values[ii] = i_fitvals
+            r_squareds[ii] = i_rsquared
+
+        i_coeffs = np.polyfit(flux_sweep[mask_i], fitted_ifs[:][mask_i], 2)
+        i_sweetspot = -i_coeffs[1]/(2*i_coeffs[0])
+
+        return i_sweetspot
 
     def fit(self):
         """Empty placeholder for now"""
+        xarr = get_xarray_from_meas(self.measurement)
+        xarr = convert_plot_units(xarr)
+        xarr = xr.apply_ufunc(self.dataprocessing, xarr.T)
+
+        # Determine axis name
+        if isinstance(self.peak_axis, str):
+            axis_name = self.peak_axis
+        elif isinstance(self.peak_axis, int):
+            axis_name = xarr.dims[self.peak_axis]
+        else:
+            raise ValueError("peak_axis must be int or str")
+
+        # Prepare data
+        data = xarr.transpose(..., axis_name).to_numpy()
+        x_vals = xarr[axis_name].to_numpy()
+
+        self.qubit_if = self._find_qubit_freq(
+            data=data,
+            x_vals=x_vals,
+        )
 
         return None
 

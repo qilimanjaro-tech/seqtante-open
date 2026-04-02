@@ -20,6 +20,7 @@ from .analysis import (
     array_from_center_span_npoints,
     center_span_npoints_from_array,
     decibels,
+    lorentzian,
     rotate_iq,
     sss_from_array,
     sss_from_center_span_npoints,
