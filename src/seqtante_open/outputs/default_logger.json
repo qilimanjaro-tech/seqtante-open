@@ -1,0 +1,46 @@
+{
+  "extra": {
+    "app": "seqtante",
+    "CALIBRATION_ID": true,
+    "GENERATE_UUID": true
+  },
+  "handlers": [
+    {
+      "name": "console",
+      "sink": "stderr",
+      "level": "INFO",
+      "colorize": true,
+      "format": "<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
+      "enqueue": true,
+      "backtrace": false,
+      "diagnose": false
+    },
+    {
+      "name": "runtime_info",
+      "sink": "SEQTANTE_FOLDER/logs/runtime_info.log",
+      "level": "DEBUG",
+      "colorize": true,
+      "format": "{time:YYYY-MM-DD HH:mm:ss} | {message}",
+      "rotation": "10 MB",
+      "retention": "14 days",
+      "compression": "zip",
+      "enqueue": true,
+      "filter": "lt_warning_seqtante",
+      "serialize" : false
+    },
+    {
+      "name": "error",
+      "sink": "SEQTANTE_FOLDER/logs/error.log",
+      "level": "WARNING",
+      "colorize": true,
+      "format": "{time:YYYY-MM-DD HH:mm:ss} | {message}",
+      "rotation": "10 MB",
+      "retention": "30 days",
+      "compression": "zip",
+      "enqueue": true,
+      "backtrace": false,
+      "diagnose": false,
+      "filter": "seqtante"
+    }
+  ]
+}
