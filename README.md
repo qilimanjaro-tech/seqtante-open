@@ -1,9 +1,9 @@
-# Seqtante
+# Seqtante-open
 
-Calibration tools for analog superconducting devices. 
+Open-source version of Qilimanjaro calibration tools for analog superconducting devices. 
 
 
-Seqtante is a library/CLI that provides tools for characterising and calibrating analog superconducting devices.
+Seqtante-open is a library/CLI that provides tools for characterising and calibrating analog superconducting devices.
 
 Its main feauture is an **automatic calibration workflows** for quantum processors using a **YAML file** to declare the calibration steps (nodes) and their **dependencies** (edges).
 Under the hood it builds a directed acyclic graph (DAG), injects parameters between steps when needed, and executes everything in a **topological order** on a `qililab` platform.
@@ -11,7 +11,7 @@ Under the hood it builds a directed acyclic graph (DAG), injects parameters betw
 This repository’s main entrypoint is:
 
 ```
-seqtante/autocalibration.py
+seqtante-open/autocalibration.py
 ```
 
 It implements:
@@ -55,8 +55,8 @@ Installable with `pip` as shown below.
 
 ```bash
 # clone your project
-git clone https://github.com/qilimanjaro-tech/seqtante.git
-cd seqtante
+git clone https://github.com/qilimanjaro-tech/seqtante-open.git
+cd seqtante-open
 
 # (recommended) create a virtualenv
 python -m venv .venv
