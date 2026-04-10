@@ -22,7 +22,7 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
 ]
 dependencies = [
-    "qililab == 0.30.0",
+    "qililab == 0.29.3",
     "ruamel-yaml>=0.18.10",
     "scikit-optimize>=0.10.2",
     "lmfit>=1.3.2",
