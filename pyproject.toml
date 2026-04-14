@@ -3,7 +3,7 @@ name = "seqtante_open"
 version = "0.1.0"
 description = "Fundamental package for fast calibration of quantum chips."
 authors = [{name = "Qilimanjaro Quantum Tech", email = "info@qilimanjaro.tech"}]
-urls = {Repository = "https://github.com/qilimanjaro-tech/seqtante"}
+urls = {Repository = "https://github.com/qilimanjaro-tech/seqtante-open"}
 readme = "README.md"
 requires-python = ">=3.10"
 keywords = ["quantum control"]
@@ -147,7 +147,7 @@ logger-objects = ["qililab.logger"]
 "tests/*" = ["ANN", "S", "CPY", "SLF001", "PLR", "DOC", "RUF012"]
 "docs/*" = ["CPY"]
 "examples/*" = ["CPY", "T20"]
-"src/seqtante/about.py" = ["T201"]
+"src/seqtante_open/about.py" = ["T201"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -174,7 +174,7 @@ exclude = [
 [tool.commitizen]
 version = "0.16.1"
 version_files = [
-    "src/seqtante/config/version.py",
+    "src/seqtante_open/config/version.py",
     "pyproject.toml:version"
 ]
 tag_format = "$version"

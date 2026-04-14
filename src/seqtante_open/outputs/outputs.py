@@ -28,7 +28,7 @@ from loguru import logger
 from qililab.result import CalibrationRun, DatabaseManager, get_db_manager
 
 # ---------------------Logger constants-----------------------
-DEFAULT_LOG_CONFIG = Path(files("seqtante.outputs") / "default_logger.json")
+DEFAULT_LOG_CONFIG = Path(files("seqtante_open.outputs") / "default_logger.json")
 DEFAULT_FOLDER_ALIAS = "SEQTANTE_FOLDER"
 
 SINKS = {
@@ -36,10 +36,11 @@ SINKS = {
     "stdout": sys.stdout,
 }
 
-FILTERS = {"lt_warning": lambda r: r["level"].no < logger.level("WARNING").no,
-           "seqtante": lambda r: r["name"].startswith("seqtante."),
-           "lt_warning_seqtante": lambda r: r["name"].startswith("seqtante.") and r["level"].no < logger.level("WARNING").no}
-
+FILTERS = {
+    "lt_warning": lambda r: r["level"].no < logger.level("WARNING").no,
+    "seqtante_open": lambda r: r["name"].startswith("seqtante_open."),
+    "lt_warning_seqtante_open": lambda r: r["name"].startswith("seqtante_open.") and r["level"].no < logger.level("WARNING").no
+}
 
 class CalibrationParameter(Enum):
     "Output parameters that aren't stored in the runcard"

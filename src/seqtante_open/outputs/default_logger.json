@@ -1,6 +1,6 @@
 {
   "extra": {
-    "app": "seqtante",
+    "app": "seqtante_open",
     "CALIBRATION_ID": true,
     "GENERATE_UUID": true
   },
@@ -25,7 +25,7 @@
       "retention": "14 days",
       "compression": "zip",
       "enqueue": true,
-      "filter": "lt_warning_seqtante",
+      "filter": "lt_warning_seqtante_open",
       "serialize" : false
     },
     {
@@ -40,7 +40,7 @@
       "enqueue": true,
       "backtrace": false,
       "diagnose": false,
-      "filter": "seqtante"
+      "filter": "seqtante_open"
     }
   ]
 }
