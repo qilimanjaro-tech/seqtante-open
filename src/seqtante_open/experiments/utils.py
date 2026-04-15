@@ -17,6 +17,7 @@ import numpy as np
 import qcodes as qc
 from qililab.instruments.voltage_source import VoltageSource
 from qililab import Calibration
+from typing import Any
 
 from seqtante_open.experiments.analysis import lorentzian
 
