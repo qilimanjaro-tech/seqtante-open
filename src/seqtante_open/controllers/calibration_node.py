@@ -19,7 +19,7 @@ from typing import Any, Dict
 
 from loguru import logger
 from qililab import Platform
-from seqtante_open.experiments.experiment_functions import double_qubit_exp, experiment_functions_dict, single_qubit_exp
+from seqtante_open.experiments.experiment_functions import experiment_functions_dict
 
 
 class CalibrationNode:
@@ -108,12 +108,8 @@ class CalibrationNode:
             logger.opt(colors=True).warning("Experiment <i><fg #8838ff>{experiment}</></i> not implemented. (Node Skipped)", experiment=self.experiment)
             self._valid_node = dict.fromkeys(self.targets, False)
 
-        if self.experiment in single_qubit_exp:
-            target_clss = int
-        elif self.experiment in double_qubit_exp:
-            target_clss = tuple
-        else:
-            target_clss = None.__class__
+        
+        target_clss = None.__class__
 
         for target in self.targets:
             if not isinstance(target, target_clss):
