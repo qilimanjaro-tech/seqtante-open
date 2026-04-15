@@ -78,7 +78,7 @@ pip install -e .
 3. Run:
 
 ```bash
-python -m seqtante.autocalibration \
+python -m seqtante_open.autocalibration \
   --platform_path path/to/platform.yaml \
   --config_path   path/to/calibration.yaml
 ```

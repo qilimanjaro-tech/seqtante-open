@@ -45,15 +45,6 @@ def load_config(config_path):
 def main(platform_path: str, config_path: str):
     start = time.time()
 
-    # Optional ASCII logo
-
-    # TODO: LOGO not used with logs. Decide what to do about it in the future.
-    # base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    # logo_path = os.path.join(base_dir, "img", "seqtante_logo.txt")
-    # if os.path.exists(logo_path):
-    #     with open(logo_path, "r") as f:
-    #         print("\n" + f.read())
-
     # Load YAML
     config: dict = load_config(config_path)
 
@@ -66,7 +57,7 @@ def main(platform_path: str, config_path: str):
     output_controller.add_calibration_run(calibration_tree=config, sample_name=config["sample"], cooldown=config["cooldown"])
 
     output_controller.setup_logger()
-    logger.opt(colors=True).info("Welcome to Seqtante")
+    logger.opt(colors=True).info("Welcome to Seqtante-Open")
 
     platform = ql.build_platform(runcard=platform_path)
     graph = CalibrationGraph(platform, platform_path)

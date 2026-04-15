@@ -29,7 +29,7 @@ class CustomHandler(logging.StreamHandler):
     def format(self, record):
         """Format the record with specific format."""
 
-        fmt = f"[seqtante] [{__version__}|%(levelname)s|%(asctime)s]: %(message)s"
+        fmt = f"[seqtante_open] [{__version__}|%(levelname)s|%(asctime)s]: %(message)s"
         return logging.Formatter(fmt, datefmt="%Y-%m-%d %H:%M:%S").format(record)
 
 
