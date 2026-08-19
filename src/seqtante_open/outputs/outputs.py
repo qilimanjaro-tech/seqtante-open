@@ -224,7 +224,7 @@ class Outputs:
             # Map filters to callables
             filt = params.get("filter")
             if isinstance(filt, str) and filt.lower() in FILTERS:
-                params["filter"] = FILTERS[filt]
+                params["filter"] = FILTERS[filt.lower()]
 
             params.pop("name", None)
             handlers.append(params)
@@ -232,6 +232,7 @@ class Outputs:
         EXTRAS = {"CALIBRATION_ID": self.calibration_id,
                 "GENERATED_UUID": uuid4()}
 
+        extra_cfg: dict[str, Any] = {}
         extra = cfg.get("extra")
 
         if extra:

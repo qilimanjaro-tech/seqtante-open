@@ -15,13 +15,23 @@
 import os
 from abc import ABC
 
-import matplotlib.pyplot as plt
 import numpy as np
+import plotly.graph_objects as go
 from lmfit import Model
 from scipy.special import erf as _erf
 from xarray import DataArray
 
 from seqtante_open.outputs import output_controller
+
+RENDER_ENGINE = "kaleido"
+"""Static-image backend plotly renders through. Kaleido needs no display, which is
+what writing a plot from a calibration run on a headless machine requires."""
+
+RENDER_FORMAT = "png"
+
+RENDER_SCALE = 2
+"""Pixel multiplier on the figure's layout size. 2 keeps text legible when a
+reviewer zooms into a saved sweep."""
 
 
 class FittingClass(ABC):
@@ -57,13 +67,27 @@ class FittingClass(ABC):
         self.fit()
         self.plot()
 
-    def save_plot(self, title):
-        if self.path:
-            filepath = os.path.join(self.path, title + ".png")
-            plt.savefig(filepath, dpi=300, bbox_inches='tight')
-        else:
-            plt.show()
-        plt.close()
+    def save_plot(self, fig: go.Figure, title: str) -> str | None:
+        """Write ``fig`` under :attr:`path`, or show it when there is no path.
+
+        Args:
+            fig (go.Figure): Figure to render.
+            title (str): Basename for the file. Newlines are stripped, so a plot
+                title broken across lines can be passed straight in.
+
+        Returns:
+            str | None: Path written, or None when the figure was shown instead.
+                Fits that register their output with ``add_fitting`` need the path.
+        """
+        if not self.path:
+            fig.show()
+            return None
+
+        os.makedirs(self.path, exist_ok=True)
+        filename = title.replace("\n", "").strip()
+        filepath = os.path.join(self.path, f"{filename}.{RENDER_FORMAT}")
+        fig.write_image(filepath, format=RENDER_FORMAT, scale=RENDER_SCALE, engine=RENDER_ENGINE)
+        return filepath
 
     # ----------------- Data-processing------------------
     def get_xarray(self) -> DataArray:

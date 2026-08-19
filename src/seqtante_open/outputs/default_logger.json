@@ -2,7 +2,7 @@
   "extra": {
     "app": "seqtante_open",
     "CALIBRATION_ID": true,
-    "GENERATE_UUID": true
+    "GENERATED_UUID": true
   },
   "handlers": [
     {
@@ -13,7 +13,8 @@
       "format": "<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
       "enqueue": true,
       "backtrace": false,
-      "diagnose": false
+      "diagnose": false,
+      "filter": "seqtante_open"
     },
     {
       "name": "runtime_info",
