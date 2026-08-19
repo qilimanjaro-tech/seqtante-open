@@ -19,6 +19,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from lmfit import Model
 from scipy.special import erf as _erf
+from xarray import DataArray
+
 from seqtante_open.outputs import output_controller
 
 
@@ -27,14 +29,14 @@ class FittingClass(ABC):
 
     def __init__(self,
                  measurement_id: int,
-                 target: int | list[int] | tuple[int],
+                 target: str | None = None,
                  path: str | None = None,
                  ):
         """Base class for all fittings. It includes many functions for the fittings.
 
         Args:
             measurement_id (int): ID of the experiment to fit in the autocalibration database.
-            target (int | list[int]): _description_
+            target (str | None, optional): Qubit or coupler token the fit belongs to, e.g. ``"q1"`` or ``"c1_2"``. Defaults to None.
             path (str | None, optional): Directory of the folder where the plot/s are saved, if None it shows the plot. Defaults to None.
         """
         self.id = measurement_id
@@ -42,11 +44,7 @@ class FittingClass(ABC):
         self.array, self.loops = self.measurement.load_h5()
 
         self.path = path
-        if isinstance(target, int):
-            self.qubit_idx = target
-        if isinstance(target, (tuple, list)):
-            self.control_qubit_idx = target[0]
-            self.target_qubit_idx = target[1]
+        self.target = target
 
     def fit(self):
         """Fits the experimental data to the corresponding function."""
@@ -67,8 +65,105 @@ class FittingClass(ABC):
             plt.show()
         plt.close()
 
-    # ------------------- Utils Block -------------------
+    # ----------------- Data-processing------------------
+    def get_xarray(self) -> DataArray:
+        """Build the measurement's ``S21`` map as a labelled :class:`~xarray.DataArray`.
 
+        Reloads the measurement with ``load_h5`` and assembles one dimension per
+        sweep loop. Each dimension is named ``"{parameter} {bus} ({units})"``
+        (just ``"{bus} ({units})"`` for flux loops, whose parameter is implied)
+        and carries the loop metadata in its coord ``attrs``, so downstream
+        helpers such as ``qilitools.plotting.convert_plot_units`` can rescale the
+        axes. Loops without a ``parameter`` entry keep their raw h5 name.
+
+        VNA results are already complex and are used as-is; Qblox and QM results
+        arrive with a trailing I/Q axis which is combined into ``I + 1j * Q``.
+
+        Returns:
+            DataArray: Complex ``S21`` named ``"S21"``, with one labelled
+                dimension per sweep loop.
+        """
+        results, loops = self.measurement.load_h5()
+
+        if len(results.shape) == len(loops.keys()):  # For the VNA
+            s21 = results
+        else:  # For Qblox and QM
+            s21 = results[..., 0] + 1j * results[..., 1]
+
+        coords = {}
+        dims = []
+        for dim_name, metadata in loops.items():
+            if metadata["parameter"]:
+                if metadata["parameter"] == "Flux":
+                    new_dim_name = f"{metadata['bus']} ({metadata['units']})"
+                else:
+                    new_dim_name = f"{metadata['parameter']} {metadata['bus']} ({metadata['units']})"
+            else:
+                new_dim_name = dim_name
+            dims.append(new_dim_name)
+            attrs = {k: v for k, v in metadata.items() if k != "array"}
+            coords[new_dim_name] = ((new_dim_name,), metadata["array"], attrs)
+
+        return DataArray(data=s21, dims=dims, coords=coords, name="S21")
+
+    @staticmethod
+    def convert_plot_units(xobj: DataArray) -> DataArray:
+        """Rescale coords and rename dims so plots read ``"{parameter} {bus} ({unit})"``.
+
+        Reads the loop metadata :meth:`get_xarray` puts in each coord's ``attrs``,
+        so the two are meant to be used together: build the map, then convert it
+        just before plotting.
+
+        Conversions:
+          - ``IF_frequency``: Hz -> MHz
+          - ``LO_frequency``, ``frequency``: Hz -> GHz
+          - ``current``: A -> mA
+          - ``voltage``: V -> V
+
+        A coord whose ``parameter`` is not listed is left untouched, dimension
+        name included.
+
+        Args:
+            xobj (DataArray): Labelled map, normally straight from :meth:`get_xarray`.
+
+        Returns:
+            DataArray: The same data with rescaled coords and relabelled dims.
+        """
+        conversions = {
+            "IF_frequency": (1e-6, "MHz"),
+            "LO_frequency": (1e-9, "GHz"),
+            "frequency": (1e-9, "GHz"),
+            "current": (1e3, "mA"),
+            "voltage": (1.0, "V"),
+        }
+
+        new_coords = {}
+        rename_dims = {}
+        for dim, coord in xobj.coords.items():
+            parameter = coord.attrs.get("parameter", dim)
+            bus = coord.attrs.get("bus", "")
+            if parameter not in conversions:
+                continue
+            scale, new_unit = conversions[parameter]
+            new_coords[dim] = (coord.dims, coord.values * scale, {**coord.attrs, "unit": new_unit})
+            rename_dims[dim] = f"{parameter} {bus} ({new_unit})".strip()
+
+        converted = xobj.assign_coords(new_coords)
+        return converted.rename(rename_dims) if rename_dims else converted
+
+    @staticmethod
+    def decibels(s21: np.ndarray) -> np.ndarray:
+        """Convert result values from s21 into dB
+
+        Args:
+            s21 (np.ndarray): combination of I + iQ
+
+        Returns:
+            np.ndarray: dB conversion
+        """
+        return 20 * np.log10(np.abs(s21))
+
+    # ------------------- Utils Block -------------------
     @staticmethod
     def rotate_iq(arr: np.ndarray):
         """

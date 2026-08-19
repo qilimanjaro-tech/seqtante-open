@@ -1,0 +1,134 @@
+name: Europa
+
+buses:
+  - alias: readout_q1 # Feedline Top
+    instruments: [QRM-RF1]
+    channels: [0]
+  - alias: readout_q2
+    instruments: [QRM-RF1]
+    channels: [1]
+
+  - alias: flux_q1_x        # DC1.01 — NOTE: Shorted!
+    instruments: [qdac2_1]
+    channels: [1]
+  - alias: flux_q1_z        # DC2.01
+    instruments: [qdac2_1]
+    channels: [2]
+  - alias: flux_q2_x        # DC1.02
+    instruments: [qdac2_1]
+    channels: [3]
+  - alias: flux_q2_z        # DC2.02
+    instruments: [qdac2_1]
+    channels: [4]
+  - alias: flux_c1_2_z      # DC1.16
+    instruments: [qdac2_1]
+    channels: [5]
+
+instruments:
+
+######################## Readout ########################
+
+  - name: QRM-RF # TOP FEEDLINE
+    alias: QRM-RF1
+    out0_in0_lo_freq: 6.3e+9
+    out0_in0_lo_en: true
+    out0_att: 30
+    in0_att: 0
+    out0_offset_path0: 0.0
+    out0_offset_path1: 0.0
+    awg_sequencers:
+    - identifier: 0
+      outputs: [0]
+      intermediate_frequency: -399464635.80265427
+      gain_imbalance: 1.0
+      phase_imbalance: 0.0
+      hardware_modulation: true
+      gain_i: 1.0
+      gain_q: 1.0
+      offset_i: 0.0
+      offset_q: 0.0
+      scope_acquire_trigger_mode: sequencer
+      scope_hardware_averaging: true
+      sampling_rate: 1000000000.0
+      hardware_demodulation: true
+      integration_length: 2100
+      integration_mode: ssb
+      sequence_timeout: 90
+      acquisition_timeout: 600
+      scope_store_enabled: false
+      threshold: 0.004857990128730904
+      threshold_rotation: 70.81499971416426
+      time_of_flight: 192
+    - identifier: 1
+      outputs: [0]
+      intermediate_frequency: -238902115.25402927
+      gain_imbalance: 1.0
+      phase_imbalance: 0.0
+      hardware_modulation: true
+      gain_i: 1.0
+      gain_q: 1.0
+      offset_i: 0.0
+      offset_q: 0.0
+      scope_acquire_trigger_mode: sequencer
+      scope_hardware_averaging: true
+      sampling_rate: 1000000000.0
+      hardware_demodulation: true
+      integration_length: 2100
+      integration_mode: ssb
+      sequence_timeout: 1
+      acquisition_timeout: 1
+      scope_store_enabled: false
+      threshold: 0.004857990128730904
+      threshold_rotation: 70.81499971416426
+      time_of_flight: 192
+
+######################## QDAC ########################
+
+  - name: qdevil_qdac2
+    alias: qdac2_1
+    voltage: [0.0, 0.0, 0.0, 0.0, 0.0] #, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+              # 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    ramping_enabled: [True, True, True, True, True] #, True, True, True, True, True, True, True,
+                      # True, True, True, True, True, True, True, True, True, True, True, True]
+    ramp_rate: [2e7, 2e7, 2e7, 2e7, 2e7] #, 2e7, 2e7, 2e7, 2e7, 2e7, 2e7, 2e7,
+                # 2e7, 2e7, 2e7, 2e7, 2e7, 2e7, 2e7, 2e7, 2e7, 2e7, 2e7, 2e7]
+    span: [high, high, high, high, high] #, high, high, high, high, high, high, high,
+          #  high, high, high, high, high, high, high, high, high, high, high, high]
+    low_pass_filter: [med, med, med, med, med] #, med, med, med, med, med, med, med,
+                      # med, med, med, med, med, med, med, med, med, med, med, med]
+    dacs: [1, 2, 3 , 4, 5] #, 6, 7, 8, 9, 10, 11, 12,
+          #  13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
+    trigger_sync: True
+    # in_trigger: 2
+
+
+instrument_controllers:
+
+  - name: qblox_cluster
+    alias: cluster_controller_0
+    connection:
+      name: tcp_ip
+      address: 192.168.6.50
+    modules:
+    - alias: QRM-RF1
+      slot_id: 1
+    reset: true
+    reference_clock: internal
+    ext_trigger: True
+
+  - name: qdevil_qdac2
+    alias: qdac2_1
+    reset: false
+    connection:
+      name: tcp_ip #Maybe try:   name: usb
+      address: 192.168.6.229 #    address: ttyUSB2  # Can change if you reconnect the QDAC to the server
+    modules:
+      - alias: qdac2_1
+        slot_id: 0
+    reference_clock: external
+
+analog:
+  qubits: [1, 2]
+  topology: [[1,2]]
+  qubit_loops: 2
+  coupler_loops: 1

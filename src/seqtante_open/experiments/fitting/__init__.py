@@ -12,8 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""configuration module"""
+from .fit_base import FittingClass
+from .utils import cosfunc
 
-from .config import logger
-
-__all__ = ["logger"]
+__all__ = ["FittingClass", "cosfunc"]

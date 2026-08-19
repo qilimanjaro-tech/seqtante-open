@@ -11,10 +11,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from seqtante_open.experiments import qdac_flux_channels_setup, single_tone_frequency_vs_flux_cw_dc, two_tone_frequency_vs_flux_pulsed_dc
 
-experiment_functions_dict = {
-    "qdac_flux_channels_setup": qdac_flux_channels_setup,
-    "single_tone_frequency_vs_flux_cw_dc": single_tone_frequency_vs_flux_cw_dc,
-    "two_tone_frequency_vs_flux_pulsed_dc_update_freq": two_tone_frequency_vs_flux_pulsed_dc,
-}
+"""Registry mapping experiment names to their callables.
+
+One flat dict. Every experiment takes ``str`` targets (``"q1"``, ``"c1_2"``), so
+there is nothing to group by: ``CalibrationNode`` validates targets against
+``str`` directly rather than looking the experiment up in a category.
+
+The three experiments seqtante-open ships:
+
+- ``single_tone_vs_flux`` (offset calibration)
+- ``two_tone``
+- ``two_tone_vs_flux``
+
+None are wired up yet. Register each here as it lands.
+"""
+
+experiment_functions_dict: dict = {}
+"""``{experiment name: Callable(platform, platform_path, parameters) -> Any}``."""

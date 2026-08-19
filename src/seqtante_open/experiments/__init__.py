@@ -12,15 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from seqtante_open.experiments.qdac_flux_channels_setup import qdac_flux_channels_setup
-from seqtante_open.experiments.offset_calibration import single_tone_frequency_vs_flux_cw_dc
-from seqtante_open.experiments.sweetspot_calibration import two_tone_frequency_vs_flux_pulsed_dc
-from .utils import generate_qdac_voltage_param, set_all_flux_channels_to_zero
+"""Experiments and the fitting layer they report through.
 
-__all__ = [
-    "generate_qdac_voltage_param",
-    "qdac_flux_channels_setup",
-    "set_all_flux_channels_to_zero",
-    "single_tone_frequency_vs_flux_cw_dc",
-    "two_tone_frequency_vs_flux_pulsed_dc",
-    ]
+The three experiments seqtante-open ships -- ``single_tone_vs_flux`` (offset
+calibration), ``two_tone`` and ``two_tone_vs_flux`` -- are re-exported here as
+they land. ``analysis`` and ``plotting`` stay importable as subpackages but are
+not pulled in eagerly, so importing seqtante_open stays cheap.
+"""
+
+from . import fitting
+
+__all__ = ["fitting"]

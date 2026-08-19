@@ -129,6 +129,7 @@ dmypy.json
 
 # Data
 data/
+!tests/experiments/fitting/data/
 _build
 
 tmp.*
