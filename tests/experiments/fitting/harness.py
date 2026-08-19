@@ -50,8 +50,8 @@ import matplotlib as mpl
 import numpy as np
 import pytest
 import seqtante_open
-import yaml
 from qililab.result.result_management import load_results
+from ruamel.yaml import YAML
 
 from seqtante_open.experiments.fitting.fit_base import FittingClass
 from seqtante_open.outputs import output_controller
@@ -126,7 +126,7 @@ def default_platform_before() -> dict:
     ``FluxoniumSingleToneFluxModel``) call ``build_platform`` on this, so the bus
     aliases a case's loop metadata refers to must exist in the runcard.
     """
-    return yaml.safe_load(RUNCARD_PATH.read_text(encoding="utf-8"))
+    return YAML(typ="safe").load(RUNCARD_PATH.read_text(encoding="utf-8"))
 
 
 def loop(array: np.ndarray, units: str = "", bus: str = "", parameter: str = "") -> dict:
