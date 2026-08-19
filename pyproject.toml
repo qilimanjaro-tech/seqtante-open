@@ -71,7 +71,6 @@ prerelease = "allow"
 [[tool.uv.index]]
 name = "qilimanjaro"
 url = "https://aws@qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.com/pypi/qilimanjaro/simple"
-explicit = true
 
 [tool.uv.sources]
 qililab = { index = "qilimanjaro" }
