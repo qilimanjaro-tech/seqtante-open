@@ -27,21 +27,20 @@ It implements:
 
 ## Contents
 
-* [Requirements](#requirements)
-* [Installation](#installation)
-* [Quick Start](#quick-start)
-* [YAML Schema](#yaml-schema)
-* [CLI Usage](#cli-usage)
-* [How It Works](#how-it-works)
-* [Extending with New Experiments](#extending-with-new-experiments)
-* [Troubleshooting](#troubleshooting)
-* [License](#license)
+- [Seqtante-open](#seqtante-open)
+  - [Contents](#contents)
+  - [Requirements](#requirements)
+  - [Installation](#installation)
+  - [Quick Start](#quick-start)
+  - [CLI Usage](#cli-usage)
+  - [License](#license)
+  - [Acknowledgements](#acknowledgements)
 
 ---
 
 ## Requirements
 
-* Python **3.10+**
+* Python **3.11-3.13**
 * [`qililab`](https://github.com/qilimanjaro-tech/qililab)
 * [`ruamel.yaml`](https://pypi.org/project/ruamel.yaml/)
 * [`networkx`](https://networkx.org/)
