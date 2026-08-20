@@ -15,7 +15,7 @@
 import numpy as np
 
 from seqtante_open.experiments.analysis.analysis import normalize
-from seqtante_open.experiments.plotting import flip_peak_up, subtract_median
+from .processing_vector import flip_peak_up, subtract_median
 
 
 def phase(S21):
