@@ -34,13 +34,13 @@ import pytest
 from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 from qililab.typings.enums import Parameter
 
-from seqtante_open.experiments.nodes.offset_calibration import single_tone_vs_flux_fluxonium
+from seqtante_open.experiments.nodes.offset_calibration import single_tone_vs_flux
 from seqtante_open.experiments.utils.flux_buses import get_all_flux_buses
 
 RUNCARD_PATH = Path(__file__).resolve().parents[2] / "runcards" / "test_AQPU_runcard.yml"
 
 MODULE = "seqtante_open.experiments.nodes.offset_calibration"
-FN = "single_tone_vs_flux"
+FN = "single_tone_vs_flux_experiment"
 
 MEASUREMENT_ID = 777
 FITTED_OFFSET = 0.123
@@ -76,7 +76,7 @@ def _base_parameters() -> dict:
 
 @pytest.fixture
 def run_experiment(platform, mock_db_manager, mock_recorder):
-    """Run ``single_tone_vs_flux_fluxonium`` with the execution, fit and IO boundaries mocked."""
+    """Run ``single_tone_vs_flux`` with the execution, fit and IO boundaries mocked."""
     calibration = SimpleNamespace(crosstalk_matrix=_identity_crosstalk(platform))
     mock_recorder.mock(f"{MODULE}.deserialize_from", output=calibration)
     mock_recorder.mock(f"{MODULE}.{FN}", output=MEASUREMENT_ID)
@@ -84,7 +84,7 @@ def run_experiment(platform, mock_db_manager, mock_recorder):
     mock_recorder.mock(f"{MODULE}.serialize_to")
 
     def run(parameters: dict):
-        single_tone_vs_flux_fluxonium(platform=platform, platform_path="unused", parameters=parameters)
+        single_tone_vs_flux(platform=platform, platform_path="unused", parameters=parameters)
         return mock_recorder
 
     run.calibration = calibration
@@ -152,7 +152,7 @@ def test_x_loop_flux_is_set_if_specified(platform, mock_db_manager, mock_recorde
         return MEASUREMENT_ID
 
     with patch(f"{MODULE}.{FN}", autospec=True, side_effect=_snapshot):
-        single_tone_vs_flux_fluxonium(platform=platform, platform_path="unused", parameters=parameters)
+        single_tone_vs_flux(platform=platform, platform_path="unused", parameters=parameters)
 
     assert x_flux_during["flux_q1_z"] == pytest.approx(0.2)
     assert x_flux_during["flux_c1_2_z"] == pytest.approx(0.2)
