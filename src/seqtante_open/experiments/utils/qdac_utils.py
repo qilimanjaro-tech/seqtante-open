@@ -21,7 +21,7 @@ from warnings import warn
 from qililab import Platform
 from qililab.instrument_controllers import QDevilQDac2Controller
 
-QDAC_TRIGGER_TO_VOLTAGE_PADDING = 1400  # ns
+QDAC_TRIGGER_TO_VOLTAGE_PADDING = 1400
 
 
 def get_qdac_lp_filters(platform: Platform):
@@ -62,7 +62,7 @@ def wait_time_to_settle_from_filters(
     settle_percent: float = 99.9,
     safety_factor: float = 1.0,
     extra_ns: float = 4000.0,
-    fridge_filter_hz: float = 100e3,  # always present by default
+    fridge_filter_hz: float = 100e3,
 ) -> int:
     """
     Compute recommended wait time (seconds) to settle to `settle_percent`,
@@ -87,7 +87,8 @@ def wait_time_to_settle_from_filters(
         raise ValueError("settle_percent must be between 0 and 100 (exclusive).")
 
     slowest_qdac_hz = min(QDACL_FILTERS_HZ[f] for f in filt_list)
-    f_eff = min(slowest_qdac_hz, float(fridge_filter_hz))  # fridge always in series
+    # fridge always in series
+    f_eff = min(slowest_qdac_hz, float(fridge_filter_hz))
 
     tau = 1.0 / (2.0 * math.pi * f_eff)
     eps = 1.0 - settle_percent / 100.0
@@ -140,5 +141,3 @@ def qdac_step_timings(
         "If overriding wait-times, you need to set both minimum_wait_after_step_override and "
         "qdac_stop_ro_before_step_override"
     )
-
-

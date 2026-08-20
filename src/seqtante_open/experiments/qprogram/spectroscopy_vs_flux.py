@@ -44,7 +44,6 @@ def spectroscopy_vs_flux_qdac_ramp(
 
     dwell_time_us = time_per_point_rounded_up_us
 
-    flux_wf = Arbitrary(ramp_array)
     square_wf_I = Square(amplitude=0.0, duration=time_per_avg - 4)  # NOTE -4 due to the 4ns gap between acquires
     square_wf_Q = Square(amplitude=0.0, duration=time_per_avg - 4)
     weights_shape = Square(amplitude=1, duration=time_per_avg - 4)

@@ -23,15 +23,9 @@ from xarray import DataArray
 
 from seqtante_open.outputs import output_controller
 
-RENDER_ENGINE = "kaleido"
-"""Static-image backend plotly renders through. Kaleido needs no display, which is
-what writing a plot from a calibration run on a headless machine requires."""
-
 RENDER_FORMAT = "png"
 
-RENDER_SCALE = 2
-"""Pixel multiplier on the figure's layout size. 2 keeps text legible when a
-reviewer zooms into a saved sweep."""
+RENDER_SCALE = 2  # pixel multiplier on the figure's layout size
 
 
 class FittingClass(ABC):
@@ -50,8 +44,8 @@ class FittingClass(ABC):
             path (str | None, optional): Directory of the folder where the plot/s are saved, if None it shows the plot. Defaults to None.
         """
         self.id = measurement_id
-        self.measurement = output_controller.db_manager.load_calibration_by_id(measurement_id)
-        self.array, self.loops = self.measurement.load_h5()
+        self.measurement = output_controller.db_manager.load_by_id(measurement_id)
+        self.array, self.loops = self.measurement.load_old_h5()
 
         self.path = path
         self.target = target
@@ -86,14 +80,14 @@ class FittingClass(ABC):
         os.makedirs(self.path, exist_ok=True)
         filename = title.replace("\n", "").strip()
         filepath = os.path.join(self.path, f"{filename}.{RENDER_FORMAT}")
-        fig.write_image(filepath, format=RENDER_FORMAT, scale=RENDER_SCALE, engine=RENDER_ENGINE)
+        fig.write_image(filepath, format=RENDER_FORMAT, scale=RENDER_SCALE)
         return filepath
 
     # ----------------- Data-processing------------------
     def get_xarray(self) -> DataArray:
         """Build the measurement's ``S21`` map as a labelled :class:`~xarray.DataArray`.
 
-        Reloads the measurement with ``load_h5`` and assembles one dimension per
+        Reloads the measurement with ``load_old_h5`` and assembles one dimension per
         sweep loop. Each dimension is named ``"{parameter} {bus} ({units})"``
         (just ``"{bus} ({units})"`` for flux loops, whose parameter is implied)
         and carries the loop metadata in its coord ``attrs``, so downstream
@@ -107,7 +101,7 @@ class FittingClass(ABC):
             DataArray: Complex ``S21`` named ``"S21"``, with one labelled
                 dimension per sweep loop.
         """
-        results, loops = self.measurement.load_h5()
+        results, loops = self.measurement.load_old_h5()
 
         if len(results.shape) == len(loops.keys()):  # For the VNA
             s21 = results
