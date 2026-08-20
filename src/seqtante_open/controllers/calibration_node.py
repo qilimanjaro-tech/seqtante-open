@@ -16,7 +16,7 @@
 
 import os
 from copy import copy
-from typing import Any, Dict
+from typing import Any
 
 from loguru import logger
 from qililab import Platform
@@ -58,7 +58,7 @@ class CalibrationNode:
         self.experiment_func = experiment_functions_dict.get(
             experiment, None
         )  # Callable(platform, platform_path, parameters) -> Any
-        self.parameters: Dict[str, Any] = copy(parameters)
+        self.parameters: dict[str, Any] = copy(parameters)
 
         if isinstance(simultaneous, list):
             if all(isinstance(sim, list) for sim in simultaneous):
@@ -82,7 +82,7 @@ class CalibrationNode:
         else:
             self.simultaneous = []
 
-        self._valid_node: Dict[str, bool] = dict.fromkeys(self.targets, True)
+        self._valid_node: dict[str, bool] = dict.fromkeys(self.targets, True)
         self._validate_node()
 
         self.result: dict = {}
