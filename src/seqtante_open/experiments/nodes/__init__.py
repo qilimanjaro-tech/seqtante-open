@@ -12,8 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .fit_base import FittingClass
-from .single_tone_vs_flux_fit import FluxoniumSingleToneFluxModel
-from .utils import cosfunc
+"""Node-level experiment functions: what the calibration graph runs for each node.
 
-__all__ = ["FittingClass", "FluxoniumSingleToneFluxModel", "cosfunc"]
+Each reads its parameters out of the calibration tree, loops the node's targets,
+calls a driver from ``experiment_classes`` and fits the result.
+"""
+
+from .offset_calibration import single_tone_vs_flux_fluxonium
+
+__all__ = ["single_tone_vs_flux_fluxonium"]

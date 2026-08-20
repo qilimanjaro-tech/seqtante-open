@@ -109,7 +109,7 @@ class MockRecorder:
 
         Args:
             target: Dotted path to patch (e.g.
-                ``"seqtante_open.experiments.fluxoniums.inter_qubit_crosstalk.single_tone__frequency_vs_flux_qdac_ramp_cw"``),
+                ``"seqtante_open.experiments.nodes.offset_calibration.single_tone_vs_flux"``),
                 or the callable itself. Patch at the *import site* — where the
                 function is looked up — not its definition module, or a
                 ``from x import y`` reference won't be intercepted.

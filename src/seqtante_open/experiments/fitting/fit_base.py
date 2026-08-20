@@ -97,7 +97,7 @@ class FittingClass(ABC):
         sweep loop. Each dimension is named ``"{parameter} {bus} ({units})"``
         (just ``"{bus} ({units})"`` for flux loops, whose parameter is implied)
         and carries the loop metadata in its coord ``attrs``, so downstream
-        helpers such as ``qilitools.plotting.convert_plot_units`` can rescale the
+        helpers such as :meth:`convert_plot_units` can rescale the
         axes. Loops without a ``parameter`` entry keep their raw h5 name.
 
         VNA results are already complex and are used as-is; Qblox and QM results
