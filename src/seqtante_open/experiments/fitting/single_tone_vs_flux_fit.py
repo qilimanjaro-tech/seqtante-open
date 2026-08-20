@@ -67,18 +67,29 @@ class FluxoniumSingleToneFluxModel(FittingClass):
 
     @staticmethod
     def _auto_convolve_trace(z_col, axis, mode="abs", p=0.5, half=8, unwrap=True):
-        """
-        Locate the symmetry point of one 1D feature via auto-convolution.
+        """Locate the symmetry point of one 1D feature via auto-convolution.
 
         Reduces a complex column to a real signal (amplitude or phase), mean-centers
         it, and convolves it with itself. The lobe is symmetric about 2*centroid, so
-        its smoothed argmax maps back to the feature's position on `axis`.
+        its smoothed argmax maps back to the feature's position on ``axis``.
 
-        Returns
-        -------
-        center : float, position on `axis` of the symmetry point
-        axis_s : 1D array, trimmed convolution axis (for plotting)
-        smooth : 1D array, smoothed auto-convolution (for plotting)
+        Args:
+            z_col (np.ndarray): Complex trace to locate the symmetry point of.
+            axis (np.ndarray): Values the returned center is expressed on.
+            mode (str, optional): ``"abs"`` to reduce by amplitude, ``"angle"`` by phase.
+                Defaults to ``"abs"``.
+            p (float, optional): Geometric weight of the smoothing kernel. Defaults to 0.5.
+            half (int, optional): Half-width of the smoothing kernel in samples. Defaults to 8.
+            unwrap (bool, optional): Unwrap the phase before centering, used only when
+                ``mode`` is ``"angle"``. Defaults to True.
+
+        Returns:
+            tuple[float, np.ndarray, np.ndarray]: ``center``, the symmetry point on
+                ``axis``; ``axis_s``, the trimmed convolution axis; and ``smooth``, the
+                smoothed auto-convolution. The last two are returned for plotting.
+
+        Raises:
+            ValueError: If ``mode`` is neither ``"abs"`` nor ``"angle"``.
         """
         z_col = np.asarray(z_col)
 
