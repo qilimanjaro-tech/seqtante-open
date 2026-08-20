@@ -5,13 +5,9 @@ There is nothing to register and no conftest to know about.
 
 ## Adding a case
 
-> The `T1Fit` walkthrough below came across from seqtante and is kept because it
-> is the simplest possible case. seqtante-open has no transmon fits, so treat its
-> paths as illustrative of the mirroring rule, not as files you will find.
-
 **1. Put the test where the fit class lives.** The test tree mirrors `src/`.
-`T1Fit` is in `src/seqtante_open/experiments/transmons/single_qubit_gates/fit/t1_fit.py`,
-so its test goes in `tests/experiments/transmons/single_qubit_gates/fit/test_t1_fit.py`.
+`FluxoniumSingleToneFluxModel` is in `/src/seqtante_open/experiments/fitting/single_tone_vs_flux_fit.py`,
+so its test goes in `tests/experiments/fitting/test_single_tone_vs_flux_fit.py`.
 `test_registry.py` checks this, and tells you where the file should have gone.
 
 **2. Write a builder for the data,** next to the case that uses it. It takes a
@@ -25,31 +21,52 @@ have written. Build the shape of the signal out of the model functions already o
 import numpy as np
 import pytest
 
-from seqtante_open.experiments.fitting.fit_base import FittingClass
-from seqtante_open.experiments.transmons.single_qubit_gates.fit.t1_fit import T1Fit
-from tests.experiments.fitting.harness import FittingTestCase, add_noise, as_iq, loop
+from seqtante_open.experiments.fitting.single_tone_vs_flux_fit import FluxoniumSingleToneFluxModel
+from tests.experiments.fitting.harness import FittingTestCase, as_iq, loop
 
-T1_NS = 12_400
-DECAY_RATE = -1.0 / T1_NS
+SWEET_SPOT = 0.15
+"""Flux bias the resonator response is symmetric about, in V."""
 
+FLUX_HALF_SPAN = 0.5
+FLUX_POINTS = 41
 
-def make_t1_data(rng):
-    wait = np.arange(0, 40_001, 500)
-    decay = FittingClass.exponential(wait, 1.0, DECAY_RATE, 0.0)
-
-    iq = as_iq(decay, rng, sigma=0.01)
-    threshold = np.clip(add_noise(decay, rng, 0.01), 0.0, 1.0)
-    results = np.column_stack([iq[:, 0], iq[:, 1], threshold])
-
-    return results, {"wait": loop(wait, units="ns", bus="drive_q1", parameter="duration")}
+FLUX_STEP = 2 * FLUX_HALF_SPAN / (2 * FLUX_POINTS - 2)
+"""Step of the auto-convolution axis the fit reports its answer on."""
 
 
-class TestT1Fit(FittingTestCase):
-    FIT_CLASS = T1Fit
-    DATA = "t1_fit.h5"
-    BUILDER = make_t1_data
-    INIT = {"qubit_idx": 0, "measurement_id": 1}
-    EXPECTED = {"optimized_params.thresh.1": pytest.approx(DECAY_RATE, rel=0.02)}
+def make_single_tone_vs_flux_data(rng: np.random.Generator) -> tuple[np.ndarray, dict]:
+    """A resonator dip tracing a parabola in flux, centred on the sweet spot.
+
+    Every cut of the image at fixed frequency is symmetric about ``SWEET_SPOT``,
+    because the resonance depends on ``(flux - sweet_spot) ** 2``. That symmetry
+    is what the auto-convolution inside the fit locates.
+    """
+    fluxes = np.linspace(SWEET_SPOT - FLUX_HALF_SPAN, SWEET_SPOT + FLUX_HALF_SPAN, FLUX_POINTS)
+    frequencies = np.arange(-50_000_000, 10_000_001, 1_000_000)
+
+    resonance = -10.0e6 - 30.0e6 * ((fluxes - SWEET_SPOT) / FLUX_HALF_SPAN) ** 2
+    width = 4.0e6
+    detuning = (frequencies[None, :] - resonance[:, None]) / (0.5 * width)
+    magnitude = 1.0 - 0.8 / (1.0 + detuning**2)
+
+    results = as_iq(magnitude, rng, sigma=0.002)
+
+    loops = {
+        "flux": loop(fluxes, units="V", bus="flux_q1_z", parameter="Flux"),
+        "frequency": loop(frequencies, units="Hz", bus="readout_q1", parameter="IF_frequency"),
+    }
+    return results, loops
+
+
+class TestFluxoniumSingleToneFluxModel(FittingTestCase):
+    FIT_CLASS = FluxoniumSingleToneFluxModel
+    DATA = "single_tone_vs_flux_fit.h5"
+    BUILDER = make_single_tone_vs_flux_data
+    INIT = {"measurement_id": 1, "target": "q1"}
+    EXPECTED = {
+        "center": pytest.approx(SWEET_SPOT, abs=FLUX_STEP),
+        "offset": pytest.approx(-SWEET_SPOT, abs=FLUX_STEP),
+    }
 ```
 
 **4. Write the data file and run.**
