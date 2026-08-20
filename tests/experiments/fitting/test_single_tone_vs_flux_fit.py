@@ -70,8 +70,6 @@ class TestFluxoniumSingleToneFluxModel(FittingTestCase):
     BUILDER = make_single_tone_vs_flux_data
     INIT = {"measurement_id": 1, "target": "q1"}
     EXPECTED = {
-        # The auto-convolution reports a point on its own axis, so one step of that
-        # axis is the tightest tolerance that means anything. The fit lands dead on.
         "center": pytest.approx(SWEET_SPOT, abs=FLUX_STEP),
         "offset": pytest.approx(-SWEET_SPOT, abs=FLUX_STEP),
     }
