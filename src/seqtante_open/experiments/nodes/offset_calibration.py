@@ -23,7 +23,7 @@ from qililab.typings.enums import Parameter
 from qililab.utils.serialization import deserialize_from, serialize_to
 
 from seqtante_open.experiments.experiment_classes import (
-    single_tone__frequency_vs_flux_qdac_ramp_cw as single_tone_vs_flux_experiment,
+    single_tone__frequency_vs_flux as single_tone_vs_flux_experiment,
 )
 from seqtante_open.experiments.fitting import FluxoniumSingleToneFluxModel
 from seqtante_open.experiments.utils import coupler_readout_qubit, x_loop_readout_flux

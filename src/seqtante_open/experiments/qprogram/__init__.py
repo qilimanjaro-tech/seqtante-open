@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .spectroscopy_vs_flux import spectroscopy_vs_flux_qdac_ramp
+from .spectroscopy_vs_flux import single_tone_vs_flux
 from .utils import multi_wait_for_trigger
 
-__all__ = ["multi_wait_for_trigger", "spectroscopy_vs_flux_qdac_ramp"]
+__all__ = ["multi_wait_for_trigger", "single_tone_vs_flux"]

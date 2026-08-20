@@ -23,7 +23,7 @@ from seqtante_open.experiments.analysis import sss_from_array
 from seqtante_open.experiments.qprogram.utils import multi_wait_for_trigger
 
 
-def spectroscopy_vs_flux_qdac_ramp(
+def single_tone_vs_flux(
     if_sweep: np.ndarray,
     averages: int,
     time_per_avg: float,

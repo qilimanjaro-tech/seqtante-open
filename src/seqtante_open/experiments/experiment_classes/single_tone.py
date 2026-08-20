@@ -19,11 +19,11 @@ from qililab import Parameter
 from qililab.platform import Platform
 from qililab.result import DatabaseManager, StreamArray
 
-from seqtante_open.experiments.qprogram import spectroscopy_vs_flux_qdac_ramp
+from seqtante_open.experiments.qprogram import single_tone_vs_flux
 from seqtante_open.experiments.utils import get_qdac_out_trigger, qdac_step_timings
 
 
-def single_tone__frequency_vs_flux_qdac_ramp_cw(
+def single_tone__frequency_vs_flux(
     platform: Platform,
     db_manager: DatabaseManager,
     readout_bus: str,
@@ -86,7 +86,7 @@ def single_tone__frequency_vs_flux_qdac_ramp_cw(
     if readout_attenuation is not None:
         platform.set_parameter(alias=readout_bus, parameter=Parameter.OUT0_ATT, value=readout_attenuation)
 
-    qprogram = spectroscopy_vs_flux_qdac_ramp(
+    qprogram = single_tone_vs_flux(
         if_sweep,
         averages=averages,
         time_per_avg=duration,
@@ -119,7 +119,7 @@ def single_tone__frequency_vs_flux_qdac_ramp_cw(
             },
         },
         platform=platform,
-        experiment_name="single_tone__frequency_vs_flux_cw_ramped_dc",
+        experiment_name="single_tone__frequency_vs_flux",
         db_manager=db_manager,
         qprogram=qprogram,
         optional_identifier=optional_identifier,

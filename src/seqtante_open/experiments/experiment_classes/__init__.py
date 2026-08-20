@@ -18,6 +18,6 @@ Copied from ``qilitools.experiments``. The node-level experiment functions the
 calibration graph runs live under ``nodes/`` and call into these.
 """
 
-from .single_tone import single_tone__frequency_vs_flux_qdac_ramp_cw
+from .single_tone import single_tone__frequency_vs_flux
 
-__all__ = ["single_tone__frequency_vs_flux_qdac_ramp_cw"]
+__all__ = ["single_tone__frequency_vs_flux"]
