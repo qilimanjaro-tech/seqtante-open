@@ -14,6 +14,7 @@
 
 from .fit_base import FittingClass
 from .single_tone_vs_flux_fit import FluxoniumSingleToneFluxModel
+from .two_tone_vs_flux_fit import FluxoniumTwoToneFluxModel
 from .utils import cosfunc
 
-__all__ = ["FittingClass", "FluxoniumSingleToneFluxModel", "cosfunc"]
+__all__ = ["FittingClass", "FluxoniumSingleToneFluxModel", "FluxoniumTwoToneFluxModel", "cosfunc"]
