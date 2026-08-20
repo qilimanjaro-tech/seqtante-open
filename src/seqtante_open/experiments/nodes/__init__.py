@@ -18,6 +18,6 @@ Each reads its parameters out of the calibration tree, loops the node's targets,
 calls a driver from ``experiment_classes`` and fits the result.
 """
 
-from .offset_calibration import single_tone_vs_flux_fluxonium
+from .offset_calibration import single_tone_vs_flux
 
-__all__ = ["single_tone_vs_flux_fluxonium"]
+__all__ = ["single_tone_vs_flux"]

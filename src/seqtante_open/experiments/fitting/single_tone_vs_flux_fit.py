@@ -18,9 +18,9 @@ from typing import cast
 import numpy as np
 from qililab.data_management import build_platform
 from qililab.typings.enums import Parameter
-from seqtante_open.experiments.plotting import plot_measurement_2d_heatmap_updated
 
 from seqtante_open.experiments.fitting.fit_base import FittingClass
+from seqtante_open.experiments.plotting import plot_measurement_2d_heatmap_updated
 from seqtante_open.outputs import output_controller
 
 
@@ -151,13 +151,4 @@ class FluxoniumSingleToneFluxModel(FittingClass):
             showlegend=True,
         )
 
-        if self.path:
-            os.makedirs(self.path, exist_ok=True)
-            filename = title.replace("\n", "")
-            filepath = os.path.join(self.path, f"{filename}.png")
-            fig.write_image(filepath, scale=1)
-            output_controller.db_manager.add_fitting(
-                self.id, path=filepath, parameters={"center": float(self.center), "offset": float(self.offset)}
-            )
-        else:
-            fig.show()
+        self.save_plot(fig, title)

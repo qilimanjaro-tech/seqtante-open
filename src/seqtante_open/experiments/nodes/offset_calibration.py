@@ -21,17 +21,16 @@ from qililab.qprogram.calibration import Calibration
 from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 from qililab.typings.enums import Parameter
 from qililab.utils.serialization import deserialize_from, serialize_to
-from seqtante_open.experiments.experiment_classes import (
-    single_tone__frequency_vs_flux_qdac_ramp_cw as single_tone_vs_flux,
-)
 
+from seqtante_open.experiments.experiment_classes import (
+    single_tone__frequency_vs_flux_qdac_ramp_cw as single_tone_vs_flux_experiment,
+)
+from seqtante_open.experiments.fitting import FluxoniumSingleToneFluxModel
 from seqtante_open.experiments.utils import coupler_readout_qubit, x_loop_readout_flux
 from seqtante_open.outputs import output_controller
 
-from seqtante_open.experiments.fitting import FluxoniumSingleToneFluxModel
 
-
-def single_tone_vs_flux_fluxonium(platform: Platform, platform_path: str, parameters: dict[str, Any]):
+def single_tone_vs_flux(platform: Platform, platform_path: str, parameters: dict[str, Any]):
     targets = parameters["targets"]
     qubits = [target for target in targets if target.startswith("q")]
     couplers = [target for target in targets if target.startswith("c")]
@@ -44,7 +43,7 @@ def single_tone_vs_flux_fluxonium(platform: Platform, platform_path: str, parame
     calibration: Calibration = deserialize_from(parameters["calibration_path"], Calibration)
     if not isinstance(crosstalk := calibration.crosstalk_matrix, CrosstalkMatrix):
         raise ValueError(
-            "To execute single_tone_vs_flux_fluxonium experiment, the Calibration needs to have a CrosstalkMatrix"
+            "To execute single_tone_vs_flux experiment, the Calibration needs to have a CrosstalkMatrix"
         )
     platform.set_crosstalk(crosstalk=crosstalk)
 
@@ -59,7 +58,7 @@ def single_tone_vs_flux_fluxonium(platform: Platform, platform_path: str, parame
         )
         flux_sweep = np.linspace(*target_params["flux_sweep"])
 
-        measurement_id = single_tone_vs_flux(
+        measurement_id = single_tone_vs_flux_experiment(
             platform=platform,
             db_manager=db_manager,
             readout_bus=readout_bus,
@@ -81,7 +80,7 @@ def single_tone_vs_flux_fluxonium(platform: Platform, platform_path: str, parame
         model = FluxoniumSingleToneFluxModel(cast("int", measurement_id), target=target, path=target_params["data_folder"], lo=LO)
         model.fit()
         model.plot()
-        crosstalk.flux_offsets[flux_bus] += model.offset
+        crosstalk.flux_offsets[flux_bus] += float(model.offset)
 
     try:
         for qubit, loop in product(qubits, ["z", "x"][:qubit_loops][::-1]):
