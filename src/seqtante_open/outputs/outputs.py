@@ -36,11 +36,10 @@ SINKS = {
     "stdout": sys.stdout,
 }
 
-FILTERS = {
-    "lt_warning": lambda r: r["level"].no < logger.level("WARNING").no,
-    "seqtante_open": lambda r: r["name"].startswith("seqtante_open."),
-    "lt_warning_seqtante_open": lambda r: r["name"].startswith("seqtante_open.") and r["level"].no < logger.level("WARNING").no
-}
+FILTERS = {"lt_warning": lambda r: r["level"].no < logger.level("WARNING").no,
+           "seqtante_open": lambda r: r["name"].startswith("seqtante_open."),
+           "lt_warning_seqtante_open": lambda r: r["name"].startswith("seqtante_open.") and r["level"].no < logger.level("WARNING").no}
+
 
 class CalibrationParameter(Enum):
     "Output parameters that aren't stored in the runcard"
@@ -93,8 +92,9 @@ class CalibrationData:
 
 class Outputs:
     def __init__(self):
-        self.storage_conf: dict[str, str | dict[str, str]] | None = None
+        self._initialize()
 
+    def _initialize(self):
         self._calibration_data: CalibrationData | None = None
 
         self._db_manager: DatabaseManager | None = None
@@ -103,10 +103,11 @@ class Outputs:
 
         self._storage_path: Path | None = None
 
-    def reset(self, storage_conf):
-        self.__init__()
+    def reset(self, storage_conf: dict[str, str | dict[str, str]] | None = None):
+        self._initialize()
         self.storage_conf = storage_conf
-        self._create_storage_path()
+        if storage_conf is not None:
+            self._create_storage_path()
         self._create_db_manager()
         self._create_calibration_data()
 
@@ -174,7 +175,7 @@ class Outputs:
         self.calibration_run = self.db_manager.add_calibration_run(
             calibration_tree=calibration_tree,
             sample_name=sample_name,
-            cooldown=cooldown
+            cooldown=cooldown,
         )
         self.calibration_id = self.calibration_run.calibration_id if self.calibration_run else -1
 
@@ -184,12 +185,12 @@ class Outputs:
             self.calibration_run.end_calibration(self.db_manager.session)
 
     def setup_logger(self):
-        """Sets up the loguru loger with the given or default configuration
+        """Sets up the loguru logger with the given or default configuration
 
         Args:
-            data_folder (str): Folder where the stasndar calibration outputs (.h5 and plots) are saved. Used if the field "sink" starts with "SEQTANTE_FOLDER"
+            data_folder (str): Folder where the standard calibration outputs (.h5 and plots) are saved. Used if the field "sink" starts with "SEQTANTE_FOLDER"
             calibration_id (int, optional): Id for the calibration in the calibration database. Used if CALIBRATION_ID in config["extras"].
-            config (dict, optional): Log configuration dict, if one isn't porvided or "file_dir" not in the dict, it uses the default file.
+            config (dict, optional): Log configuration dict, if one isn't provided or "file_dir" not in the dict, it uses the default file.
 
         Returns:
             list[int]
@@ -213,7 +214,7 @@ class Outputs:
         for h in cfg.get("handlers", []):
             params: dict[str, Any] = dict(h)
 
-            # Map sinks. If log directory starts with "SEQTANTE_FOLDER", "SEQTANTE_FOLDER" is substituded by the data folder
+            # Map sinks. If log directory starts with "SEQTANTE_FOLDER", "SEQTANTE_FOLDER" is substituted by the data folder
             sink = params.get("sink")
             if isinstance(sink, str) and sink in SINKS:
                 params["sink"] = SINKS[sink]
@@ -223,7 +224,7 @@ class Outputs:
             # Map filters to callables
             filt = params.get("filter")
             if isinstance(filt, str) and filt.lower() in FILTERS:
-                params["filter"] = FILTERS[filt]
+                params["filter"] = FILTERS[filt.lower()]
 
             params.pop("name", None)
             handlers.append(params)
@@ -231,6 +232,7 @@ class Outputs:
         EXTRAS = {"CALIBRATION_ID": self.calibration_id,
                 "GENERATED_UUID": uuid4()}
 
+        extra_cfg: dict[str, Any] = {}
         extra = cfg.get("extra")
 
         if extra:

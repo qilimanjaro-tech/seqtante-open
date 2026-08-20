@@ -11,9 +11,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from .spectroscopy import resonator_spectroscopy_cw
-from .qubit_spectroscopy import two_tone_spectroscopy
-from .rabi import rabi_amp_square_drive
-from .t1 import t1_single_square
+"""Module for handling correction and fitting of Two Tone data.
+This module provides classes and functions to correct
+and fit Two Tone data.
+Classes:
+    TwoToneFit: Handles the correction and fitting
+    of Two Tone data.
+Functions:
+    fit: Fit the two tone data.
+    plot: plot the fitted data.
+"""
 
-__all__ = ["resonator_spectroscopy_cw", "rabi_amp_square_drive", "two_tone_spectroscopy", "t1_single_square"]
+import numpy as np
+
+
+def cosfunc(phi, A, omega, offset, phase_offset):
+    return offset + A * np.cos(omega * phi + phase_offset)

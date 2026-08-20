@@ -24,6 +24,9 @@ from scipy.signal import firwin, lfilter
 from tqdm.auto import tqdm
 from xarray import DataArray
 
+from .processing_vector import subtract_median
+from .processing_phase import phase
+
 # kaleido_get_chrome #NOTE look into if this code can be run without running this command. Potentially by using an earlier version.
 
 def center_phase_around_median(S21):

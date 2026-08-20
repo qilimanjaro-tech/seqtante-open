@@ -20,10 +20,11 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("seqtante-open")
 except PackageNotFoundError:
-    __version__ = "0.2.0"
+    __version__ = "0.0.0"
 
 from . import experiments
 from . import controllers
 from . import autocalibration
+from .calibration_run import CalibrationRun
 
-__all__ = ["experiments", "controllers", "autocalibration"]
+__all__ = ["CalibrationRun", "experiments", "controllers", "autocalibration"]
