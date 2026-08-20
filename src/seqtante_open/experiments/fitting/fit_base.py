@@ -44,8 +44,8 @@ class FittingClass(ABC):
             path (str | None, optional): Directory of the folder where the plot/s are saved, if None it shows the plot. Defaults to None.
         """
         self.id = measurement_id
-        self.measurement = output_controller.db_manager.load_by_id(measurement_id)
-        self.array, self.loops = self.measurement.load_old_h5()
+        self.measurement = output_controller.db_manager.load_calibration_by_id(measurement_id)
+        self.array, self.loops = self.measurement.load_h5()
 
         self.path = path
         self.target = target
@@ -101,7 +101,7 @@ class FittingClass(ABC):
             DataArray: Complex ``S21`` named ``"S21"``, with one labelled
                 dimension per sweep loop.
         """
-        results, loops = self.measurement.load_old_h5()
+        results, loops = self.measurement.load_h5()
 
         if len(results.shape) == len(loops.keys()):  # For the VNA
             s21 = results
