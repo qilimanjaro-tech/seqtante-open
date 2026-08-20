@@ -23,15 +23,9 @@ from xarray import DataArray
 
 from seqtante_open.outputs import output_controller
 
-RENDER_ENGINE = "kaleido"
-"""Static-image backend plotly renders through. Kaleido needs no display, which is
-what writing a plot from a calibration run on a headless machine requires."""
-
 RENDER_FORMAT = "png"
 
-RENDER_SCALE = 2
-"""Pixel multiplier on the figure's layout size. 2 keeps text legible when a
-reviewer zooms into a saved sweep."""
+RENDER_SCALE = 2  # pixel multiplier on the figure's layout size
 
 
 class FittingClass(ABC):
@@ -86,7 +80,7 @@ class FittingClass(ABC):
         os.makedirs(self.path, exist_ok=True)
         filename = title.replace("\n", "").strip()
         filepath = os.path.join(self.path, f"{filename}.{RENDER_FORMAT}")
-        fig.write_image(filepath, format=RENDER_FORMAT, scale=RENDER_SCALE, engine=RENDER_ENGINE)
+        fig.write_image(filepath, format=RENDER_FORMAT, scale=RENDER_SCALE)
         return filepath
 
     # ----------------- Data-processing------------------
