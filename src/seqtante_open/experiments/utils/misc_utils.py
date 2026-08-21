@@ -16,8 +16,8 @@ from qililab import Calibration, Parameter, Platform
 from qililab.typings.enums import InstrumentName
 
 
-def get_lo_multiple_sources(bus: str, platform: Platform, calibration: Calibration, parameters: dict = {}) -> int:
-    if (lo := parameters.get("LO") or calibration.parameters.get("LO", {}).get(bus)) is None:
+def get_lo_multiple_sources(bus: str, target: str, platform: Platform, calibration: Calibration) -> int:
+    if (lo := calibration.parameters.get("LO", {}).get(target)) is None:
         bus_object = platform.get_element(alias=bus)
         lo = bus_object.get_parameter(parameter=Parameter.LO_FREQUENCY)
         if (

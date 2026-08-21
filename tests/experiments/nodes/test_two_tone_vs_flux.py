@@ -262,35 +262,24 @@ def test_defaults_are_used_when_parameters_are_missing(run_experiment):
         assert call["kwargs"]["overlap_time"] == 0
 
 
-def test_lo_from_parameters_wins_over_the_platform(run_experiment):
-    """An explicit ``LO`` is what gets driven and what the fit reports against."""
-    parameters = _base_parameters()
-    parameters["LO"] = 4.9e9
-
-    recorder = run_experiment(parameters)
-
-    assert all(c["kwargs"]["drive_LO"] == 4.9e9 for c in recorder.calls[FN])
-    assert all(f["kwargs"]["lo"] == 4.9e9 for f in recorder.calls["FluxoniumTwoToneFluxModel"])
-
-
-def test_lo_from_the_calibration_is_per_bus(platform, mock_db_manager, mock_recorder):
+def test_lo_from_the_calibration_is_per_target(platform, mock_db_manager, mock_recorder):
     """With no ``LO`` parameter, the calibration's per-bus table is consulted next."""
-    calibration = _calibration(platform, lo={"drive_q2": 4.7e9})
+    calibration = _calibration(platform, lo={"c1_2": 4.7e9})
     mock_recorder.mock(f"{MODULE}.deserialize_from", output=calibration)
     mock_recorder.mock(f"{MODULE}.{FN}", output=MEASUREMENT_ID)
     mock_recorder.mock(f"{MODULE}.FluxoniumTwoToneFluxModel", output=_fit_model())
     mock_recorder.mock(f"{MODULE}.serialize_to")
 
     parameters = _base_parameters()
-    parameters["coupler_readout_qubit"] = {"c1_2": "q2"}
-    parameters["q2"] = {}
+    parameters["coupler_readout_qubit"] = {"c1_2": "q1"}
+    parameters["q1"] = {}
 
     two_tone_frequency_vs_flux_node(platform=platform, platform_path="unused", parameters=parameters)
 
-    los = {c["kwargs"]["drive_bus"]: c["kwargs"]["drive_LO"] for c in mock_recorder.calls[FN]}
+    los = {c["kwargs"]["target"]: c["kwargs"]["drive_LO"] for c in mock_recorder.calls[FN]}
     assert los == {
-        "drive_q1": platform.get_parameter("drive_q1", Parameter.LO_FREQUENCY),
-        "drive_q2": 4.7e9,
+        "q1": platform.get_parameter("drive_q1", Parameter.LO_FREQUENCY),
+        "c1_2": 4.7e9,
     }
 
 

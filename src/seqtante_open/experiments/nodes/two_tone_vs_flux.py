@@ -63,7 +63,7 @@ def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, para
         if readout_flux:
             platform.set_parameter(readout_flux[0], Parameter.FLUX, readout_flux[1])
         target_params = {**parameters, **parameters[target]}
-        drive_LO = get_lo_multiple_sources(bus=drive_bus, platform=platform, calibration=calibration, parameters=target_params)
+        drive_LO = get_lo_multiple_sources(bus=drive_bus, target=target, platform=platform, calibration=calibration)
         drive_if_freq = platform.get_parameter(alias=drive_bus, parameter=Parameter.IF)
         readout_if_freq = platform.get_parameter(alias=readout_bus, parameter=Parameter.IF)
         freq_sweep = np.linspace(*target_params["freq_sweep"]) + drive_if_freq
