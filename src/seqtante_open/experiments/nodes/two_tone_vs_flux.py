@@ -13,6 +13,7 @@
 # limitations under the License.
 from itertools import product
 from typing import Any
+from copy import deepcopy
 
 import numpy as np
 from qililab.platform.platform import Platform
@@ -68,6 +69,8 @@ def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, para
         readout_if_freq = platform.get_parameter(alias=readout_bus, parameter=Parameter.IF)
         freq_sweep = np.linspace(*target_params["freq_sweep"]) + drive_if_freq
         flux_sweep = np.linspace(*target_params["flux_sweep"])
+        calibration_copy = deepcopy(calibration)
+        calibration_copy.parameters["data_folder"] = target_params["data_folder"]
 
         measurement_id = two_tone_vs_flux_experiment(
             platform=platform,
@@ -88,7 +91,7 @@ def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, para
             drive_gain=target_params.get("drive_gain", _DEFAULTS["drive_gain"]),
             ringup_time=target_params.get("ringup_time", _DEFAULTS["ringup_time"]),
             overlap_time=target_params.get("overlap_time", _DEFAULTS["overlap_time"]),
-            calibration=calibration,
+            calibration=calibration_copy,
             drive_LO=drive_LO,
             target=target,
             autocalibration=True,
