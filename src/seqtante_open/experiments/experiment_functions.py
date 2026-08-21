@@ -27,9 +27,11 @@ The three experiments seqtante-open ships:
 Register each here as it lands.
 """
 
-from seqtante_open.experiments.nodes import single_tone_vs_flux, two_tone_node
+from seqtante_open.experiments.nodes import single_tone_vs_flux, two_tone_node, two_tone_frequency_vs_flux_node
 
 experiment_functions_dict: dict = {
-    "offset_calibration": single_tone_vs_flux, "two_tone": two_tone_node
+    "offset_calibration": single_tone_vs_flux,
+    "two_tone": two_tone_node,
+    "two_tone_vs_flux": two_tone_frequency_vs_flux_node,
 }
 """``{experiment name: Callable(platform, platform_path, parameters) -> Any}``."""

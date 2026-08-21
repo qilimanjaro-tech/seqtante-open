@@ -24,6 +24,13 @@ buses:
     instruments: [qdac2_1]
     channels: [5]
 
+  - alias: drive_q1
+    instruments: [QCM-RF1]
+    channels: [0]
+  - alias: drive_q2
+    instruments: [QCM-RF1]
+    channels: [1]
+
 instruments:
 
 ######################## Readout ########################
@@ -82,6 +89,42 @@ instruments:
       threshold_rotation: 70.81499971416426
       time_of_flight: 192
 
+######################## Drive ########################
+
+  - name: QCM-RF
+    alias: QCM-RF1
+    out0_lo_freq: 4.5e+9
+    out0_lo_en: true
+    out0_att: 20
+    out0_offset_path0: 0.0
+    out0_offset_path1: 0.0
+    out1_lo_freq: 5.0e+9
+    out1_lo_en: true
+    out1_att: 20
+    out1_offset_path0: 0.0
+    out1_offset_path1: 0.0
+    awg_sequencers:
+    - identifier: 0
+      outputs: [0]
+      intermediate_frequency: 1.0e+8
+      gain_imbalance: 1.0
+      phase_imbalance: 0.0
+      hardware_modulation: true
+      gain_i: 1.0
+      gain_q: 1.0
+      offset_i: 0.0
+      offset_q: 0.0
+    - identifier: 1
+      outputs: [1]
+      intermediate_frequency: 1.5e+8
+      gain_imbalance: 1.0
+      phase_imbalance: 0.0
+      hardware_modulation: true
+      gain_i: 1.0
+      gain_q: 1.0
+      offset_i: 0.0
+      offset_q: 0.0
+
 ######################## QDAC ########################
 
   - name: qdevil_qdac2
@@ -112,6 +155,8 @@ instrument_controllers:
     modules:
     - alias: QRM-RF1
       slot_id: 1
+    - alias: QCM-RF1
+      slot_id: 2
     reset: true
     reference_clock: internal
     ext_trigger: True
