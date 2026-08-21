@@ -70,7 +70,7 @@ def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, para
         freq_sweep = np.linspace(*target_params["freq_sweep"]) + drive_if_freq
         flux_sweep = np.linspace(*target_params["flux_sweep"])
         calibration_copy = deepcopy(calibration)
-        calibration_copy.parameters["data_folder"] = target_params["data_folder"]
+        calibration_copy.parameters["data_folder"] = target_params["data_folder"] + flux_bus
 
         measurement_id = two_tone_vs_flux_experiment(
             platform=platform,
@@ -98,7 +98,11 @@ def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, para
         )
 
         model = FluxoniumTwoToneFluxModel(
-            measurement_id, target=target, path=target_params["data_folder"], lo=drive_LO, flux_bus=flux_bus
+            measurement_id,
+            target=target,
+            path=target_params["data_folder"] + flux_bus,
+            lo=drive_LO,
+            flux_bus=flux_bus
         )
         model.fit()
         model.plot()
