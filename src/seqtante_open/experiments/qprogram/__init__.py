@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from .spectroscopy_vs_flux import single_tone_vs_flux
+from .two_tone import two_tone_spectroscopy
 from .utils import multi_wait_for_trigger
 
-__all__ = ["multi_wait_for_trigger", "single_tone_vs_flux"]
+__all__ = ["multi_wait_for_trigger", "single_tone_vs_flux", "two_tone_spectroscopy"]

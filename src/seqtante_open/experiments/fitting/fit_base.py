@@ -195,17 +195,14 @@ class FittingClass(ABC):
         Returns:
             np.array(float): rotated values
         """
-        # Compute the covariance matrix
         cov = np.cov(arr.real, arr.imag)
-        # Get the eigenvalues and eigenvectors of the covariance matrix
-        w, v = np.linalg.eig(cov)
-        # Find the index of the max eigenvalue
-        max_idx = np.argmax(w)
-        # Compute the angle of rotation
-        angle = np.arctan2(v[max_idx, 1], v[max_idx, 0])
-        # Rotate the array
-        rotated = arr * np.exp(1j * angle)
-        return rotated
+        # eigh, not eig: cov is symmetric, and eig returns complex eigenpairs on numpy >= 2.5.
+        w, v = np.linalg.eigh(cov)
+        principal = v[:, np.argmax(w)]
+        if principal[0] < 0:  # the eigenvector sign is arbitrary, pin it
+            principal = -principal
+        angle = np.arctan2(principal[1], principal[0])
+        return arr * np.exp(-1j * angle)
 
     @staticmethod
     def wrap_pi(angle: float) -> float:
