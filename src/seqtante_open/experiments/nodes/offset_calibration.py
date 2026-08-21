@@ -80,7 +80,12 @@ def single_tone_vs_flux(platform: Platform, platform_path: str, parameters: dict
             autocalibration=True
         )
 
-        model = FluxoniumSingleToneFluxModel(cast("int", measurement_id), target=target, path=target_params["data_folder"] + flux_bus, lo=LO)
+        model = FluxoniumSingleToneFluxModel(
+            cast("int", measurement_id),
+            target=target,
+            path=target_params["data_folder"] + flux_bus,
+            lo=LO
+        )
         model.fit()
         model.plot()
         crosstalk.flux_offsets[flux_bus] += float(model.offset)
