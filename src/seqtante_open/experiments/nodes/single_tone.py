@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from typing import Any
+from copy import deepcopy
 
 import numpy as np
 from qililab import save_platform
@@ -54,6 +55,8 @@ def single_tone_node(platform: Platform, platform_path: str, parameters: dict[st
             if_sweep = np.linspace(*target_params["if_sweep"]) + platform.get_parameter(
                 alias=readout_bus, parameter=Parameter.IF
             )
+            calibration_copy = deepcopy(calibration)
+            calibration_copy.parameters["data_folder"] = target_params["data_folder"]
 
             measurement_id = single_tone_experiment(
                 platform=platform,
@@ -65,7 +68,7 @@ def single_tone_node(platform: Platform, platform_path: str, parameters: dict[st
                 readout_duration=target_params["readout_duration"],
                 relax_duration=target_params["relax_duration"],
                 ringup_time=target_params.get("ringup_time", _DEFAULTS["ringup_time"]),
-                calibration=calibration,
+                calibration=calibration_copy,
                 qubit_idx=qubit,
                 autocalibration=True,
             )
