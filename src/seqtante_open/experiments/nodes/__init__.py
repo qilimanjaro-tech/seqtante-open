@@ -19,5 +19,6 @@ calls a driver from ``experiment_classes`` and fits the result.
 """
 
 from .offset_calibration import single_tone_vs_flux
+from .two_tone import two_tone_node
 
 __all__ = ["single_tone_vs_flux"]

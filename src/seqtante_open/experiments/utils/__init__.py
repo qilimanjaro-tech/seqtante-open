@@ -18,6 +18,7 @@ from .flux_buses import (
     get_all_flux_buses,
     x_loop_readout_flux,
 )
+from .misc_utils import get_lo_multiple_sources
 from .qdac_utils import (
     QDAC_TRIGGER_TO_VOLTAGE_PADDING,
     all_qdacs_using_ext_clock,
@@ -33,9 +34,11 @@ __all__ = [
     "apply_flux_filters",
     "coupler_readout_qubit",
     "get_all_flux_buses",
+    "get_lo_multiple_sources",
     "get_qdac_lp_filters",
     "get_qdac_out_trigger",
     "qdac_step_timings",
+    "set_lo_multiple_sources",
     "wait_time_to_settle_from_filters",
     "x_loop_readout_flux",
 ]

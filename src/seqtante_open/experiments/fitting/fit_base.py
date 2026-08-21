@@ -87,7 +87,7 @@ class FittingClass(ABC):
     def get_xarray(self) -> DataArray:
         """Build the measurement's ``S21`` map as a labelled :class:`~xarray.DataArray`.
 
-        Reloads the measurement with ``load_old_h5`` and assembles one dimension per
+        Reloads the measurement with ``load_h5`` and assembles one dimension per
         sweep loop. Each dimension is named ``"{parameter} {bus} ({units})"``
         (just ``"{bus} ({units})"`` for flux loops, whose parameter is implied)
         and carries the loop metadata in its coord ``attrs``, so downstream
@@ -195,17 +195,14 @@ class FittingClass(ABC):
         Returns:
             np.array(float): rotated values
         """
-        # Compute the covariance matrix
         cov = np.cov(arr.real, arr.imag)
-        # Get the eigenvalues and eigenvectors of the covariance matrix
-        w, v = np.linalg.eig(cov)
-        # Find the index of the max eigenvalue
-        max_idx = np.argmax(w)
-        # Compute the angle of rotation
-        angle = np.arctan2(v[max_idx, 1], v[max_idx, 0])
-        # Rotate the array
-        rotated = arr * np.exp(1j * angle)
-        return rotated
+        # eigh, not eig: cov is symmetric, and eig returns complex eigenpairs on numpy >= 2.5.
+        w, v = np.linalg.eigh(cov)
+        principal = v[:, np.argmax(w)]
+        if principal[0] < 0:  # the eigenvector sign is arbitrary, pin it
+            principal = -principal
+        angle = np.arctan2(principal[1], principal[0])
+        return arr * np.exp(-1j * angle)
 
     @staticmethod
     def wrap_pi(angle: float) -> float:

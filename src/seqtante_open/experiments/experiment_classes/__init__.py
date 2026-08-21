@@ -19,5 +19,6 @@ calibration graph runs live under ``nodes/`` and call into these.
 """
 
 from .single_tone import single_tone__frequency_vs_flux
+from .two_tone import two_tone_frequency
 
-__all__ = ["single_tone__frequency_vs_flux"]
+__all__ = ["single_tone__frequency_vs_flux", "two_tone_frequency"]
