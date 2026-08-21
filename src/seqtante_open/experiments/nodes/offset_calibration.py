@@ -59,7 +59,7 @@ def single_tone_vs_flux(platform: Platform, platform_path: str, parameters: dict
         )
         flux_sweep = np.linspace(*target_params["flux_sweep"])
         calibration_copy = deepcopy(calibration)
-        calibration_copy.parameters["data_folder"] = target_params["data_folder"]
+        calibration_copy.parameters["data_folder"] = target_params["data_folder"] + flux_bus
 
         measurement_id = single_tone_vs_flux_experiment(
             platform=platform,
@@ -80,7 +80,7 @@ def single_tone_vs_flux(platform: Platform, platform_path: str, parameters: dict
             autocalibration=True
         )
 
-        model = FluxoniumSingleToneFluxModel(cast("int", measurement_id), target=target, path=target_params["data_folder"], lo=LO)
+        model = FluxoniumSingleToneFluxModel(cast("int", measurement_id), target=target, path=target_params["data_folder"] + flux_bus, lo=LO)
         model.fit()
         model.plot()
         crosstalk.flux_offsets[flux_bus] += float(model.offset)
