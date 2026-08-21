@@ -87,11 +87,11 @@ class FittingClass(ABC):
     def get_xarray(self) -> DataArray:
         """Build the measurement's ``S21`` map as a labelled :class:`~xarray.DataArray`.
 
-        Reloads the measurement with ``load_h5`` and assembles one dimension per
+        Reloads the measurement with ``load_old_h5`` and assembles one dimension per
         sweep loop. Each dimension is named ``"{parameter} {bus} ({units})"``
         (just ``"{bus} ({units})"`` for flux loops, whose parameter is implied)
         and carries the loop metadata in its coord ``attrs``, so downstream
-        helpers such as ``qilitools.plotting.convert_plot_units`` can rescale the
+        helpers such as :meth:`convert_plot_units` can rescale the
         axes. Loops without a ``parameter`` entry keep their raw h5 name.
 
         VNA results are already complex and are used as-is; Qblox and QM results

@@ -12,8 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .fit_base import FittingClass
-from .single_tone_vs_flux_fit import FluxoniumSingleToneFluxModel
-from .utils import cosfunc
+from .spectroscopy_vs_flux import single_tone_vs_flux
+from .utils import multi_wait_for_trigger
 
-__all__ = ["FittingClass", "FluxoniumSingleToneFluxModel", "cosfunc"]
+__all__ = ["multi_wait_for_trigger", "single_tone_vs_flux"]
