@@ -107,7 +107,7 @@ def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, para
         model.fit()
         model.plot()
         if model.fitted:
-            crosstalk.flux_offsets[flux_bus] += model.offset
+            crosstalk.flux_offsets[flux_bus] += float(model.offset)
 
     try:
         for qubit, loop in product(qubits, ["z", "x"][:qubit_loops][::-1]):
