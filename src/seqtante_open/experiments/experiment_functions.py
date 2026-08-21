@@ -18,18 +18,19 @@ One flat dict. Every experiment takes ``str`` targets (``"q1"``, ``"c1_2"``), so
 there is nothing to group by: ``CalibrationNode`` validates targets against
 ``str`` directly rather than looking the experiment up in a category.
 
-The three experiments seqtante-open ships:
+The experiments seqtante-open ships:
 
 - ``single_tone_vs_flux`` (offset calibration)
+- ``single_tone``
 - ``two_tone``
 - ``two_tone_vs_flux``
 
 Register each here as it lands.
 """
 
-from seqtante_open.experiments.nodes import single_tone_vs_flux, two_tone_node
+from seqtante_open.experiments.nodes import single_tone_node, single_tone_vs_flux, two_tone_node
 
 experiment_functions_dict: dict = {
-    "offset_calibration": single_tone_vs_flux, "two_tone": two_tone_node
+    "offset_calibration": single_tone_vs_flux, "single_tone": single_tone_node, "two_tone": two_tone_node
 }
 """``{experiment name: Callable(platform, platform_path, parameters) -> Any}``."""

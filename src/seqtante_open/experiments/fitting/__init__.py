@@ -13,8 +13,15 @@
 # limitations under the License.
 
 from .fit_base import FittingClass
+from .single_tone_fit import FluxoniumSingleToneModel
 from .single_tone_vs_flux_fit import FluxoniumSingleToneFluxModel
 from .two_tone_fit import FluxoniumTwoToneModel
 from .utils import cosfunc
 
-__all__ = ["FittingClass", "FluxoniumSingleToneFluxModel", "FluxoniumTwoToneModel", "cosfunc"]
+__all__ = [
+    "FittingClass",
+    "FluxoniumSingleToneFluxModel",
+    "FluxoniumSingleToneModel",
+    "FluxoniumTwoToneModel",
+    "cosfunc",
+]

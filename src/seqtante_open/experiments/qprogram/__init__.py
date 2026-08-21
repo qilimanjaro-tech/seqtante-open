@@ -12,8 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from .spectroscopy import resonator_spectroscopy
 from .spectroscopy_vs_flux import single_tone_vs_flux
 from .two_tone import two_tone_spectroscopy
 from .utils import multi_wait_for_trigger
 
-__all__ = ["multi_wait_for_trigger", "single_tone_vs_flux", "two_tone_spectroscopy"]
+__all__ = ["multi_wait_for_trigger", "resonator_spectroscopy", "single_tone_vs_flux", "two_tone_spectroscopy"]
