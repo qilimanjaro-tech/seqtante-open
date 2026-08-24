@@ -15,11 +15,12 @@
 """Single-tone drivers, copied from ``qilitools.experiments.single_tone``."""
 
 import numpy as np
-from qililab import Parameter
+from qililab import Calibration, Parameter
 from qililab.platform import Platform
 from qililab.result import DatabaseManager, StreamArray
 
-from seqtante_open.experiments.qprogram import single_tone_vs_flux
+from seqtante_open.experiments.analysis import sss_from_array
+from seqtante_open.experiments.qprogram import resonator_spectroscopy, single_tone_vs_flux
 from seqtante_open.experiments.utils import get_qdac_out_trigger, qdac_step_timings
 
 
@@ -143,3 +144,73 @@ def single_tone__frequency_vs_flux(
             ).results
         stream_array[()] = results[readout_bus][0].array.transpose(1, 2, 0)
     return stream_array.measurement.measurement_id if stream_array.measurement is not None else None  # type: ignore [return-value]
+
+
+def single_tone__frequency_sweep(
+    platform: Platform,
+    db_manager: DatabaseManager,
+    readout_bus: str,
+    if_sweep: np.ndarray,
+    readout_amplitude: float,
+    averages: int,
+    readout_duration: int,
+    relax_duration: int,
+    ringup_time: int = 0,
+    readout_LO: int | None = None,
+    qubit_idx: str | None = None,
+    calibration: Calibration | None = None,
+    optional_identifier: str | None = None,
+    autocalibration: bool = False,
+) -> int | None:
+    """Pulsed single-tone spectroscopy (resonator spectroscopy), hardware-looping over the readout IF.
+
+    Args:
+        platform: Qililab platform to execute on.
+        db_manager: Database manager for result storage.
+        readout_bus: Physical alias of the readout bus.
+        if_sweep: Readout intermediate frequencies to hardware-loop over.
+        readout_amplitude: Amplitude of the readout pulse.
+        averages: Number of hardware averages.
+        readout_duration: Duration of the readout pulse.
+        relax_duration: Resonator relaxation time between repetitions, in ns.
+        ringup_time: Time of the pulse needed to excite the resonator for readout. Defaults to 0.
+        readout_LO: If provided, set the readout LO frequency before executing. Defaults to None.
+        qubit_idx: Qubit index to associate with the measurement. Defaults to None.
+        calibration: Calibration to use when executing the qprogram. Defaults to None.
+        optional_identifier: Identifier for the measurement in the database. Defaults to None.
+        autocalibration: If True the measurement is saved in the autocalibration database. Defaults to False.
+
+    Returns:
+        int | None: ID of the measurement in the database.
+    """
+    qprogram = resonator_spectroscopy(
+        *sss_from_array(if_sweep),
+        averages=averages,
+        r_duration=readout_duration,
+        r_amp=readout_amplitude,
+        relax_duration=relax_duration,
+        ringup_time=ringup_time,
+    )
+
+    if readout_LO is not None:
+        platform.set_parameter(alias=readout_bus, parameter=Parameter.LO_FREQUENCY, value=readout_LO)
+
+    stream_array = StreamArray(
+        shape=(len(if_sweep), 2),
+        loops={
+            "frequency": {"array": if_sweep, "units": "Hz", "bus": readout_bus, "parameter": "IF_frequency"},
+        },
+        platform=platform,
+        experiment_name="single_tone__frequency_sweep",
+        db_manager=db_manager,
+        qprogram=qprogram,
+        optional_identifier=optional_identifier,
+        calibration=calibration,
+        qubit_idx=qubit_idx,
+        autocalibration=autocalibration,
+    )
+
+    with stream_array:
+        results = platform.execute_qprogram(qprogram, bus_mapping={"readout": readout_bus}).results
+        stream_array[()] = results[readout_bus][0].array.T
+    return stream_array.measurement.measurement_id if stream_array.measurement is not None else None
