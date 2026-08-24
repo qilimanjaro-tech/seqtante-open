@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from typing import Any
+from copy import deepcopy
 
 import numpy as np
 from qililab import save_platform
@@ -64,6 +65,8 @@ def two_tone_node(platform: Platform, platform_path: str, parameters: dict[str, 
             freq_sweep = np.linspace(*target_params["freq_sweep"]) + platform.get_parameter(
                 alias=drive_bus, parameter=Parameter.IF
             )
+            calibration_copy = deepcopy(calibration)
+            calibration_copy.parameters["data_folder"] = target_params["data_folder"]
 
             measurement_id = two_tone_experiment(
                 platform=platform,
@@ -81,7 +84,7 @@ def two_tone_node(platform: Platform, platform_path: str, parameters: dict[str, 
                 drive_gain=target_params.get("drive_gain", _DEFAULTS["drive_gain"]),
                 ringup_time=target_params.get("ringup_time", _DEFAULTS["ringup_time"]),
                 overlap_time=target_params.get("overlap_time", _DEFAULTS["overlap_time"]),
-                calibration=calibration,
+                calibration=calibration_copy,
                 drive_LO=drive_LO,
                 target=qubit,
                 autocalibration=True,

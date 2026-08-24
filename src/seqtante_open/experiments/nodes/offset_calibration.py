@@ -14,6 +14,7 @@
 
 from itertools import product
 from typing import Any, cast
+from copy import deepcopy
 
 import numpy as np
 from qililab.platform.platform import Platform
@@ -57,6 +58,8 @@ def single_tone_vs_flux(platform: Platform, platform_path: str, parameters: dict
             alias=readout_bus, parameter=Parameter.IF
         )
         flux_sweep = np.linspace(*target_params["flux_sweep"])
+        calibration_copy = deepcopy(calibration)
+        calibration_copy.parameters["data_folder"] = target_params["data_folder"] + flux_bus
 
         measurement_id = single_tone_vs_flux_experiment(
             platform=platform,
@@ -71,13 +74,18 @@ def single_tone_vs_flux(platform: Platform, platform_path: str, parameters: dict
             minimum_wait_after_step_override=target_params.get("minimum_wait_after_step"),
             qdac_stop_ro_before_step_override=target_params.get("qdac_stop_ro_before_step"),
             lo=LO,
-            calibration=calibration,
+            calibration=calibration_copy,
             flux_parameter=Parameter.FLUX,
             qubit_idx=target,
             autocalibration=True
         )
 
-        model = FluxoniumSingleToneFluxModel(cast("int", measurement_id), target=target, path=target_params["data_folder"], lo=LO)
+        model = FluxoniumSingleToneFluxModel(
+            cast("int", measurement_id),
+            target=target,
+            path=target_params["data_folder"] + flux_bus,
+            lo=LO
+        )
         model.fit()
         model.plot()
         crosstalk.flux_offsets[flux_bus] += float(model.offset)
