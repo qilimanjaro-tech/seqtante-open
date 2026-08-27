@@ -18,6 +18,10 @@ Like the flux-swept sibling, this fit plots with plotly and reads the readout LO
 off a platform built from ``measurement.platform_before`` (``lo`` is left unset),
 so the ``readout_q1`` alias its loop metadata names has to exist in the test
 runcard, where it resolves to ``QRM-RF1`` at 6.3 GHz.
+
+The fit takes the deepest swept point rather than fitting a curve, so the dip is
+placed exactly on a sweep point and ``FREQ_STEP`` is the tolerance it can be
+found to.
 """
 
 import numpy as np
@@ -36,8 +40,8 @@ FREQ_STEP = 1.0e6
 def make_single_tone_data(rng: np.random.Generator) -> tuple[np.ndarray, dict]:
     """A single resonator dip: a Lorentzian in |S21| centred on ``RESONANCE_IF``.
 
-    The dip lives on one quadrature in the rotated IQ plane, which is what
-    ``rotate_iq`` recovers before the Lorentzian fit locates its centre.
+    Only the magnitude matters to this fit, but the trace is still packed onto a
+    rotated IQ axis the way the acquisition writes it.
     """
     frequencies = np.arange(-30_000_000, 30_000_001, int(FREQ_STEP))
     width = 4.0e6

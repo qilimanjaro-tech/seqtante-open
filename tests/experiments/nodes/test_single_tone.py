@@ -24,11 +24,11 @@ into the readout bus. The execution function, the fit model and the writer
 """
 
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from qililab.qprogram.calibration import Calibration
 from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 from qililab.typings.enums import Parameter
 
@@ -50,6 +50,17 @@ READOUT_BUSES = ("readout_q1", "readout_q2")
 def _identity_crosstalk(platform) -> CrosstalkMatrix:
     buses = get_all_flux_buses(platform)
     return CrosstalkMatrix.from_buses({b: {bb: (1.0 if b == bb else 0.0) for bb in buses} for b in buses})
+
+
+def _calibration(platform) -> Calibration:
+    """A real ``Calibration`` holding nothing but an identity crosstalk matrix.
+
+    Real rather than a stand-in because the node writes the ``data_folder`` into
+    ``parameters`` of a copy of it.
+    """
+    calibration = Calibration()
+    calibration.crosstalk_matrix = _identity_crosstalk(platform)
+    return calibration
 
 
 def _fit_model() -> MagicMock:
@@ -86,7 +97,7 @@ def _base_parameters() -> dict:
 @pytest.fixture
 def run_experiment(platform, mock_db_manager, mock_recorder):
     """Run ``single_tone_node`` with the execution, fit and IO boundaries mocked."""
-    calibration = SimpleNamespace(crosstalk_matrix=_identity_crosstalk(platform))
+    calibration = _calibration(platform)
     mock_recorder.mock(f"{MODULE}.deserialize_from", output=calibration)
     mock_recorder.mock(f"{MODULE}.{FN}", output=MEASUREMENT_ID)
     mock_recorder.mock(f"{MODULE}.FluxoniumSingleToneModel", output=_fit_model())
@@ -116,9 +127,15 @@ def test_basic_parameters(run_experiment):
     assert all(c["kwargs"]["averages"] == 4000 for c in calls)
     assert all(c["kwargs"]["readout_duration"] == 2000 for c in calls)
     assert all(c["kwargs"]["relax_duration"] == 200_000 for c in calls)
-    assert all(c["kwargs"]["calibration"] is run_experiment.calibration for c in calls)
     assert [c["kwargs"]["qubit_idx"] for c in calls] == ["q1", "q2"]
     assert [c["kwargs"]["readout_bus"] for c in calls] == list(READOUT_BUSES)
+
+    # Each measurement gets its own stamped copy; the shared calibration stays untouched.
+    for call in calls:
+        calibration = call["kwargs"]["calibration"]
+        assert calibration is not run_experiment.calibration
+        assert calibration.parameters["data_folder"] == DATA_FOLDER
+    assert "data_folder" not in run_experiment.calibration.parameters
 
     # The IF sweep is the raw linspace offset by the readout bus IF, both read
     # before the fit overwrote the IF.
@@ -213,7 +230,7 @@ def test_fitted_if_is_written_to_the_platform(run_experiment):
 def test_platform_is_saved_even_when_the_experiment_fails(run_experiment, mock_recorder):
     """``save_platform`` lives in a ``finally``, so a failed run still persists."""
     mock_recorder.reset()
-    calibration = SimpleNamespace(crosstalk_matrix=_identity_crosstalk(run_experiment.platform))
+    calibration = _calibration(run_experiment.platform)
     mock_recorder.mock(f"{MODULE}.deserialize_from", output=calibration)
     mock_recorder.mock(f"{MODULE}.save_platform")
     boom = mock_recorder.mock(f"{MODULE}.{FN}")
@@ -230,7 +247,7 @@ def test_platform_is_saved_even_when_the_experiment_fails(run_experiment, mock_r
 def test_calibration_without_crosstalk_matrix_is_rejected(run_experiment, mock_recorder):
     """A calibration lacking a ``CrosstalkMatrix`` fails before anything is executed."""
     mock_recorder.reset()
-    mock_recorder.mock(f"{MODULE}.deserialize_from", output=SimpleNamespace(crosstalk_matrix=None))
+    mock_recorder.mock(f"{MODULE}.deserialize_from", output=Calibration())
     mock_recorder.mock(f"{MODULE}.{FN}", output=MEASUREMENT_ID)
     mock_recorder.mock(f"{MODULE}.save_platform")
 

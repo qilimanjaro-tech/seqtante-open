@@ -115,7 +115,10 @@ Optional:
 - **`PLOTS`** exact filenames `plot()` must produce, if you want them pinned.
 - **`WAIVED`** `{"method": "why it needs no test"}`. The reason is the point; a
   waiver naming a method the class does not define is rejected at import.
-- **`SEED`** for a `DATA` builder. Defaults to 0.
+- **`SEED`** for a `DATA` builder, and for the global numpy RNG, which is seeded
+  with it just before `fit()`. The Lorentzian fits run `differential_evolution`
+  and draw their population from that RNG, so an unseeded fit answers differently
+  depending on what ran before it. Defaults to 0.
 
 ## How the harness fakes a measurement
 

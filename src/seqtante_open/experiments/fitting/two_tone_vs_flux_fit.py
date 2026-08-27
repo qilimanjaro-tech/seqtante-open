@@ -137,7 +137,7 @@ class FluxoniumTwoToneFluxModel(FittingClass):
         if self.fitted:
             fluxes = np.linspace(self.fluxes.min(), self.fluxes.max(), 101)
             fig.add_scatter(
-                x=(np.polyval(cast("np.ndarray", self.coefficients), fluxes) + lo) * 1e-9,
+                x=(np.polyval(self.coefficients, fluxes) + lo) * 1e-9,
                 y=fluxes,
                 mode="lines",
                 name=f"Parabola (r² = {self.r_squared:.3f})",

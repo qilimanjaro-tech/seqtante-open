@@ -25,11 +25,11 @@ fitted or written to disk.
 """
 
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+from qililab.qprogram.calibration import Calibration
 from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 from qililab.typings.enums import Parameter
 
@@ -43,6 +43,7 @@ FN = "two_tone_vs_flux_experiment"
 
 MEASUREMENT_ID = 777
 FITTED_OFFSET = 0.123
+DATA_FOLDER = "unused-mocked-folder"
 
 MEASURED_BUSES = ("flux_q1_x", "flux_q1_z", "flux_c1_2_z")
 """The flux buses of ``["q1", "c1_2"]``, in the order the node sweeps them."""
@@ -53,9 +54,16 @@ def _identity_crosstalk(platform) -> CrosstalkMatrix:
     return CrosstalkMatrix.from_buses({b: {bb: (1.0 if b == bb else 0.0) for bb in buses} for b in buses})
 
 
-def _calibration(platform, lo: dict[str, float] | None = None) -> SimpleNamespace:
-    """Stand-in ``Calibration``: a crosstalk matrix and the per-bus LO table."""
-    return SimpleNamespace(crosstalk_matrix=_identity_crosstalk(platform), parameters={"LO": lo or {}})
+def _calibration(platform, lo: dict[str, float] | None = None) -> Calibration:
+    """A real ``Calibration`` holding a crosstalk matrix and the per-bus LO table.
+
+    Real rather than a stand-in because the node writes the per-measurement
+    ``data_folder`` into ``parameters`` of a copy of it.
+    """
+    calibration = Calibration()
+    calibration.crosstalk_matrix = _identity_crosstalk(platform)
+    calibration.parameters = {"LO": lo or {}}
+    return calibration
 
 
 def _fit_model() -> MagicMock:
@@ -69,7 +77,7 @@ def _base_parameters() -> dict:
     return {
         "targets": ["q1", "c1_2"],
         "calibration_path": "unused-mocked.yml",
-        "data_folder": "unused-mocked-folder",
+        "data_folder": DATA_FOLDER,
         "freq_sweep": [-1.5e6, 1.5e6, 21],
         "flux_sweep": [-1, 1, 11],
         "averages": 1000,
@@ -123,8 +131,14 @@ def test_basic_parameters(platform, run_experiment):
     assert all(c["kwargs"]["ringup_time"] == 24 for c in calls)
     assert all(c["kwargs"]["overlap_time"] == 12 for c in calls)
     assert all(c["kwargs"]["flux_parameter"] == Parameter.FLUX for c in calls)
-    assert all(c["kwargs"]["calibration"] is run_experiment.calibration for c in calls)
     assert all(c["kwargs"]["autocalibration"] is True for c in calls)
+
+    # Each measurement gets its own stamped copy; the shared calibration stays untouched.
+    for call in calls:
+        calibration = call["kwargs"]["calibration"]
+        assert calibration is not run_experiment.calibration
+        assert calibration.parameters["data_folder"] == DATA_FOLDER + call["kwargs"]["flux_bus"]
+    assert "data_folder" not in run_experiment.calibration.parameters
 
     # The flux sweep is the raw linspace; the frequency sweep is offset by the drive bus IF.
     for call in calls:
@@ -294,7 +308,7 @@ def test_fitted_offsets_are_written_to_the_calibration(run_experiment):
     fits = recorder.calls["FluxoniumTwoToneFluxModel"]
     assert len(fits) == 3
     assert all(f["args"] == (MEASUREMENT_ID,) for f in fits)
-    assert all(f["kwargs"]["path"] == "unused-mocked-folder" for f in fits)
+    assert [f["kwargs"]["path"] for f in fits] == [DATA_FOLDER + bus for bus in MEASURED_BUSES]
     assert [f["kwargs"]["target"] for f in fits] == ["q1", "q1", "c1_2"]
     assert [f["kwargs"]["flux_bus"] for f in fits] == list(MEASURED_BUSES)
     assert run_experiment.model.fit.call_count == 3
@@ -333,7 +347,7 @@ def test_calibration_is_saved_even_when_the_experiment_fails(platform, mock_db_m
 
 def test_calibration_without_crosstalk_matrix_is_rejected(platform, mock_db_manager, mock_recorder):
     """A calibration lacking a ``CrosstalkMatrix`` fails before anything is executed."""
-    mock_recorder.mock(f"{MODULE}.deserialize_from", output=SimpleNamespace(crosstalk_matrix=None, parameters={}))
+    mock_recorder.mock(f"{MODULE}.deserialize_from", output=Calibration())
     mock_recorder.mock(f"{MODULE}.{FN}", output=MEASUREMENT_ID)
     mock_recorder.mock(f"{MODULE}.serialize_to")
 
