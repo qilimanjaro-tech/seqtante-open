@@ -260,7 +260,8 @@ class FittingTestCase:
     Optional: ``MEASUREMENT`` to override attributes of the fake measurement
     (``platform_before``, ``calibration``, ``data_shape``, ...), ``PLOTS`` to pin
     the exact filenames ``plot`` must produce, ``WAIVED`` to justify an added
-    method that needs no test of its own, and ``SEED`` for a ``DATA`` callable.
+    method that needs no test of its own, and ``SEED`` for a ``DATA`` callable and
+    for the global RNG the fit itself draws on.
     """
 
     FIT_CLASS: FittingClass
@@ -370,8 +371,18 @@ class FittingTestCase:
 
     @pytest.fixture(scope="class")
     def _fitted_once(self, environment: MagicMock) -> Any:
-        """``fit()`` run once per test class, because several of these fits are slow."""
+        """``fit()`` run once per test class, because several of these fits are slow.
+
+        The global numpy RNG is seeded first, because ``lorentzian_fit`` runs
+        ``differential_evolution``, which draws its population from it. Left alone,
+        the same trace fits to a different centre depending on what ran before it,
+        and ``EXPECTED`` becomes a coin toss. Seeding here rather than in
+        ``lorentzian_fit`` is deliberate: ``FluxoniumTwoToneFluxModel.fit`` retries a
+        poor trace by simply fitting it again, which only works while consecutive
+        fits differ. This pins the sequence without making it constant.
+        """
         obj = self.FIT_CLASS(**self.INIT)
+        np.random.seed(self.SEED)
         obj.fit()
         return obj
 

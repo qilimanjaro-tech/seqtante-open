@@ -26,11 +26,11 @@ to disk.
 """
 
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+from qililab.qprogram.calibration import Calibration
 from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 from qililab.typings.enums import Parameter
 
@@ -44,11 +44,26 @@ FN = "single_tone_vs_flux_experiment"
 
 MEASUREMENT_ID = 777
 FITTED_OFFSET = 0.123
+DATA_FOLDER = "unused-mocked-folder"
+
+MEASURED_BUSES = ("flux_q1_x", "flux_q1_z", "flux_c1_2_z")
+"""The flux buses of ``["q1", "c1_2"]``, in the order the experiment sweeps them."""
 
 
 def _identity_crosstalk(platform) -> CrosstalkMatrix:
     buses = get_all_flux_buses(platform)
     return CrosstalkMatrix.from_buses({b: {bb: (1.0 if b == bb else 0.0) for bb in buses} for b in buses})
+
+
+def _calibration(platform) -> Calibration:
+    """A real ``Calibration`` holding nothing but an identity crosstalk matrix.
+
+    Real rather than a stand-in because the experiment writes the per-measurement
+    ``data_folder`` into ``parameters`` of a copy of it.
+    """
+    calibration = Calibration()
+    calibration.crosstalk_matrix = _identity_crosstalk(platform)
+    return calibration
 
 
 def _fit_model() -> MagicMock:
@@ -62,7 +77,7 @@ def _base_parameters() -> dict:
     return {
         "targets": ["q1", "c1_2"],
         "calibration_path": "unused-mocked.yml",
-        "data_folder": "unused-mocked-folder",
+        "data_folder": DATA_FOLDER,
         "if_sweep": [-1.5e6, 1.5e6, 21],
         "flux_sweep": [-1, 1, 11],
         "readout_amp": 0.075,
@@ -77,7 +92,7 @@ def _base_parameters() -> dict:
 @pytest.fixture
 def run_experiment(platform, mock_db_manager, mock_recorder):
     """Run ``single_tone_vs_flux`` with the execution, fit and IO boundaries mocked."""
-    calibration = SimpleNamespace(crosstalk_matrix=_identity_crosstalk(platform))
+    calibration = _calibration(platform)
     mock_recorder.mock(f"{MODULE}.deserialize_from", output=calibration)
     mock_recorder.mock(f"{MODULE}.{FN}", output=MEASUREMENT_ID)
     mock_recorder.mock(f"{MODULE}.FluxoniumSingleToneFluxModel", output=_fit_model())
@@ -102,7 +117,13 @@ def test_basic_parameters(platform, run_experiment):
     assert all(c["kwargs"]["averages"] == 1000 for c in calls)
     assert all(c["kwargs"]["duration"] == 2000 for c in calls)
     assert all(c["kwargs"]["flux_parameter"] == Parameter.FLUX for c in calls)
-    assert all(c["kwargs"]["calibration"] is run_experiment.calibration for c in calls)
+
+    # Each measurement gets its own stamped copy; the shared calibration stays untouched.
+    for call in calls:
+        calibration = call["kwargs"]["calibration"]
+        assert calibration is not run_experiment.calibration
+        assert calibration.parameters["data_folder"] == DATA_FOLDER + call["kwargs"]["flux_bus"]
+    assert "data_folder" not in run_experiment.calibration.parameters
 
     # The flux sweep is the raw linspace; the IF sweep is offset by the readout bus IF.
     for call in calls:
@@ -137,7 +158,7 @@ def test_x_loop_flux_is_set_if_specified(platform, mock_db_manager, mock_recorde
     ``set_bias_to_zero``, so the final platform state says nothing about the bias
     the measurement actually saw.
     """
-    calibration = SimpleNamespace(crosstalk_matrix=_identity_crosstalk(platform))
+    calibration = _calibration(platform)
     mock_recorder.mock(f"{MODULE}.deserialize_from", output=calibration)
     mock_recorder.mock(f"{MODULE}.FluxoniumSingleToneFluxModel", output=_fit_model())
     mock_recorder.mock(f"{MODULE}.serialize_to")
@@ -221,17 +242,13 @@ def test_fitted_offsets_are_written_to_the_calibration(run_experiment):
     recorder = run_experiment(_base_parameters())
 
     offsets = run_experiment.calibration.crosstalk_matrix.flux_offsets
-    assert {bus: offsets[bus] for bus in ("flux_q1_z", "flux_q1_x", "flux_c1_2_z")} == {
-        "flux_q1_z": FITTED_OFFSET,
-        "flux_q1_x": FITTED_OFFSET,
-        "flux_c1_2_z": FITTED_OFFSET,
-    }
+    assert {bus: offsets[bus] for bus in MEASURED_BUSES} == dict.fromkeys(MEASURED_BUSES, FITTED_OFFSET)
 
-    # One fit per measurement, each pointed at the configured data folder.
+    # One fit per measurement, each pointed at the configured data folder and its own flux bus.
     fits = recorder.calls["FluxoniumSingleToneFluxModel"]
     assert len(fits) == 3
     assert all(f["args"] == (MEASUREMENT_ID,) for f in fits)
-    assert all(f["kwargs"]["path"] == "unused-mocked-folder" for f in fits)
+    assert [f["kwargs"]["path"] for f in fits] == [DATA_FOLDER + bus for bus in MEASURED_BUSES]
 
     # The updated calibration and platform are persisted once, at the end.
     assert len(recorder.calls["serialize_to"]) == 1
