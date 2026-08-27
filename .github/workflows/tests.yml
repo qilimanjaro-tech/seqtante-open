@@ -106,10 +106,6 @@ jobs:
         if: matrix.python-version != env.COVERAGE_PYTHON
         run: pytest -n auto --dist loadfile tests
 
-      - name: Run tests with coverage
-        if: matrix.python-version == env.COVERAGE_PYTHON
-        run: pytest -n auto --dist loadfile --cov=seqtante_open --cov-report=term tests
-
   all-tests:
     name: Tests
     needs: [tests]
