@@ -1,6 +1,6 @@
 [project]
 name = "seqtante_open"
-version = "0.1.0"
+version = "0.1.1"
 description = "Fundamental package for fast calibration of quantum chips."
 authors = [{name = "Qilimanjaro Quantum Tech", email = "info@qilimanjaro.tech"}]
 urls = {Repository = "https://github.com/qilimanjaro-tech/seqtante-open"}
