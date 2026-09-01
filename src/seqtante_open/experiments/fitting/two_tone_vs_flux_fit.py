@@ -78,7 +78,7 @@ class FluxoniumTwoToneFluxModel(FittingClass):
 
     def _drive_lo(self) -> float:
         """Drive-bus LO frequency in Hz, taken from the runcard stored with the measurement."""
-        platform = build_platform(cast("dict", self.measurement.platform_before))
+        platform = build_platform(cast("str", self.measurement.platform_before))
         return platform.get_parameter(alias=self.drive_bus, parameter=Parameter.LO_FREQUENCY)
 
     def fit(self):

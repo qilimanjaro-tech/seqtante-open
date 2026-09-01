@@ -112,7 +112,7 @@ def qdac_step_timings(
     platform: Platform,
     minimum_wait_after_step_override: float | None = None,
     qdac_stop_ro_before_step_override: float | None = None,
-) -> tuple[int, int]:
+) -> tuple[float, float]:
     """Wait times around each QDAC step, in ns.
 
     Warns if any QDAC runs off its internal clock, which risks missing a trigger.

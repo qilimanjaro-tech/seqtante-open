@@ -14,10 +14,12 @@
 
 import os
 from abc import ABC
+from typing import cast
 
 import numpy as np
 import plotly.graph_objects as go
 from lmfit import Model
+from qililab.result.database import AutocalMeasurement
 from scipy.special import erf as _erf
 from xarray import DataArray
 
@@ -44,7 +46,7 @@ class FittingClass(ABC):
             path (str | None, optional): Directory of the folder where the plot/s are saved, if None it shows the plot. Defaults to None.
         """
         self.id = measurement_id
-        self.measurement = output_controller.db_manager.load_calibration_by_id(measurement_id)
+        self.measurement = cast("AutocalMeasurement", output_controller.db_manager.load_calibration_by_id(measurement_id))
         self.array, self.loops = self.measurement.load_h5()
 
         self.path = path
@@ -238,12 +240,12 @@ class FittingClass(ABC):
         return fit, fitted_drag_coeff
 
     @staticmethod
-    def exponential(x: float | list | np.ndarray, A: float, B: float, C: float):
+    def exponential(x: float | np.ndarray, A: float, B: float, C: float):
         '''Returns exponential A * np.exp(B * x) + C'''
         return A * np.exp(B * x) + C
 
     @staticmethod
-    def exponential_initial_guess(x_array: list | np.ndarray, y_array: list | np.ndarray) -> tuple[float]:
+    def exponential_initial_guess(x_array: list | np.ndarray, y_array: list | np.ndarray) -> tuple[float, float, float]:
         """Generates an rough initial guess for an exponential fitting."""
         _n = len(y_array)
         _end_idx = 1 if int(_n * 2 / 100) < 1 else int(_n * 2 / 100)

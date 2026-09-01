@@ -21,7 +21,7 @@ from typing import Any
 from loguru import logger
 from qililab import Platform
 
-from seqtante_open.experiments.experiment_functions import experiment_functions_dict
+from seqtante_open.experiments.experiment_functions import experiment_functions_dict, ExperimentFunction
 
 
 class CalibrationNode:
@@ -37,6 +37,8 @@ class CalibrationNode:
         targets (list[str]): Targets (qubits or couplings) were this experiment will run, e.g. ``"q1"``, ``"c1_2"``.
         simultaneous (bool | list | list[list], optional): Parameter that specifies if parallel calibration of qubits is done and in what way. Defaults to False.
     """
+
+    experiment_func: ExperimentFunction
 
     def __init__(
         self,
@@ -55,14 +57,11 @@ class CalibrationNode:
         self.idx = idx
         self.targets = list(targets)
         self.experiment = experiment
-        self.experiment_func = experiment_functions_dict.get(
-            experiment, None
-        )  # Callable(platform, platform_path, parameters) -> Any
         self.parameters: dict[str, Any] = copy(parameters)
 
         if isinstance(simultaneous, list):
             if all(isinstance(sim, list) for sim in simultaneous):
-                self.simultaneous = [list(sim) for sim in simultaneous]
+                self.simultaneous: list[list[str]] = [list(sim) for sim in simultaneous]
                 unexpected_sim_targets = {st for sim in self.simultaneous for st in sim if st not in self.targets}
                 if unexpected_sim_targets:
                     logger.opt(colors=True).warning(
@@ -76,7 +75,7 @@ class CalibrationNode:
                     "(Running node without parallelization)",
                     node=self.name,
                 )
-                self.simultaneous = False
+                self.simultaneous = []
         elif simultaneous:
             self.simultaneous = [self.targets]
         else:
@@ -102,7 +101,9 @@ class CalibrationNode:
     # ------------------------- Normalization helpers -------------------------
 
     def _validate_node(self):
-        if not self.experiment_func:
+        if self.experiment in experiment_functions_dict:
+            self.experiment_func = experiment_functions_dict[self.experiment]
+        else:
             logger.opt(colors=True).warning(
                 "Experiment <i><fg #8838ff>{experiment}</></i> not implemented. (Node Skipped)",
                 experiment=self.experiment,

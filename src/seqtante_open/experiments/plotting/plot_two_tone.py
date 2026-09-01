@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from typing import cast
 
 import numpy as np
 import plotly.graph_objects as go
@@ -28,7 +29,7 @@ def plot_two_tone_readout_optimization(measurement: Measurement, title: str):
     start = 0
     stop = data.shape[1]
 
-    qp = deserialize(measurement.qprogram)  # type:ignore [call-overload]
+    qp = deserialize(cast("str", measurement.qprogram))  # type:ignore [call-overload]
     readout_if_freq = qp.body.elements[0].frequency
     # TODO: modify this hardcoded readout_if_freq
 
