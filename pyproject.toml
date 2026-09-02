@@ -79,7 +79,6 @@ qpysequence = { index = "qilimanjaro" }
 [tool.ruff]
 line-length = 120
 output-format = "concise"
-target-version = "py313"
 
 [tool.ruff.lint]
 preview = true
