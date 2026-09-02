@@ -41,8 +41,8 @@ SINKS = {
 
 FILTERS = {
     "lt_warning": lambda r: r["level"].no < logger.level("WARNING").no,
-    "seqtante": lambda r: r["name"].startswith("seqtante."),
-    "lt_warning_seqtante": lambda r: r["name"].startswith("seqtante.") and r["level"].no < logger.level("WARNING").no,
+    "seqtante_open": lambda r: r["name"].startswith("seqtante_open."),
+    "lt_warning_seqtante_open": lambda r: r["name"].startswith("seqtante_open.") and r["level"].no < logger.level("WARNING").no,
 }
 
 
