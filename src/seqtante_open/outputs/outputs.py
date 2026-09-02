@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from qililab.result.database import SequenceRun
 
 # ---------------------Logger constants-----------------------
-DEFAULT_LOG_CONFIG = Path(str(files("seqtante-open.outputs") / "default_logger.json"))
+DEFAULT_LOG_CONFIG = Path(str(files("seqtante_open.outputs") / "default_logger.json"))
 DEFAULT_FOLDER_ALIAS = "SEQTANTE_FOLDER"
 
 SINKS = {
