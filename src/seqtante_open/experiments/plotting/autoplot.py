@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Callable, cast
+from typing import cast
 
 import numpy as np
 from qililab.data_management import build_platform
@@ -33,6 +33,7 @@ from seqtante_open.experiments.plotting import (
     plot_measurement_3d_heatmap_slider_updated,
     plot_two_tone_readout_optimization,
 )
+from seqtante_open.experiments.plotting.plot_general import DataProcessing
 
 
 def correct_tof(xarr: DataArray, platform: Platform, tof: float | None = None):
@@ -90,7 +91,7 @@ def auto_plot(
     y: str | None = None,
     z: str | None = None,
     xarr: DataArray | None = None,
-    dataprocessing: Callable | None = decibels,
+    dataprocessing: DataProcessing | None = decibels,
     tof: int | None = None,
     unwrap: bool = False,
 ):

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any
+from typing import Any, cast
 from copy import deepcopy
 
 import numpy as np
@@ -73,7 +73,7 @@ def single_tone_node(platform: Platform, platform_path: str, parameters: dict[st
                 autocalibration=True,
             )
 
-            model = FluxoniumSingleToneModel(measurement_id, target=qubit, path=target_params["data_folder"], lo=LO)
+            model = FluxoniumSingleToneModel(cast("int", measurement_id), target=qubit, path=target_params["data_folder"], lo=LO)
             model.fit()
             model.plot()
             platform.set_parameter(

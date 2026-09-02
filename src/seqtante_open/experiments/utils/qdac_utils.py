@@ -31,7 +31,7 @@ def get_qdac_lp_filters(platform: Platform):
     lp_filters = []
     for instrument_controller in platform.instrument_controllers.elements:
         if isinstance(instrument_controller, QDevilQDac2Controller):
-            lp_filters.extend(instrument_controller.modules[0].low_pass_filter)
+            lp_filters.extend(instrument_controller.modules[0].low_pass_filter)  # ty: ignore[unresolved-attribute]
 
     return lp_filters
 
@@ -50,7 +50,7 @@ def get_qdac_out_trigger(platform: Platform, default: int = 2) -> int:
     """
     for instrument_controller in platform.instrument_controllers.elements:
         if isinstance(instrument_controller, QDevilQDac2Controller):
-            out_trigger = instrument_controller.modules[0].out_trigger
+            out_trigger = instrument_controller.modules[0].out_trigger  # ty: ignore[unresolved-attribute]
             if out_trigger is not None:
                 return out_trigger
 
