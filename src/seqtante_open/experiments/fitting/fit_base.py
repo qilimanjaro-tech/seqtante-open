@@ -14,16 +14,18 @@
 
 import os
 from abc import ABC
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import plotly.graph_objects as go
 from lmfit import Model
-from qililab.result.database import AutocalMeasurement
 from scipy.special import erf as _erf
 from xarray import DataArray
 
 from seqtante_open.outputs import output_controller
+
+if TYPE_CHECKING:
+    from qililab.result.database import AutocalMeasurement
 
 RENDER_FORMAT = "png"
 
@@ -33,11 +35,12 @@ RENDER_SCALE = 2  # pixel multiplier on the figure's layout size
 class FittingClass(ABC):
     """Base class for all fittings."""
 
-    def __init__(self,
-                 measurement_id: int,
-                 target: str | None = None,
-                 path: str | None = None,
-                 ):
+    def __init__(
+        self,
+        measurement_id: int,
+        target: str | None = None,
+        path: str | None = None,
+    ):
         """Base class for all fittings. It includes many functions for the fittings.
 
         Args:
@@ -46,7 +49,9 @@ class FittingClass(ABC):
             path (str | None, optional): Directory of the folder where the plot/s are saved, if None it shows the plot. Defaults to None.
         """
         self.id = measurement_id
-        self.measurement = cast("AutocalMeasurement", output_controller.db_manager.load_calibration_by_id(measurement_id))
+        self.measurement = cast(
+            "AutocalMeasurement", output_controller.db_manager.load_calibration_by_id(measurement_id)
+        )
         self.array, self.loops = self.measurement.load_h5()
 
         self.path = path
@@ -241,7 +246,7 @@ class FittingClass(ABC):
 
     @staticmethod
     def exponential(x: float | np.ndarray, A: float, B: float, C: float):
-        '''Returns exponential A * np.exp(B * x) + C'''
+        """Returns exponential A * np.exp(B * x) + C"""
         return A * np.exp(B * x) + C
 
     @staticmethod

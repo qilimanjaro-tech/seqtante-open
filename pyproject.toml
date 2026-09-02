@@ -79,7 +79,7 @@ qpysequence = { index = "qilimanjaro" }
 [tool.ruff]
 line-length = 120
 output-format = "concise"
-target-version = "py311"
+target-version = "py313"
 
 [tool.ruff.lint]
 preview = true
@@ -123,40 +123,40 @@ select = [
     "RUF"
 ]
 ignore = [
-    "E111",
-    "E114",
-    "E117",
-    "E501",
-    "D206",
-    "D300",
-    "Q000",
-    "Q001",
-    "Q002",
-    "Q003",
-    "COM812",
-    "COM819",
-    "ISC001",
-    "ISC002",
-    "E741",
-    "W191",
-    "RET504",
-    "SIM117",
-    "PLC0414",
-    "PLC2701",
-    "PLR0904",
-    "PLR0911",
-    "PLR0912",
-    "PLR0913",
-    "PLR0914",
-    "PLR0915",
-    "PLR0917",
-    "PLR1702"]
+    "indentation-with-invalid-multiple",
+    "indentation-with-invalid-multiple-comment",
+    "over-indented",
+    "line-too-long",
+    "docstring-tab-indentation",
+    "triple-single-quotes",
+    "bad-quotes-inline-string",
+    "bad-quotes-multiline-string",
+    "bad-quotes-docstring",
+    "avoidable-escaped-quote",
+    "missing-trailing-comma",
+    "prohibited-trailing-comma",
+    "single-line-implicit-string-concatenation",
+    "multi-line-implicit-string-concatenation",
+    "ambiguous-variable-name",
+    "tab-indentation",
+    "unnecessary-assign",
+    "multiple-with-statements",
+    "useless-import-alias",
+    "import-private-name",
+    "too-many-public-methods",
+    "too-many-return-statements",
+    "too-many-branches",
+    "too-many-arguments",
+    "too-many-locals",
+    "too-many-statements",
+    "too-many-positional-arguments",
+    "too-many-nested-blocks"]
 dummy-variable-rgx = "^_$"
 logger-objects = ["qililab.logger"]
 
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["ANN", "S", "CPY", "SLF001", "PLR", "DOC", "RUF012"]
+"tests/*" = ["ANN", "S", "CPY", "private-member-access", "PLR", "DOC", "mutable-class-default"]
 "docs/*" = ["CPY"]
 "examples/*" = ["CPY", "T20"]
 

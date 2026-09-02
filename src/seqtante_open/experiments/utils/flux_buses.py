@@ -85,17 +85,15 @@ def _ch_coupler(a: int, b: int, axis: str) -> str:
 def coupler_readout_qubit(couplers: list[str], coupler_readout_overwrite: dict[str, str]):
     digits = re.compile(r"\d+")
     readout_x_couplers = {
-            coupler: coupler_readout_overwrite.get(
-                coupler, f"q{min(int(num) for num in digits.findall(coupler))}"
-            )
-            for coupler in couplers
-        }
+        coupler: coupler_readout_overwrite.get(coupler, f"q{min(int(num) for num in digits.findall(coupler))}")
+        for coupler in couplers
+    }
     return readout_x_couplers
 
 
 def x_loop_readout_flux(qubit: str, qubit_loops: int, parameters: dict[str, Any]) -> tuple[str, float] | None:
-        """Bus and value of the x-loop bias holding the resonator readable, or None if there is no x loop."""
-        if qubit_loops < 2:
-            return None
-        flux = parameters.get(qubit, {}).get("x_loop_readout_flux", parameters.get("x_loop_readout_flux"))
-        return (f"flux_{qubit}_x", flux) if flux else None
+    """Bus and value of the x-loop bias holding the resonator readable, or None if there is no x loop."""
+    if qubit_loops < 2:
+        return None
+    flux = parameters.get(qubit, {}).get("x_loop_readout_flux", parameters.get("x_loop_readout_flux"))
+    return (f"flux_{qubit}_x", flux) if flux else None

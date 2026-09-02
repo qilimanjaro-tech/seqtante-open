@@ -28,6 +28,8 @@ reported so it does not quietly become an orphan.
 
 from __future__ import annotations
 
+from loguru import logger
+
 from tests.experiments.fitting.harness import DATA_DIR, FittingTestCase, import_test_modules
 
 
@@ -44,13 +46,13 @@ def main() -> None:
         path = case.regenerate()
         if path is not None:
             written.add(path.name)
-            print(f"wrote {path.relative_to(DATA_DIR.parent)}")
+            logger.info(f"wrote {path.relative_to(DATA_DIR.parent)}")
         elif not callable(case.DATA):
-            print(f"SKIPPED {case.DATA}: {case.__name__} declares no BUILDER")
+            logger.info(f"SKIPPED {case.DATA}: {case.__name__} declares no BUILDER")
 
     orphans = {path.name for path in DATA_DIR.glob("*.h5")} - written
     for name in sorted(orphans):
-        print(f"ORPHAN {name}: no test case regenerates this file")
+        logger.info(f"ORPHAN {name}: no test case regenerates this file")
 
 
 if __name__ == "__main__":

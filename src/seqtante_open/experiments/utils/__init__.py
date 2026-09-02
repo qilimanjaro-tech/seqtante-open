@@ -38,7 +38,6 @@ __all__ = [
     "get_qdac_lp_filters",
     "get_qdac_out_trigger",
     "qdac_step_timings",
-    "set_lo_multiple_sources",
     "wait_time_to_settle_from_filters",
     "x_loop_readout_flux",
 ]

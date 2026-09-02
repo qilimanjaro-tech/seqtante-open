@@ -21,7 +21,7 @@ from typing import Any
 from loguru import logger
 from qililab import Platform
 
-from seqtante_open.experiments.experiment_functions import experiment_functions_dict, ExperimentFunction
+from seqtante_open.experiments.experiment_functions import ExperimentFunction, experiment_functions_dict
 
 
 class CalibrationNode:
@@ -191,7 +191,7 @@ class CalibrationNode:
             )
             if isinstance(result, dict):
                 self.result.update(result)
-        except Exception as e:
+        except Exception as e:  # ruff: ignore[blind-except]
             logger.opt(exception=True).warning(str(e.__class__.__name__) + " " + str(e))
             logger.opt(colors=True).warning("Skipping calibration of target/s <r>{target}</>", target=targets)
             target_error = targets

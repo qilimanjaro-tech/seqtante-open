@@ -52,17 +52,19 @@ def correct_tof(xarr: DataArray, platform: Platform, tof: float | None = None):
     for ii, coord in enumerate(xarr.coords.values()):
         bus_name = coord.bus
         if bus_name in [bus.alias for bus in platform.buses]:
-
             instrument = platform.buses.get(alias=bus_name).instruments[0]
 
             # Skip if this isn't a readout bus
             if coord.parameter in ("IF_frequency", "LO_frequency", "frequency") and (
                 instrument.name == InstrumentName.QBLOX_QRM
-                or instrument.name == InstrumentName.QRMRF or instrument.name == InstrumentName.KEYSIGHT_E5080B
+                or instrument.name == InstrumentName.QRMRF
+                or instrument.name == InstrumentName.KEYSIGHT_E5080B
                 # TODO: add or instrument.name == InstrumentName.QUANTUM_MACHINES_CLUSTER
             ):
                 # Get time of flight in seconds
-                if tof is None and instrument.name != InstrumentName.KEYSIGHT_E5080B:  # TODO VNA does not have TOF parameter in runcard yet, when added in Qililab, update the functionality below accortdingly.
+                if (
+                    tof is None and instrument.name != InstrumentName.KEYSIGHT_E5080B
+                ):  # TODO VNA does not have TOF parameter in runcard yet, when added in Qililab, update the functionality below accortdingly.
                     tof = platform.get_parameter(bus_name, parameter=Parameter.TIME_OF_FLIGHT) * 1e-9
                 elif tof is None:
                     tof = 0.0  # No TOF correction for VNA
@@ -120,7 +122,9 @@ def auto_plot(
         for coord in coords.values():
             if coord.parameter == "IF_frequency":
                 bus = coord.bus
-                fixed_LO_freq = build_platform(cast("str", measurement.platform)).get_parameter(bus, parameter=Parameter.LO_FREQUENCY)  # type:ignore [arg-type]
+                fixed_LO_freq = build_platform(cast("str", measurement.platform)).get_parameter(
+                    bus, parameter=Parameter.LO_FREQUENCY
+                )  # type:ignore [arg-type]
 
     if len(coords) == 1:
         if plot_type == "line":
@@ -135,7 +139,6 @@ def auto_plot(
         )
 
     if len(coords) == 2:
-
         if x:
             xarr = xarr.transpose(..., x)
         elif y:
@@ -158,7 +161,6 @@ def auto_plot(
             xarr=xarr, title=title, fixed_LO_freq=fixed_LO_freq, dataprocessing=dataprocessing
         )
     if len(coords) == 3:
-
         if not any([x, y, z]):
             # We need to transpose here because x is used as the first dim for this type.
             for dim, coord in xarr.coords.items():
@@ -188,7 +190,5 @@ def auto_plot(
             return plot_measurement_3d_heatmap_slider_updated(
                 xarr=xarr, title=title, fixed_LO_freq=fixed_LO_freq, dataprocessing=dataprocessing
             )
-        return plot_measurement_3d_heatmap_grid_updated(
-            xarr=xarr, title=title, dataprocessing=dataprocessing
-        )
+        return plot_measurement_3d_heatmap_grid_updated(xarr=xarr, title=title, dataprocessing=dataprocessing)
     raise (Exception("4-dim and higher data is not supported for automatic plotting"))

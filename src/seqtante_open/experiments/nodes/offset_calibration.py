@@ -36,16 +36,16 @@ def single_tone_vs_flux(platform: Platform, platform_path: str, parameters: dict
     qubits = [target for target in targets if target.startswith("q")]
     couplers = [target for target in targets if target.startswith("c")]
 
-    readout_x_couplers = coupler_readout_qubit(couplers=couplers, coupler_readout_overwrite=parameters.get("coupler_readout_qubit", {}))
+    readout_x_couplers = coupler_readout_qubit(
+        couplers=couplers, coupler_readout_overwrite=parameters.get("coupler_readout_qubit", {})
+    )
     qubit_loops = acs.qubit_loops if (acs := platform.analog_compilation_settings) else 1
     coupler_loops = acs.coupler_loops if acs else 1
     db_manager = output_controller.db_manager
 
     calibration: Calibration = deserialize_from(parameters["calibration_path"], Calibration)
     if not isinstance(crosstalk := calibration.crosstalk_matrix, CrosstalkMatrix):
-        raise ValueError(
-            "To execute single_tone_vs_flux experiment, the Calibration needs to have a CrosstalkMatrix"
-        )
+        raise ValueError("To execute single_tone_vs_flux experiment, the Calibration needs to have a CrosstalkMatrix")
     platform.set_crosstalk(crosstalk=crosstalk)
 
     def _run_experiment(target: str, flux_bus: str, readout_bus: str, readout_flux: tuple[str, float] | None = None):
@@ -77,14 +77,11 @@ def single_tone_vs_flux(platform: Platform, platform_path: str, parameters: dict
             calibration=calibration_copy,
             flux_parameter=Parameter.FLUX,
             qubit_idx=target,
-            autocalibration=True
+            autocalibration=True,
         )
 
         model = FluxoniumSingleToneFluxModel(
-            cast("int", measurement_id),
-            target=target,
-            path=target_params["data_folder"] + flux_bus,
-            lo=LO
+            cast("int", measurement_id), target=target, path=target_params["data_folder"] + flux_bus, lo=LO
         )
         model.fit()
         model.plot()

@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, cast
 from copy import deepcopy
+from typing import Any, cast
 
 import numpy as np
 from qililab import save_platform
@@ -40,9 +40,7 @@ def single_tone_node(platform: Platform, platform_path: str, parameters: dict[st
 
     calibration: Calibration = deserialize_from(parameters["calibration_path"], Calibration)
     if not isinstance(crosstalk := calibration.crosstalk_matrix, CrosstalkMatrix):
-        raise ValueError(
-            "To execute single_tone_node experiment, the Calibration needs to have a CrosstalkMatrix"
-        )
+        raise ValueError("To execute single_tone_node experiment, the Calibration needs to have a CrosstalkMatrix")
     platform.set_crosstalk(crosstalk=crosstalk)
 
     platform.set_flux_to_zero()
@@ -73,7 +71,9 @@ def single_tone_node(platform: Platform, platform_path: str, parameters: dict[st
                 autocalibration=True,
             )
 
-            model = FluxoniumSingleToneModel(cast("int", measurement_id), target=qubit, path=target_params["data_folder"], lo=LO)
+            model = FluxoniumSingleToneModel(
+                cast("int", measurement_id), target=qubit, path=target_params["data_folder"], lo=LO
+            )
             model.fit()
             model.plot()
             platform.set_parameter(

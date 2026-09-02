@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
 from typing import cast
 
 import numpy as np
@@ -21,7 +20,6 @@ from qililab.typings.enums import Parameter
 
 from seqtante_open.experiments.fitting.fit_base import FittingClass
 from seqtante_open.experiments.plotting import plot_measurement_2d_heatmap_updated
-from seqtante_open.outputs import output_controller
 
 
 class FluxoniumSingleToneFluxModel(FittingClass):
@@ -145,7 +143,12 @@ class FluxoniumSingleToneFluxModel(FittingClass):
     def plot(self):
         title = f"Single Tone vs Flux \n {self.target} {self.flux_bus}"
         lo = self.lo if self.lo is not None else self._readout_lo()
-        fig = plot_measurement_2d_heatmap_updated(xarr=self.array.transpose(..., self.array.dims[0]), title=title + f" ID: {self.id}", fixed_LO_freq=lo, dataprocessing=self.decibels)
+        fig = plot_measurement_2d_heatmap_updated(
+            xarr=self.array.transpose(..., self.array.dims[0]),
+            title=title + f" ID: {self.id}",
+            fixed_LO_freq=lo,
+            dataprocessing=self.decibels,
+        )
         fig.add_scatter(
             x=self.per_trace,
             y=self.frequencies,
@@ -155,7 +158,9 @@ class FluxoniumSingleToneFluxModel(FittingClass):
             marker={"size": 4},
         )
         fig.add_vline(
-            x=self.center, line={"color": "red", "dash": "dot", "width": 4}, annotation_text=f"Median Center = {self.center:.4f}"
+            x=self.center,
+            line={"color": "red", "dash": "dot", "width": 4},
+            annotation_text=f"Median Center = {self.center:.4f}",
         )
         fig.update_layout(
             legend={"x": 0.02, "y": 0.98, "xanchor": "left", "yanchor": "top", "bgcolor": "rgba(0,0,0,0.2)"},
