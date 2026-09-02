@@ -48,7 +48,7 @@ class FluxoniumTwoToneModel(FittingClass):
             ``None`` it is read from the runcard stored with the measurement.
     """
 
-    results: dict[str, dict[str, float | np.ndarray]]
+    results: dict[str, dict[str, float]]
 
     def __init__(
         self, measurement_id: int, target: str | None = None, path: str | None = None, lo: float | None = None
@@ -74,7 +74,7 @@ class FluxoniumTwoToneModel(FittingClass):
 
     def _drive_lo(self) -> float:
         """Drive-bus LO frequency in Hz, taken from the runcard stored with the measurement."""
-        platform = build_platform(cast("dict", self.measurement.platform_before))
+        platform = build_platform(cast("str", self.measurement.platform_before))
         return platform.get_parameter(alias=self.drive_bus, parameter=Parameter.LO_FREQUENCY)
 
     def fit(self):
@@ -135,7 +135,7 @@ class FluxoniumTwoToneModel(FittingClass):
                 row=1,
                 col=col,
             )
-            fitted_if_mhz = cast("float", res["fitted_if"]) * 1e-6
+            fitted_if_mhz = res["fitted_if"] * 1e-6
             fig.add_trace(
                 go.Scatter(
                     x=[fitted_if_mhz, fitted_if_mhz],

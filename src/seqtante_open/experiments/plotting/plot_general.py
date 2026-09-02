@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Callable
+from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 import plotly.express as px
@@ -23,10 +23,19 @@ from xarray import DataArray, apply_ufunc
 from seqtante_open.experiments.analysis import decibels
 
 
+@runtime_checkable
+class DataProcessing(Protocol):
+    """A data-processing callable whose ``__name__`` is used to label the plotted quantity."""
+
+    __name__: str
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
+
+
 def plot_measurement_1d_line_updated(
     xarr: DataArray,
     title: str,
-    dataprocessing: Callable | None = None,
+    dataprocessing: DataProcessing | None = None,
     fixed_LO_freq: float | None = None,
 ):
 
@@ -373,7 +382,7 @@ def plot_measurement_1d_freq_updated(
 
 
 def plot_measurement_2d_heatmap_updated(
-    xarr: DataArray, title: str, fixed_LO_freq: float | None = None, dataprocessing: Callable | None = None
+    xarr: DataArray, title: str, fixed_LO_freq: float | None = None, dataprocessing: DataProcessing | None = None
 ):
 
     if dataprocessing:
@@ -458,7 +467,7 @@ def plot_measurement_2d_heatmap_updated(
 
 
 def plot_measurement_2d_line_updated(
-    xarr: DataArray, title: str, fixed_LO_freq: float | None = None, dataprocessing: Callable | None = None
+    xarr: DataArray, title: str, fixed_LO_freq: float | None = None, dataprocessing: DataProcessing | None = None
 ):
 
     # xarr = convert_plot_units(xarr)
@@ -540,7 +549,7 @@ def plot_measurement_2d_line_updated(
 
 
 def plot_measurement_3d_heatmap_slider_updated(
-    xarr: DataArray, title: str, fixed_LO_freq: float | None = None, dataprocessing: Callable | None = None
+    xarr: DataArray, title: str, fixed_LO_freq: float | None = None, dataprocessing: DataProcessing | None = None
 ):
 
     # xarr = convert_plot_units(xarr)
@@ -631,7 +640,7 @@ def plot_measurement_3d_heatmap_slider_updated(
 
 def plot_measurement_3d_heatmap_grid_updated(xarr: DataArray,
                                              title: str,
-                                             dataprocessing: Callable | None = None):
+                                             dataprocessing: DataProcessing | None = None):
 
     if len(xarr[xarr.dims[2]]) > 10:  # we have this here for now to not make it crash
         xarr = xarr[:, :, :30]

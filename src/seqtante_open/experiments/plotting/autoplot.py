@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Callable
+from typing import cast
 
 import numpy as np
 from qililab.data_management import build_platform
@@ -33,6 +33,7 @@ from seqtante_open.experiments.plotting import (
     plot_measurement_3d_heatmap_slider_updated,
     plot_two_tone_readout_optimization,
 )
+from seqtante_open.experiments.plotting.plot_general import DataProcessing
 
 
 def correct_tof(xarr: DataArray, platform: Platform, tof: float | None = None):
@@ -90,7 +91,7 @@ def auto_plot(
     y: str | None = None,
     z: str | None = None,
     xarr: DataArray | None = None,
-    dataprocessing: Callable | None = decibels,
+    dataprocessing: DataProcessing | None = decibels,
     tof: int | None = None,
     unwrap: bool = False,
 ):
@@ -104,7 +105,7 @@ def auto_plot(
         xarr = correct_tof(xarr, platform=build_platform(measurement.platform), tof=tof)  # type: ignore
 
     xarr = convert_plot_units(xarr)
-    coords = xarr.coords  # type: ignore
+    coords = xarr.coords
 
     title = (
         f"{measurement.experiment_name}, id = {measurement.measurement_id}"
@@ -119,7 +120,7 @@ def auto_plot(
         for coord in coords.values():
             if coord.parameter == "IF_frequency":
                 bus = coord.bus
-                fixed_LO_freq = build_platform(measurement.platform).get_parameter(bus, parameter=Parameter.LO_FREQUENCY)  # type:ignore [arg-type]
+                fixed_LO_freq = build_platform(cast("str", measurement.platform)).get_parameter(bus, parameter=Parameter.LO_FREQUENCY)  # type:ignore [arg-type]
 
     if len(coords) == 1:
         if plot_type == "line":
@@ -136,20 +137,20 @@ def auto_plot(
     if len(coords) == 2:
 
         if x:
-            xarr = xarr.transpose(..., x)  # type: ignore
+            xarr = xarr.transpose(..., x)
         elif y:
-            xarr = xarr.transpose(y, ...)  # type: ignore
+            xarr = xarr.transpose(y, ...)
         else:
-            for dim, coord in xarr.coords.items():  # type: ignore
+            for dim, coord in xarr.coords.items():
                 if plot_type == "line":
                     # We want different default dims for frequency, depending on iof it is a line plot or heatmap
-                    xarr = xarr.transpose(..., dim)  # type: ignore
+                    xarr = xarr.transpose(..., dim)
                 else:
-                    xarr = xarr.transpose(dim, ...)  # type: ignore
+                    xarr = xarr.transpose(dim, ...)
                 break
 
         if plot_type == "line":
-            xarr = xarr.transpose()  # type: ignore
+            xarr = xarr.transpose()
             return plot_measurement_2d_line_updated(
                 xarr=xarr, title=title, fixed_LO_freq=fixed_LO_freq, dataprocessing=dataprocessing
             )
@@ -160,16 +161,16 @@ def auto_plot(
 
         if not any([x, y, z]):
             # We need to transpose here because x is used as the first dim for this type.
-            for dim, coord in xarr.coords.items():  # type: ignore
+            for dim, coord in xarr.coords.items():
                 if getattr(coord, "parameter", None) in ("IF_frequency", "LO_frequency"):
                     y_dim = dim
-                    z_dim = min(xarr.sizes, key=xarr.sizes.get)  # type: ignore
-                    remaining = [d for d in xarr.dims if d not in (y_dim, z_dim)]  # type: ignore
+                    z_dim = min(xarr.sizes, key=xarr.sizes.get)
+                    remaining = [d for d in xarr.dims if d not in (y_dim, z_dim)]
                     if len(remaining) != 1:
                         raise ValueError(f"Cannot determine unique x dimension. Remaining: {remaining}")
                     x_dim = remaining[0]
                     # Transpose in correct order: y (rows), x (cols), z (slider)
-                    xarr = xarr.transpose(y_dim, x_dim, z_dim)  # type: ignore
+                    xarr = xarr.transpose(y_dim, x_dim, z_dim)
                     break
 
         elif [x, y, z].count(None) > 1:
@@ -181,7 +182,7 @@ def auto_plot(
                 if not dim:
                     dim = ...
                 t_list.append(dim)
-            xarr = xarr.transpose(*t_list)  # type: ignore
+            xarr = xarr.transpose(*t_list)
 
         if plot_type == "slider":
             return plot_measurement_3d_heatmap_slider_updated(

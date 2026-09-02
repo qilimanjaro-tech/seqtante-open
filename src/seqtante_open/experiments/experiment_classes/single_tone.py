@@ -14,6 +14,8 @@
 
 """Single-tone drivers, copied from ``qilitools.experiments.single_tone``."""
 
+from typing import cast
+
 import numpy as np
 from qililab import Calibration, Parameter
 from qililab.platform import Platform
@@ -132,7 +134,7 @@ def single_tone__frequency_vs_flux(
 
     with stream_array:
         if flux_parameter is Parameter.VOLTAGE:
-            results = platform.execute_qprogram(  # type: ignore [call-arg]
+            results = platform.execute_qprogram(
                 qprogram,
                 bus_mapping={"readout": readout_bus, "flux": flux_bus},
                 calibration=calibration,
@@ -143,7 +145,7 @@ def single_tone__frequency_vs_flux(
                 qprogram, bus_mapping={"readout": readout_bus, "flux": flux_bus}, calibration=calibration
             ).results
         stream_array[()] = results[readout_bus][0].array.transpose(1, 2, 0)
-    return stream_array.measurement.measurement_id if stream_array.measurement is not None else None  # type: ignore [return-value]
+    return cast("int", stream_array.measurement.measurement_id) if stream_array.measurement is not None else None
 
 
 def single_tone__frequency_sweep(
@@ -213,4 +215,4 @@ def single_tone__frequency_sweep(
     with stream_array:
         results = platform.execute_qprogram(qprogram, bus_mapping={"readout": readout_bus}).results
         stream_array[()] = results[readout_bus][0].array.T
-    return stream_array.measurement.measurement_id if stream_array.measurement is not None else None
+    return cast("int", stream_array.measurement.measurement_id) if stream_array.measurement is not None else None

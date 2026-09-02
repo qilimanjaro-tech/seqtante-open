@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from copy import deepcopy
 from itertools import product
 from typing import Any, cast
-from copy import deepcopy
 
 import numpy as np
 from qililab.platform.platform import Platform
