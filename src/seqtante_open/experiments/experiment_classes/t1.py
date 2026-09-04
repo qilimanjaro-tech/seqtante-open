@@ -51,15 +51,14 @@ def t1_saturation(
     autocalibration: bool = False,
     calibration: Calibration | None = None,
 ) -> int | None:
-    """T1 measured via a saturation pulse, ramping the drive bias via QDAC soft steps rather
-    than a hardware wait-time loop.
+    """T1 measured via a saturation pulse.
 
     Args:
         platform: Qililab platform to execute on.
         db_manager: Database manager for result storage.
         readout_bus: Physical alias of the readout bus.
         drive_bus: Physical alias of the drive bus.
-        wait_sweep: Idle (wait) durations to sweep over via the QDAC soft-step ramp.
+        wait_sweep: Idle (wait) between exiting the qubit and the readout.
         drive_if: Intermediate frequency (Hz) for the drive tone.
         drive_step_duration: Duration (ns) of the drive step.
         drive_amplitude: Amplitude of the drive pulse.
@@ -110,8 +109,12 @@ def t1_saturation(
         platform.set_parameter(alias=readout_bus, parameter=Parameter.LO_FREQUENCY, value=readout_lo)
 
     instrument_platform = next(
-        instrument_name for instrument_platform in platform.get_element(drive_bus).instruments
-        if (instrument_name := instrument_platform.name.name) in ["ROHDE_SCHWARZ", "QCMRF"]
+        (
+            instrument_name
+            for instrument_platform in platform.get_element(drive_bus).instruments
+            if (instrument_name := instrument_platform.name.name) in ["ROHDE_SCHWARZ", "QCMRF"]
+        ),
+        None,
     )
     if instrument_platform is not None:
         if instrument_platform == "ROHDE_SCHWARZ":

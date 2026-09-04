@@ -64,7 +64,9 @@ def t1_saturation(
         logger.warning(f"Positive overlap capped to max_overlap = {max_overlap:.0f} ns")
     eff_overlap = min(overlap, max_overlap)
 
-    smooth_rup, d_smooth_rup, _ = smooth_ringup_wf(duration=4 * drive_rise_time, n_sigmas=n_sigmas, amplitude=drive_amplitude)
+    smooth_rup, d_smooth_rup, _ = smooth_ringup_wf(
+        duration=4 * drive_rise_time, n_sigmas=n_sigmas, amplitude=drive_amplitude
+    )
     # The shape of the pulses is introduced here
     wf_I = Square(amplitude=readout_amplitude, duration=readout_duration)
     wf_Q = Square(amplitude=0, duration=readout_duration)
