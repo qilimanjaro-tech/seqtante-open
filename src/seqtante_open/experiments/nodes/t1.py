@@ -45,9 +45,7 @@ def t1_node(platform: Platform, platform_path: str, parameters: dict[str, Any]):
 
     calibration: Calibration = deserialize_from(parameters["calibration_path"], Calibration)
     if not isinstance(crosstalk := calibration.crosstalk_matrix, CrosstalkMatrix):
-        raise ValueError(
-            "To execute single_tone_vs_flux_fluxonium experiment, the Calibration needs to have a CrosstalkMatrix"
-        )
+        raise ValueError("To execute t1_saturation experiment, the Calibration needs to have a CrosstalkMatrix")
     platform.set_crosstalk(crosstalk=crosstalk)
 
     platform.set_flux_to_zero()

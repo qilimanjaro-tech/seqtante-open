@@ -26,5 +26,6 @@ __all__ = [
     "FluxoniumSingleToneModel",
     "FluxoniumTwoToneFluxModel",
     "FluxoniumTwoToneModel",
+    "T1Fit",
     "cosfunc",
 ]

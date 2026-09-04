@@ -26,7 +26,6 @@ jobs:
       CA_DOMAIN: qilimanjaro
       CA_DOMAIN_OWNER: "723412851021"
       CA_REGION: eu-west-1
-      COVERAGE_PYTHON: "3.13"
 
     permissions:
       contents: read
@@ -35,9 +34,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # A PR runs the oldest and the newest version we support and main fills in
-        # the middle. COVERAGE_PYTHON is the one that measures and uploads coverage;
-        # the env context is not available here, so it has to be spelled out.
         python-version: ${{ github.event_name == 'push' && fromJSON('["3.11", "3.12", "3.13"]') || fromJSON('["3.11", "3.13"]') }}
 
     steps:
@@ -103,7 +99,6 @@ jobs:
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Run tests
-        if: matrix.python-version != env.COVERAGE_PYTHON
         run: pytest -n auto --dist loadfile tests
 
   all-tests:
