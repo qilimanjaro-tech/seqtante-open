@@ -61,5 +61,5 @@ class TestFluxoniumSingleToneModel(FittingTestCase):
     DATA = make_single_tone_data
     INIT = {"measurement_id": 1, "target": "q1"}
     EXPECTED = {
-        "results.signal.fitted_if": pytest.approx(RESONANCE_IF, abs=FREQ_STEP),
+        "results.fitted_if": pytest.approx(RESONANCE_IF, abs=FREQ_STEP),
     }

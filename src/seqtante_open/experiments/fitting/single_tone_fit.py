@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import cast
+from typing import TypedDict, cast
 
 import numpy as np
 import plotly.graph_objects as go
@@ -20,6 +20,11 @@ from qililab.data_management import build_platform
 from qililab.typings.enums import Parameter
 
 from seqtante_open.experiments.fitting.fit_base import FittingClass
+
+
+class _SingleToneResults(TypedDict, total=False):
+    magnitude: np.ndarray[tuple[int], np.dtype[np.floating]]
+    fitted_if: float
 
 
 class FluxoniumSingleToneModel(FittingClass):
@@ -40,7 +45,7 @@ class FluxoniumSingleToneModel(FittingClass):
             ``None`` it is read from the runcard stored with the measurement.
     """
 
-    results: dict[str, dict[str, float | np.ndarray]]
+    results: _SingleToneResults
 
     def __init__(
         self, measurement_id: int, target: str | None = None, path: str | None = None, lo: float | None = None
@@ -59,7 +64,7 @@ class FluxoniumSingleToneModel(FittingClass):
 
     def _readout_lo(self) -> float:
         """Readout-bus LO frequency in Hz, taken from the runcard stored with the measurement."""
-        platform = build_platform(cast("str", self.measurement.platform_before))
+        platform = build_platform(cast("dict", self.measurement.platform_before))
         return platform.get_parameter(alias=self.readout_bus, parameter=Parameter.LO_FREQUENCY)
 
     def fit(self):
@@ -70,7 +75,7 @@ class FluxoniumSingleToneModel(FittingClass):
         """
         magnitude = self.decibels(self.s21)
         fitted_if = self.frequencies[np.argmin(magnitude)]
-        self.results = {"signal": {"fitted_if": fitted_if, "magnitude": magnitude}}
+        self.results = {"fitted_if": fitted_if, "magnitude": magnitude}
 
         return fitted_if
 
@@ -81,8 +86,8 @@ class FluxoniumSingleToneModel(FittingClass):
 
         title = f"Single Tone {self.target}"
         lo = self.lo if self.lo is not None else self._readout_lo()
-        fitted_if = cast("float", self.results["signal"]["fitted_if"])
-        magnitude = cast("np.ndarray", self.results["signal"]["magnitude"])
+        fitted_if = self.results["fitted_if"]
+        magnitude = self.results["magnitude"]
         resonance_ghz = (fitted_if + lo) * 1e-9
 
         fig = go.Figure(

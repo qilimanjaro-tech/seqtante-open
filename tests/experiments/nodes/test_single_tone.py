@@ -71,10 +71,7 @@ def _fit_model() -> MagicMock:
     reads ``model.results["signal"]["fitted_if"]`` to update the readout bus.
     """
     model = MagicMock(name="FluxoniumSingleToneModel")
-    model.results = {
-        "signal": {"fitted_if": FITTED_IF, "fit_values": np.zeros(21), "r_squared": 0.99},
-        "noise": {"fitted_if": 0.0, "fit_values": np.zeros(21), "r_squared": 0.01},
-    }
+    model.results = {"fitted_if": FITTED_IF, "magnitude": np.zeros(21)}
     return model
 
 

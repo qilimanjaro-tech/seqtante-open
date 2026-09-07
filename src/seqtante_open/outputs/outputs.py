@@ -11,12 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 import json
 import os
 import sys
 from datetime import datetime
 from enum import Enum
+from functools import wraps
 from importlib.resources import files
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
@@ -41,8 +41,10 @@ SINKS = {
 
 FILTERS = {
     "lt_warning": lambda r: r["level"].no < logger.level("WARNING").no,
-    "seqtante": lambda r: r["name"].startswith("seqtante."),
-    "lt_warning_seqtante": lambda r: r["name"].startswith("seqtante.") and r["level"].no < logger.level("WARNING").no,
+    "seqtante_open": lambda r: r["name"].startswith("seqtante_open."),
+    "lt_warning_seqtante_open": lambda r: (
+        r["name"].startswith("seqtante_open.") and r["level"].no < logger.level("WARNING").no
+    ),
 }
 
 
@@ -131,11 +133,22 @@ class CalibrationData:
         self._data[target_str][parameter.value] = float(value)
 
 
+def _requires_initialized(fn):
+    @wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if not self._initialized:
+            raise AttributeError("Output has not been initialized. Use `Outputs.reset` to initialize.")
+        return fn(self, *args, **kwargs)
+
+    return wrapper
+
+
 class Outputs:
     def __init__(self):
         self._initialize()
 
     def _initialize(self):
+        self._initialized = False
         self._calibration_data: CalibrationData | None = None
 
         self._db_manager: DatabaseManager | None = None
@@ -149,12 +162,13 @@ class Outputs:
     def reset(self, storage_conf: StorageConf | None = None):
         self._initialize()
         self.storage_conf = storage_conf or {}
-        if storage_conf is not None:
-            self._storage_path = self._create_storage_path()
+        self._initialized = True
+        self._storage_path = self._create_storage_path()
         self._db_manager = self._create_db_manager()
         self._calibration_data = self._create_calibration_data()
 
     @property
+    @_requires_initialized
     def storage_path(self) -> str:
         if self._storage_path is None:
             self._storage_path = self._create_storage_path()
@@ -176,6 +190,7 @@ class Outputs:
         return storage_path
 
     @property
+    @_requires_initialized
     def db_manager(self) -> DatabaseManager:
         if self._db_manager is None:
             self._db_manager = self._create_db_manager()
@@ -197,6 +212,7 @@ class Outputs:
         )
 
     @property
+    @_requires_initialized
     def calibration_data(self) -> CalibrationData:
         if self._calibration_data is None:
             self._calibration_data = self._create_calibration_data()
@@ -239,7 +255,7 @@ class Outputs:
         Returns:
             list[int]
         """
-        config = self.storage_conf.get("log_config", {})
+        config = self.storage_conf.get("log_config", None) or {}
         try:
             file_dir = config.get("file_dir")
             path = Path(file_dir) if file_dir else DEFAULT_LOG_CONFIG
@@ -259,7 +275,7 @@ class Outputs:
             params: dict[str, Any] = dict(h)
 
             # Map sinks. If log directory starts with "SEQTANTE_FOLDER", "SEQTANTE_FOLDER" is substituted by the data folder
-            sink = params.get("sink", "stderr")
+            sink = params.get("sink")
             if isinstance(sink, str):
                 if sink in SINKS:
                     params["sink"] = SINKS[sink]
@@ -269,7 +285,7 @@ class Outputs:
             # Map filters to callables
             filt = params.get("filter")
             if isinstance(filt, str) and filt.lower() in FILTERS:
-                params["filter"] = FILTERS[filt]
+                params["filter"] = FILTERS[filt.lower()]
 
             params.pop("name", None)
             handlers.append(params)
@@ -277,7 +293,8 @@ class Outputs:
         EXTRAS = {"CALIBRATION_ID": self.calibration_id, "GENERATED_UUID": uuid4()}
 
         extra_cfg: dict[str, Any] = {
-            k.lower() if k in EXTRAS else k: EXTRAS[k] if k in EXTRAS else v for k, v in cfg.get("extra", {}).items()
+            k.lower() if k in EXTRAS else k: EXTRAS[k] if k in EXTRAS else v
+            for k, v in (cfg.get("extra") or {}).items()
         }
 
         return logger.configure(

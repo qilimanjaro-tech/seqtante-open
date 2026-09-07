@@ -14,7 +14,7 @@
 
 from copy import deepcopy
 from itertools import product
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 from qililab.platform.platform import Platform
@@ -81,7 +81,7 @@ def single_tone_vs_flux(platform: Platform, platform_path: str, parameters: dict
         )
 
         model = FluxoniumSingleToneFluxModel(
-            cast("int", measurement_id), target=target, path=target_params["data_folder"] + flux_bus, lo=LO
+            measurement_id, target=target, path=target_params["data_folder"] + flux_bus, lo=LO
         )
         model.fit()
         model.plot()
