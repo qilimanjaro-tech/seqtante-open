@@ -62,21 +62,20 @@ def correct_tof(xarr: DataArray, platform: Platform, tof: float | None = None):
                 # TODO: add or instrument.name == InstrumentName.QUANTUM_MACHINES_CLUSTER
             ):
                 # Get time of flight in seconds
-                if (
-                    tof is None and instrument.name != InstrumentName.KEYSIGHT_E5080B
-                ):  # TODO VNA does not have TOF parameter in runcard yet, when added in Qililab, update the functionality below accortdingly.
+                if tof is None and instrument.name != InstrumentName.KEYSIGHT_E5080B:
                     tof = platform.get_parameter(bus_name, parameter=Parameter.TIME_OF_FLIGHT) * 1e-9
                 elif tof is None:
-                    tof = 0.0  # No TOF correction for VNA
+                    tof = (platform.get_parameter(bus_name, parameter=Parameter.ELECTRICAL_DELAY) or 0.0) * 1e-9
                 else:
-                    tof = tof * 1e-9  # Convert from ns to seconds if user-provided
+                    # Convert from ns to seconds if user-provided
+                    tof = tof * 1e-9
 
                 # Get frequency array
                 freq = xarr.coords[xarr.dims[ii]].values
 
                 if coord.parameter == "LO_frequency" or coord.parameter == "frequency":
                     phase = np.exp(2j * np.pi * freq * tof)
-                else:  # IF frequency
+                else:
                     LO_freq = platform.get_parameter(bus_name, parameter=Parameter.LO_FREQUENCY)
                     phase = np.exp(2j * np.pi * (freq + LO_freq) * tof)
 
