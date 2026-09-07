@@ -27,6 +27,7 @@ class T1Fit(FittingClass):
         measurement_id (int): ID of the measurement to fit.
         path (str | None, optional): Directory where the plot is saved. If None, the plot is shown. Defaults to None.
     """
+
     T1: int
     results: np.ndarray | None
 

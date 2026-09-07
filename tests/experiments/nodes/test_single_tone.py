@@ -71,10 +71,7 @@ def _fit_model() -> MagicMock:
     reads ``model.results["signal"]["fitted_if"]`` to update the readout bus.
     """
     model = MagicMock(name="FluxoniumSingleToneModel")
-    model.results = {
-        "signal": {"fitted_if": FITTED_IF, "fit_values": np.zeros(21), "r_squared": 0.99},
-        "noise": {"fitted_if": 0.0, "fit_values": np.zeros(21), "r_squared": 0.01},
-    }
+    model.results = {"fitted_if": FITTED_IF, "magnitude": np.zeros(21)}
     return model
 
 
@@ -123,7 +120,7 @@ def test_basic_parameters(run_experiment):
 
     calls = recorder.calls[FN]
     assert len(calls) == 2, f"Expected {FN} to be called once per qubit"
-    assert all(c["kwargs"]["readout_amplitude"] == 0.075 for c in calls)
+    assert all(c["kwargs"]["readout_amplitude"] == pytest.approx(0.075) for c in calls)
     assert all(c["kwargs"]["averages"] == 4000 for c in calls)
     assert all(c["kwargs"]["readout_duration"] == 2000 for c in calls)
     assert all(c["kwargs"]["relax_duration"] == 200_000 for c in calls)
@@ -166,7 +163,7 @@ def test_per_target_overwrite_reaches_execution(run_experiment):
     assert calls, f"Expected {FN} to be called"
 
     (q1_call,) = [c for c in calls if c["kwargs"]["qubit_idx"] == "q1"]
-    assert q1_call["kwargs"]["readout_amplitude"] == 0.05
+    assert q1_call["kwargs"]["readout_amplitude"] == pytest.approx(0.05)
     assert q1_call["kwargs"]["readout_duration"] == 3000
     assert q1_call["kwargs"]["averages"] == 1500
     np.testing.assert_allclose(
@@ -174,7 +171,7 @@ def test_per_target_overwrite_reaches_execution(run_experiment):
     )
 
     (q2_call,) = [c for c in calls if c["kwargs"]["qubit_idx"] == "q2"]
-    assert q2_call["kwargs"]["readout_amplitude"] == 0.075
+    assert q2_call["kwargs"]["readout_amplitude"] == pytest.approx(0.075)
     assert q2_call["kwargs"]["readout_duration"] == 2000
     assert q2_call["kwargs"]["averages"] == 4000
     assert len(q2_call["kwargs"]["if_sweep"]) == 21
@@ -198,7 +195,7 @@ def test_overwrite_does_not_mutate_shared_parameters(run_experiment):
 
     run_experiment(parameters)
 
-    assert parameters["readout_amplitude"] == 0.075
+    assert parameters["readout_amplitude"] == pytest.approx(0.075)
     assert parameters["q1"] == {"readout_amplitude": 0.9}
 
 

@@ -54,8 +54,8 @@ class CalibrationParser:
         return reduce(dict.__or__, dicts, {})
 
     @staticmethod
-    def _get_overwrites(target: str, overwrites: list[dict[str, Any]]) -> dict[str, Any] | None:
-        """Returns the overwrite if the target is the target of any overwrite, if not it returns None.
+    def _get_overwrites(target: str, overwrites: list[dict[str, Any]]) -> dict[str, Any]:
+        """Returns the overwrite if the target is the target of any overwrite.
         Fuses overwrites, if a parameter is overwritten multiple times only the last instance of that parameter is used
         """
         overwrite_list = []

@@ -51,10 +51,10 @@ import h5py
 import matplotlib as mpl
 import numpy as np
 import pytest
-import seqtante_open
 from qililab.result.result_management import load_results
 from ruamel.yaml import YAML
 
+import seqtante_open
 from seqtante_open.experiments.fitting.fit_base import FittingClass
 from seqtante_open.outputs import output_controller
 
@@ -362,6 +362,7 @@ class FittingTestCase:
         db_manager.load_calibration_by_id.return_value = measurement
 
         monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(output_controller, "_initialized", True)
         monkeypatch.setattr(output_controller, "_db_manager", db_manager)
         monkeypatch.setattr(output_controller, "store_parameter", lambda **_: None)
         yield db_manager

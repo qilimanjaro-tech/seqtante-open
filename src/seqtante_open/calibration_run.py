@@ -16,15 +16,18 @@
 
 import time
 import warnings
+from typing import TYPE_CHECKING
 
 from loguru import logger
 from qcodes.utils.deprecate import QCoDeSDeprecationWarning
 from qililab.data_management import build_platform
-from qililab.platform.platform import Platform
 from ruamel.yaml import YAML
 
 from seqtante_open.controllers import CalibrationGraph, CalibrationParser
 from seqtante_open.outputs import output_controller
+
+if TYPE_CHECKING:
+    from qililab.platform.platform import Platform
 
 warnings.filterwarnings("ignore", category=QCoDeSDeprecationWarning)
 warnings.filterwarnings("ignore", message="Using UFloat objects with std_dev==0*")

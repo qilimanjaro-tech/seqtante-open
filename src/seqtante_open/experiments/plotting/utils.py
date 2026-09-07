@@ -24,14 +24,16 @@ from scipy.signal import firwin, lfilter
 from tqdm.auto import tqdm
 from xarray import DataArray
 
-from .processing_vector import subtract_median
 from .processing_phase import phase
+from .processing_vector import subtract_median
 
 # kaleido_get_chrome #NOTE look into if this code can be run without running this command. Potentially by using an earlier version.
+
 
 def center_phase_around_median(S21):
     centered = np.apply_along_axis(subtract_median, axis=0, arr=phase(S21))
     return ((centered + np.pi) % (2 * np.pi)) - np.pi
+
 
 def get_xarray_from_meas(measurement: Measurement):
     results, loops = measurement.load_old_h5()
@@ -194,7 +196,7 @@ def plotly_slider_to_gif(
     Export a Plotly slider/animation figure to GIF, advancing the slider's active index
     and drawing a per-frame label (annotation and/or title).
     """
-    # Make mypy aware that fig.frames is a sequence of go.Frame
+
     frames_obj = fig.frames
     frames = cast("Sequence[go.Frame]", frames_obj)
     if not frames:
@@ -214,18 +216,14 @@ def plotly_slider_to_gif(
         base_labels = cast("Sequence[Union[str, float, int]]", inferred)
 
     if len(base_labels) != len(all_frames):
-        raise ValueError(
-            f"labels length ({len(base_labels)}) must match number of frames ({len(all_frames)})."
-        )
+        raise ValueError(f"labels length ({len(base_labels)}) must match number of frames ({len(all_frames)}).")
 
     if len(base_labels) != len(all_frames):
-        raise ValueError(
-            f"labels length ({len(base_labels)}) must match number of frames ({len(all_frames)})."
-        )
+        raise ValueError(f"labels length ({len(base_labels)}) must match number of frames ({len(all_frames)}).")
 
     def _fmt_label(val: Union[str, float, int], i: int) -> str:
         if callable(label_formatter):
-            return str(label_formatter(val, i))
+            return str(label_formatter(val, i))  # ty: ignore[call-top-callable]
         if isinstance(label_formatter, str):
             return label_formatter.format(label=val, i=i)
         return str(val)
