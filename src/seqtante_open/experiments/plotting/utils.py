@@ -194,7 +194,7 @@ def plotly_slider_to_gif(
     Export a Plotly slider/animation figure to GIF, advancing the slider's active index
     and drawing a per-frame label (annotation and/or title).
     """
-    # Make mypy aware that fig.frames is a sequence of go.Frame
+
     frames_obj = fig.frames
     frames = cast("Sequence[go.Frame]", frames_obj)
     if not frames:
@@ -225,7 +225,7 @@ def plotly_slider_to_gif(
 
     def _fmt_label(val: Union[str, float, int], i: int) -> str:
         if callable(label_formatter):
-            return str(label_formatter(val, i))
+            return str(label_formatter(val, i))  # ty: ignore[call-top-callable]
         if isinstance(label_formatter, str):
             return label_formatter.format(label=val, i=i)
         return str(val)

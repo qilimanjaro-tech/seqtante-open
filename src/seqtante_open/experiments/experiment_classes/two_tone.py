@@ -12,12 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import cast
 from warnings import warn
 
 import numpy as np
 from qililab import Calibration, Parameter
 from qililab.platform import Platform
-from qililab.result import DatabaseManager, StreamArray
+from qililab.result import AutocalMeasurement, DatabaseManager, StreamArray
 
 from seqtante_open.experiments.analysis import sss_from_array
 from seqtante_open.experiments.qprogram import two_tone_spectroscopy
@@ -100,9 +101,8 @@ def two_tone_frequency(
     for instrument in platform.get_element(drive_bus).instruments:
         if instrument.name.name == "ROHDE_SCHWARZ":
             platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=False)
-    id = stream_array.measurement.measurement_id if stream_array.measurement is not None else None
 
-    return id
+    return cast("int", cast("AutocalMeasurement", stream_array.measurement).measurement_id)
 
 
 def two_tone__frequency_vs_flux(
@@ -201,6 +201,5 @@ def two_tone__frequency_vs_flux(
     for instrument in platform.get_element(drive_bus).instruments:
         if instrument.name.name == "ROHDE_SCHWARZ":
             platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=False)
-    id = stream_array.measurement.measurement_id if stream_array.measurement is not None else None
 
-    return id
+    return cast("int", cast("AutocalMeasurement", stream_array.measurement).measurement_id)

@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from copy import deepcopy
 from itertools import product
 from typing import Any, cast
-from copy import deepcopy
 
 import numpy as np
 from qililab.platform.platform import Platform
@@ -81,7 +81,7 @@ def single_tone_vs_flux(platform: Platform, platform_path: str, parameters: dict
         )
 
         model = FluxoniumSingleToneFluxModel(
-            cast("int", measurement_id),
+            measurement_id,
             target=target,
             path=target_params["data_folder"] + flux_bus,
             lo=LO

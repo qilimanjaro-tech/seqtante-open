@@ -12,8 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-from typing import cast
+from typing import TypedDict, cast
 
 import numpy as np
 import plotly.graph_objects as go
@@ -28,6 +27,12 @@ _QUADRATURE_LABELS = {
     "signal": "Signal quadrature (rotated)",
     "noise": "Noise quadrature (orthogonal)",
 }
+
+
+class _TwoToneResults(TypedDict, total=False):
+    fitted_if: float
+    fit_values: np.ndarray
+    r_squared: float
 
 
 class FluxoniumTwoToneModel(FittingClass):
@@ -48,7 +53,7 @@ class FluxoniumTwoToneModel(FittingClass):
             ``None`` it is read from the runcard stored with the measurement.
     """
 
-    results: dict[str, dict[str, float | np.ndarray]]
+    results: dict[str, _TwoToneResults]
 
     def __init__(
         self, measurement_id: int, target: str | None = None, path: str | None = None, lo: float | None = None
@@ -107,7 +112,7 @@ class FluxoniumTwoToneModel(FittingClass):
 
         for col, (quadrature, values) in enumerate(self.quadratures.items(), start=1):
             res = self.results[quadrature]
-            fit_values = cast("np.ndarray", res["fit_values"])
+            fit_values = res["fit_values"]
             fig.add_trace(
                 go.Scatter(
                     x=frequencies_mhz,
@@ -135,7 +140,7 @@ class FluxoniumTwoToneModel(FittingClass):
                 row=1,
                 col=col,
             )
-            fitted_if_mhz = cast("float", res["fitted_if"]) * 1e-6
+            fitted_if_mhz = res["fitted_if"] * 1e-6
             fig.add_trace(
                 go.Scatter(
                     x=[fitted_if_mhz, fitted_if_mhz],

@@ -27,6 +27,9 @@ The experiments seqtante-open ships:
 
 Register each here as it lands.
 """
+from typing import Any, Protocol
+
+from qililab import Platform
 
 from seqtante_open.experiments.nodes import (
     single_tone_node,
@@ -35,7 +38,18 @@ from seqtante_open.experiments.nodes import (
     two_tone_node,
 )
 
-experiment_functions_dict: dict = {
+
+class ExperimentFunction(Protocol):
+    """Signature every experiment in the registry must implement.
+
+    Experiments are always invoked with keyword arguments, so parameter order in
+    the implementations is irrelevant, but the names are part of the contract.
+    """
+
+    def __call__(self, *, platform: Platform, platform_path: str, parameters: dict[Any, Any]) -> Any: ...
+
+
+experiment_functions_dict: dict[str, ExperimentFunction] = {
     "offset_calibration": single_tone_vs_flux,
     "single_tone": single_tone_node,
     "two_tone": two_tone_node,

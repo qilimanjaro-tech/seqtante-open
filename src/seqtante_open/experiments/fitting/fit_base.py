@@ -44,7 +44,10 @@ class FittingClass(ABC):
             path (str | None, optional): Directory of the folder where the plot/s are saved, if None it shows the plot. Defaults to None.
         """
         self.id = measurement_id
-        self.measurement = output_controller.db_manager.load_calibration_by_id(measurement_id)
+        measurement = output_controller.db_manager.load_calibration_by_id(measurement_id)
+        if measurement is None:
+            raise LookupError(f"No measurement found for measurement_id: {measurement_id}")
+        self.measurement = measurement
         self.array, self.loops = self.measurement.load_h5()
 
         self.path = path
@@ -101,16 +104,16 @@ class FittingClass(ABC):
             DataArray: Complex ``S21`` named ``"S21"``, with one labelled
                 dimension per sweep loop.
         """
-        results, loops = self.measurement.load_h5()
 
-        if len(results.shape) == len(loops.keys()):  # For the VNA
-            s21 = results
+        # For the VNA
+        if len(self.array.shape) == len(self.loops.keys()):
+            s21 = self.array
         else:  # For Qblox and QM
-            s21 = results[..., 0] + 1j * results[..., 1]
+            s21 = self.array[..., 0] + 1j * self.array[..., 1]
 
         coords = {}
         dims = []
-        for dim_name, metadata in loops.items():
+        for dim_name, metadata in self.loops.items():
             if metadata["parameter"]:
                 if metadata["parameter"] == "Flux":
                     new_dim_name = f"{metadata['bus']} ({metadata['units']})"
@@ -170,7 +173,7 @@ class FittingClass(ABC):
         return converted.rename(rename_dims) if rename_dims else converted
 
     @staticmethod
-    def decibels(s21: np.ndarray) -> np.ndarray:
+    def decibels(s21: np.typing.ArrayLike) -> np.ndarray:
         """Convert result values from s21 into dB
 
         Args:
@@ -238,19 +241,19 @@ class FittingClass(ABC):
         return fit, fitted_drag_coeff
 
     @staticmethod
-    def exponential(x: float | list | np.ndarray, A: float, B: float, C: float):
-        '''Returns exponential A * np.exp(B * x) + C'''
-        return A * np.exp(B * x) + C
+    def exponential(x: float | np.ndarray, a: float, b: float, c: float):
+        '''Returns exponential a * np.exp(b * x) + c'''
+        return a * np.exp(b * x) + c
 
     @staticmethod
-    def exponential_initial_guess(x_array: list | np.ndarray, y_array: list | np.ndarray) -> tuple[float]:
+    def exponential_initial_guess(x_array: list | np.ndarray, y_array: list | np.ndarray) -> tuple[float, float, float]:
         """Generates an rough initial guess for an exponential fitting."""
         _n = len(y_array)
         _end_idx = 1 if int(_n * 2 / 100) < 1 else int(_n * 2 / 100)
-        C: float = np.average(y_array[-_end_idx])
-        A: float = y_array[0] - C
-        B: float = -1 / x_array[int(_n / 2)]
-        return A, B, C
+        c: float = np.average(y_array[-_end_idx])
+        a: float = y_array[0] - c
+        b: float = -1 / x_array[int(_n / 2)]
+        return a, b, c
 
     @staticmethod
     def joint_model(x, mmt_relax, thermal_pop, std0, v0, std1, v1, N):
@@ -348,5 +351,5 @@ class FittingClass(ABC):
         return a * x + b
 
     @staticmethod
-    def cosfunc(phi, A, omega, offset, phase_offset):
-        return offset + A * np.cos(omega * phi + phase_offset)
+    def cosfunc(phi, a, omega, offset, phase_offset):
+        return offset + a * np.cos(omega * phi + phase_offset)
