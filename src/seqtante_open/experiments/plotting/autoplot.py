@@ -120,7 +120,7 @@ def auto_plot(
         for coord in coords.values():
             if coord.parameter == "IF_frequency":
                 bus = coord.bus
-                fixed_LO_freq = build_platform(cast("str", measurement.platform)).get_parameter(bus, parameter=Parameter.LO_FREQUENCY)  # type:ignore [arg-type]
+                fixed_LO_freq = build_platform(cast("dict", measurement.platform)).get_parameter(bus, parameter=Parameter.LO_FREQUENCY)  # type:ignore [arg-type]
 
     if len(coords) == 1:
         if plot_type == "line":

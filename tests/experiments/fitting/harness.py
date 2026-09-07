@@ -359,6 +359,7 @@ class FittingTestCase:
         db_manager.load_calibration_by_id.return_value = measurement
 
         monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(output_controller, "_initialized", True)
         monkeypatch.setattr(output_controller, "_db_manager", db_manager)
         monkeypatch.setattr(output_controller, "store_parameter", lambda **_: None)
         yield db_manager

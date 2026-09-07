@@ -77,7 +77,7 @@ def single_tone_node(platform: Platform, platform_path: str, parameters: dict[st
             model.fit()
             model.plot()
             platform.set_parameter(
-                alias=readout_bus, parameter=Parameter.IF, value=float(model.results["signal"]["fitted_if"])
+                alias=readout_bus, parameter=Parameter.IF, value=float(model.results["fitted_if"])
             )
 
     finally:

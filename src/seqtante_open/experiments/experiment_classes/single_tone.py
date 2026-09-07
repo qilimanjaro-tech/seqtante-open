@@ -19,7 +19,7 @@ from typing import cast
 import numpy as np
 from qililab import Calibration, Parameter
 from qililab.platform import Platform
-from qililab.result import DatabaseManager, StreamArray
+from qililab.result import AutocalMeasurement, DatabaseManager, StreamArray
 
 from seqtante_open.experiments.analysis import sss_from_array
 from seqtante_open.experiments.qprogram import resonator_spectroscopy, single_tone_vs_flux
@@ -46,7 +46,7 @@ def single_tone__frequency_vs_flux(
     secondary_idx: str | None = None,
     autocalibration: bool = False,
     readout_attenuation: int | None = None,
-) -> int | None:
+) -> int:
     """Continuous-wave single-tone spectroscopy vs. flux, hardware-looping over the readout IF
     while the flux is ramped via QDAC soft steps.
 
@@ -78,7 +78,7 @@ def single_tone__frequency_vs_flux(
             Defaults to None.
 
     Returns:
-        int | None: ID of the measurement in the database.
+        int: ID of the measurement in the database.
     """
     qdac_min_wait_after_step, qdac_stop_ro_before_step = qdac_step_timings(
         platform, minimum_wait_after_step_override, qdac_stop_ro_before_step_override
@@ -145,7 +145,8 @@ def single_tone__frequency_vs_flux(
                 qprogram, bus_mapping={"readout": readout_bus, "flux": flux_bus}, calibration=calibration
             ).results
         stream_array[()] = results[readout_bus][0].array.transpose(1, 2, 0)
-    return cast("int", stream_array.measurement.measurement_id) if stream_array.measurement is not None else None
+
+    return cast("int", cast("AutocalMeasurement", stream_array.measurement).measurement_id)
 
 
 def single_tone__frequency_sweep(
@@ -215,4 +216,4 @@ def single_tone__frequency_sweep(
     with stream_array:
         results = platform.execute_qprogram(qprogram, bus_mapping={"readout": readout_bus}).results
         stream_array[()] = results[readout_bus][0].array.T
-    return cast("int", stream_array.measurement.measurement_id) if stream_array.measurement is not None else None
+    return cast("int", cast("AutocalMeasurement", stream_array.measurement).measurement_id)

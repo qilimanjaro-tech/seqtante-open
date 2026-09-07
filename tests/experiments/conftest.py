@@ -72,6 +72,7 @@ def mock_db_manager(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     ``monkeypatch`` restores the original after the test.
     """
     db_manager = MagicMock(name="db_manager")
+    monkeypatch.setattr(output_controller, "_initialized", True)
     monkeypatch.setattr(output_controller, "_db_manager", db_manager)
     return db_manager
 

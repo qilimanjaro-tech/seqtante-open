@@ -81,7 +81,7 @@ def single_tone_vs_flux(platform: Platform, platform_path: str, parameters: dict
         )
 
         model = FluxoniumSingleToneFluxModel(
-            cast("int", measurement_id),
+            measurement_id,
             target=target,
             path=target_params["data_folder"] + flux_bus,
             lo=LO
