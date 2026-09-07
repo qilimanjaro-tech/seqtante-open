@@ -11,9 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from copy import deepcopy
 from itertools import product
 from typing import Any
-from copy import deepcopy
 
 import numpy as np
 from qililab.platform.platform import Platform
@@ -98,11 +98,7 @@ def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, para
         )
 
         model = FluxoniumTwoToneFluxModel(
-            measurement_id,
-            target=target,
-            path=target_params["data_folder"] + flux_bus,
-            lo=drive_LO,
-            flux_bus=flux_bus
+            measurement_id, target=target, path=target_params["data_folder"] + flux_bus, lo=drive_LO, flux_bus=flux_bus
         )
         model.fit()
         model.plot()

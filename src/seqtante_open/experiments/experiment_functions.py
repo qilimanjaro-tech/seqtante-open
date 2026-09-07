@@ -27,6 +27,7 @@ The experiments seqtante-open ships:
 
 Register each here as it lands.
 """
+
 from typing import Any, Protocol
 
 from qililab import Platform

@@ -69,7 +69,6 @@ def plot_measurement_1d_line_updated(
         fig.update_yaxes(title_text="Integrated Voltage (V)", row=1, col=2)
 
         if (xarr[xarr.dims[0]].parameter == "IF_frequency") and fixed_LO_freq:
-
             fig.update_layout(
                 xaxis11={
                     "showgrid": False,
@@ -638,9 +637,7 @@ def plot_measurement_3d_heatmap_slider_updated(
     return fig
 
 
-def plot_measurement_3d_heatmap_grid_updated(xarr: DataArray,
-                                             title: str,
-                                             dataprocessing: DataProcessing | None = None):
+def plot_measurement_3d_heatmap_grid_updated(xarr: DataArray, title: str, dataprocessing: DataProcessing | None = None):
 
     if len(xarr[xarr.dims[2]]) > 10:  # we have this here for now to not make it crash
         xarr = xarr[:, :, :30]

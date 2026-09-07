@@ -31,11 +31,12 @@ RENDER_SCALE = 2  # pixel multiplier on the figure's layout size
 class FittingClass(ABC):
     """Base class for all fittings."""
 
-    def __init__(self,
-                 measurement_id: int,
-                 target: str | None = None,
-                 path: str | None = None,
-                 ):
+    def __init__(
+        self,
+        measurement_id: int,
+        target: str | None = None,
+        path: str | None = None,
+    ):
         """Base class for all fittings. It includes many functions for the fittings.
 
         Args:
@@ -242,7 +243,7 @@ class FittingClass(ABC):
 
     @staticmethod
     def exponential(x: float | np.ndarray, a: float, b: float, c: float):
-        '''Returns exponential a * np.exp(b * x) + c'''
+        """Returns exponential a * np.exp(b * x) + c"""
         return a * np.exp(b * x) + c
 
     @staticmethod
