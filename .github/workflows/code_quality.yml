@@ -85,15 +85,15 @@ jobs:
         run: uv sync --locked --group dev --all-extras
 
       - name: Ruff
-        run: uv run --no-build ruff check --output-format=github .
+        run: uv run ruff check --output-format=github .
 
       - name: Format
-        run: uv run --no-build ruff format --diff --output-format=github .
+        run: uv run ruff format --diff --output-format=github .
 
       - name: Typing
         run: |
           for version in 3.11 3.12 3.13; do
             echo "::group::ty check --python-version $version"
-            uv run --no-build ty check --output-format=github --python-version "$version" ./src/seqtante_open
+            uv run ty check --output-format=github --python-version "$version" ./src/seqtante_open
             echo "::endgroup::"
           done
