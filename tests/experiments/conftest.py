@@ -69,7 +69,8 @@ def mock_db_manager(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 
     ``db_manager`` is a property backed by ``_db_manager``; setting the backing
     field makes the property return our mock without hitting a real database.
-    ``monkeypatch`` restores the original after the test.
+    The property is gated on ``_initialized``, which only ``reset`` sets, so the
+    flag is faked too. ``monkeypatch`` restores the originals after the test.
     """
     db_manager = MagicMock(name="db_manager")
     monkeypatch.setattr(output_controller, "_initialized", True)
