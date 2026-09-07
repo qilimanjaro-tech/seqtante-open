@@ -291,7 +291,7 @@ class Outputs:
         EXTRAS = {"CALIBRATION_ID": self.calibration_id, "GENERATED_UUID": uuid4()}
 
         extra_cfg: dict[str, Any] = {
-            k.lower() if k in EXTRAS else k: EXTRAS[k] if k in EXTRAS else v for k, v in cfg.get("extra", {}).items()
+            k.lower() if k in EXTRAS else k: EXTRAS[k] if k in EXTRAS else v for k, v in (cfg.get("extra") or {}).items()
         }
 
         return logger.configure(
