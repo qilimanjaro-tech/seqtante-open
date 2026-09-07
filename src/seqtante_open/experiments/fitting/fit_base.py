@@ -105,7 +105,8 @@ class FittingClass(ABC):
                 dimension per sweep loop.
         """
 
-        if len(self.array.shape) == len(self.loops.keys()):  # For the VNA
+        # For the VNA
+        if len(self.array.shape) == len(self.loops.keys()):
             s21 = self.array
         else:  # For Qblox and QM
             s21 = self.array[..., 0] + 1j * self.array[..., 1]
