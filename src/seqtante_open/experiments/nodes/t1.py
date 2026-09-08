@@ -98,5 +98,3 @@ def t1_node(platform: Platform, platform_path: str, parameters: dict[str, Any]):
 
     finally:
         platform.set_bias_to_zero()
-        save_platform(path=platform_path, platform=platform)
-        serialize_to(calibration, parameters["calibration_path"])
