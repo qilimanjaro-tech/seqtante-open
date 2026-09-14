@@ -27,7 +27,6 @@ from seqtante_open.experiments.qprogram import two_tone_spectroscopy
 def two_tone_frequency(
     platform: Platform,
     db_manager: DatabaseManager,
-    readout_if_freq: int,
     averages: int,
     r_duration: int,
     r_amp: float,
@@ -40,6 +39,7 @@ def two_tone_frequency(
     drive_bus: str,
     drive_gain: float,
     drive_IF_sweep: np.ndarray,
+    readout_if_freq: int | None = None,
     drive_LO: int | None = None,
     readout_LO: int | None = None,
     target: str | None = None,
@@ -63,7 +63,8 @@ def two_tone_frequency(
         platform.set_parameter(alias=drive_bus, parameter=Parameter.LO_FREQUENCY, value=drive_LO)
     if readout_LO is not None:
         platform.set_parameter(alias=readout_bus, parameter=Parameter.LO_FREQUENCY, value=readout_LO)
-    platform.set_parameter(alias=readout_bus, parameter=Parameter.IF, value=readout_if_freq)
+    if readout_if_freq is not None:
+        platform.set_parameter(alias=readout_bus, parameter=Parameter.IF, value=readout_if_freq)
     instrument_platform = next(
         instrument_name
         for instrument_platform in platform.get_element(drive_bus).instruments
@@ -107,7 +108,6 @@ def two_tone_frequency(
 def two_tone__frequency_vs_flux(
     platform: Platform,
     db_manager: DatabaseManager,
-    readout_if_freq: int,
     averages: int,
     r_duration: int,
     r_amp: float,
@@ -123,6 +123,7 @@ def two_tone__frequency_vs_flux(
     flux_bus: str,
     flux_parameter: Parameter,
     flux_sweep: np.ndarray,
+    readout_if_freq: int | None = None,
     drive_LO: int | None = None,
     readout_LO: int | None = None,
     target: str | None = None,
@@ -146,7 +147,8 @@ def two_tone__frequency_vs_flux(
         platform.set_parameter(alias=drive_bus, parameter=Parameter.LO_FREQUENCY, value=drive_LO)
     if readout_LO is not None:
         platform.set_parameter(alias=readout_bus, parameter=Parameter.LO_FREQUENCY, value=readout_LO)
-    platform.set_parameter(alias=readout_bus, parameter=Parameter.IF, value=readout_if_freq)
+    if readout_if_freq is not None:
+        platform.set_parameter(alias=readout_bus, parameter=Parameter.IF, value=readout_if_freq)
     instrument_platform = next(
         instrument_name
         for instrument_platform in platform.get_element(drive_bus).instruments
