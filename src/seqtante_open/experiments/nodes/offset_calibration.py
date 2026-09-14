@@ -27,7 +27,7 @@ from seqtante_open.experiments.experiment_classes import (
     single_tone__frequency_vs_flux as single_tone_vs_flux_experiment,
 )
 from seqtante_open.experiments.fitting import FluxoniumSingleToneFluxModel
-from seqtante_open.experiments.utils import coupler_readout_qubit, x_loop_readout_flux
+from seqtante_open.experiments.utils import coupler_readout_qubit, get_operating_point, x_loop_readout_flux
 from seqtante_open.outputs import output_controller
 
 
@@ -53,11 +53,18 @@ def single_tone_vs_flux(platform: Platform, platform_path: str, parameters: dict
         if readout_flux:
             platform.set_parameter(readout_flux[0], Parameter.FLUX, readout_flux[1])
         target_params = {**parameters, **parameters[target]}
-        LO = platform.get_parameter(alias=readout_bus, parameter=Parameter.LO_FREQUENCY)
+        if (operating_point_name := target_params.get("operating_point")) is not None:
+            get_operating_point(
+                calibration,
+                target=target,
+                operating_point_name=operating_point_name,
+                platform=platform,
+            )
         if_sweep = np.linspace(*target_params["if_sweep"]) + platform.get_parameter(
             alias=readout_bus, parameter=Parameter.IF
         )
         flux_sweep = np.linspace(*target_params["flux_sweep"])
+        LO = platform.get_parameter(readout_bus, parameter=Parameter.LO_FREQUENCY)
         calibration_copy = deepcopy(calibration)
         calibration_copy.parameters["data_folder"] = target_params["data_folder"] + flux_bus
 
@@ -73,7 +80,6 @@ def single_tone_vs_flux(platform: Platform, platform_path: str, parameters: dict
             flux_sweep=flux_sweep,
             minimum_wait_after_step_override=target_params.get("minimum_wait_after_step"),
             qdac_stop_ro_before_step_override=target_params.get("qdac_stop_ro_before_step"),
-            lo=LO,
             calibration=calibration_copy,
             flux_parameter=Parameter.FLUX,
             qubit_idx=target,

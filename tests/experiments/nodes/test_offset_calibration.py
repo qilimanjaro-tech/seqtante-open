@@ -46,6 +46,8 @@ MEASUREMENT_ID = 777
 FITTED_OFFSET = 0.123
 DATA_FOLDER = "unused-mocked-folder"
 
+OPERATING_POINT = "park"
+
 MEASURED_BUSES = ("flux_q1_x", "flux_q1_z", "flux_c1_2_z")
 """The flux buses of ``["q1", "c1_2"]``, in the order the experiment sweeps them."""
 
@@ -97,6 +99,7 @@ def run_experiment(platform, mock_db_manager, mock_recorder):
     mock_recorder.mock(f"{MODULE}.{FN}", output=MEASUREMENT_ID)
     mock_recorder.mock(f"{MODULE}.FluxoniumSingleToneFluxModel", output=_fit_model())
     mock_recorder.mock(f"{MODULE}.serialize_to")
+    mock_recorder.mock(f"{MODULE}.get_operating_point")
 
     def run(parameters: dict):
         single_tone_vs_flux(platform=platform, platform_path="unused", parameters=parameters)
@@ -131,7 +134,11 @@ def test_basic_parameters(platform, run_experiment):
         expected_if = np.linspace(-1.5e6, 1.5e6, 21) + platform.get_parameter(readout_bus, Parameter.IF)
         np.testing.assert_allclose(call["kwargs"]["if_sweep"], expected_if)
         np.testing.assert_allclose(call["kwargs"]["flux_sweep"], np.linspace(-1, 1, 11))
-        assert call["kwargs"]["lo"] == platform.get_parameter(readout_bus, Parameter.LO_FREQUENCY)
+
+    fits = recorder.calls["FluxoniumSingleToneFluxModel"]
+    assert [f["kwargs"]["lo"] for f in fits] == [
+        platform.get_parameter(c["kwargs"]["readout_bus"], Parameter.LO_FREQUENCY) for c in calls
+    ]
 
 
 def test_loops_over_all_loops(run_experiment):
@@ -253,3 +260,29 @@ def test_fitted_offsets_are_written_to_the_calibration(run_experiment):
     # The updated calibration and platform are persisted once, at the end.
     assert len(recorder.calls["serialize_to"]) == 1
     assert recorder.calls["serialize_to"][0]["args"] == (run_experiment.calibration, "unused-mocked.yml")
+
+
+def test_operating_point_is_applied_before_each_measurement(platform, run_experiment):
+    """With ``operating_point`` configured, every target is parked before it is measured.
+
+    The helper itself is pinned in ``tests/experiments/utils``; all that matters
+    here is that the node reaches it with the right target, name and platform.
+    """
+    parameters = _base_parameters()
+    parameters["operating_point"] = OPERATING_POINT
+
+    recorder = run_experiment(parameters)
+
+    applied = recorder.calls["get_operating_point"]
+    assert [c["kwargs"]["target"] for c in applied] == [c["kwargs"]["qubit_idx"] for c in recorder.calls[FN]]
+    for call in applied:
+        assert call["args"] == (run_experiment.calibration,)
+        assert call["kwargs"]["operating_point_name"] == OPERATING_POINT
+        assert call["kwargs"]["platform"] is platform
+
+
+def test_operating_point_is_left_alone_when_not_configured(run_experiment):
+    """Without it the node measures the platform as it already stands."""
+    recorder = run_experiment(_base_parameters())
+
+    assert recorder.calls["get_operating_point"] == []

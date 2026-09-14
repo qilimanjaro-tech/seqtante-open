@@ -21,10 +21,11 @@ from qililab.platform.platform import Platform
 from qililab.qprogram.calibration import Calibration
 from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 from qililab.typings.enums import Parameter
-from qililab.utils.serialization import deserialize_from
+from qililab.utils.serialization import deserialize_from, serialize_to
 
 from seqtante_open.experiments.experiment_classes import single_tone__frequency_sweep as single_tone_experiment
 from seqtante_open.experiments.fitting import FluxoniumSingleToneModel
+from seqtante_open.experiments.utils import get_operating_point, save_parameters_to_operating_point
 from seqtante_open.outputs import output_controller
 
 _DEFAULTS = {
@@ -43,16 +44,22 @@ def single_tone_node(platform: Platform, platform_path: str, parameters: dict[st
         raise ValueError("To execute single_tone_node experiment, the Calibration needs to have a CrosstalkMatrix")
     platform.set_crosstalk(crosstalk=crosstalk)
 
-    platform.set_flux_to_zero()
-
     try:
         for qubit in qubits:
+            platform.set_flux_to_zero()
             readout_bus = f"readout_{qubit}"
             target_params = {**parameters, **parameters[qubit]}
-            LO = platform.get_parameter(alias=readout_bus, parameter=Parameter.LO_FREQUENCY)
+            if (operating_point_name := target_params.get("operating_point")) is not None:
+                get_operating_point(
+                    calibration,
+                    target=qubit,
+                    operating_point_name=operating_point_name,
+                    platform=platform,
+                )
             if_sweep = np.linspace(*target_params["if_sweep"]) + platform.get_parameter(
                 alias=readout_bus, parameter=Parameter.IF
             )
+            LO = platform.get_parameter(readout_bus, parameter=Parameter.LO_FREQUENCY)
             calibration_copy = deepcopy(calibration)
             calibration_copy.parameters["data_folder"] = target_params["data_folder"]
 
@@ -76,8 +83,17 @@ def single_tone_node(platform: Platform, platform_path: str, parameters: dict[st
             )
             model.fit()
             model.plot()
-            platform.set_parameter(alias=readout_bus, parameter=Parameter.IF, value=float(model.results["fitted_if"]))
+            if operating_point_name is not None:
+                save_parameters_to_operating_point(
+                    (readout_bus, Parameter.IF, float(model.results["fitted_if"])),
+                    calibration=calibration,
+                    target=qubit,
+                    operating_point_name=operating_point_name,
+                )
+            else:
+                platform.set_parameter(readout_bus, parameter=Parameter.IF, value=float(model.results["fitted_if"]))
 
     finally:
         platform.set_bias_to_zero()
+        serialize_to(calibration, parameters["calibration_path"])
         save_platform(path=platform_path, platform=platform)

@@ -25,7 +25,7 @@ from qililab.utils.serialization import deserialize_from, serialize_to
 
 from seqtante_open.experiments.experiment_classes import two_tone_frequency as two_tone_experiment
 from seqtante_open.experiments.fitting import FluxoniumTwoToneModel
-from seqtante_open.experiments.utils import get_lo_multiple_sources
+from seqtante_open.experiments.utils import get_operating_point, save_parameters_to_operating_point
 from seqtante_open.outputs import output_controller
 
 _DEFAULTS = {
@@ -48,23 +48,23 @@ def two_tone_node(platform: Platform, platform_path: str, parameters: dict[str, 
         )
     platform.set_crosstalk(crosstalk=crosstalk)
 
-    platform.set_flux_to_zero()
-
     try:
         for qubit in qubits:
+            platform.set_flux_to_zero()
             readout_bus = f"readout_{qubit}"
             drive_bus = f"drive_{qubit}"
             target_params = {**parameters, **parameters[qubit]}
-            drive_LO = get_lo_multiple_sources(
-                bus=drive_bus,
-                target=qubit,
-                platform=platform,
-                calibration=calibration,
-            )
-            readout_if_freq = platform.get_parameter(alias=readout_bus, parameter=Parameter.IF)
+            if (operating_point_name := target_params.get("operating_point")) is not None:
+                get_operating_point(
+                    calibration,
+                    target=qubit,
+                    operating_point_name=operating_point_name,
+                    platform=platform,
+                )
             freq_sweep = np.linspace(*target_params["freq_sweep"]) + platform.get_parameter(
                 alias=drive_bus, parameter=Parameter.IF
             )
+            drive_LO = platform.get_parameter(drive_bus, parameter=Parameter.LO_FREQUENCY)
             calibration_copy = deepcopy(calibration)
             calibration_copy.parameters["data_folder"] = target_params["data_folder"]
 
@@ -73,7 +73,6 @@ def two_tone_node(platform: Platform, platform_path: str, parameters: dict[str, 
                 db_manager=db_manager,
                 readout_bus=readout_bus,
                 drive_bus=drive_bus,
-                readout_if_freq=readout_if_freq,
                 drive_IF_sweep=freq_sweep,
                 averages=target_params["averages"],
                 relax_duration=target_params["relax_duration"],
@@ -85,7 +84,6 @@ def two_tone_node(platform: Platform, platform_path: str, parameters: dict[str, 
                 ringup_time=target_params.get("ringup_time", _DEFAULTS["ringup_time"]),
                 overlap_time=target_params.get("overlap_time", _DEFAULTS["overlap_time"]),
                 calibration=calibration_copy,
-                drive_LO=drive_LO,
                 target=qubit,
                 autocalibration=True,
             )
@@ -93,9 +91,18 @@ def two_tone_node(platform: Platform, platform_path: str, parameters: dict[str, 
             model = FluxoniumTwoToneModel(measurement_id, target=qubit, path=target_params["data_folder"], lo=drive_LO)
             model.fit()
             model.plot()
-            platform.set_parameter(alias=drive_bus, parameter=Parameter.IF, value=model.results["signal"]["fitted_if"])
+
+            if operating_point_name is not None:
+                save_parameters_to_operating_point(
+                    (drive_bus, Parameter.IF, model.results["signal"]["fitted_if"]),
+                    calibration=calibration,
+                    target=qubit,
+                    operating_point_name=operating_point_name,
+                )
+            else:
+                platform.set_parameter(drive_bus, Parameter.IF, model.results["signal"]["fitted_if"])
 
     finally:
         platform.set_bias_to_zero()
-        save_platform(path=platform_path, platform=platform)
         serialize_to(calibration, parameters["calibration_path"])
+        save_platform(path=platform_path, platform=platform)
