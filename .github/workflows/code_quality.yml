@@ -99,6 +99,6 @@ jobs:
         run: |
           for version in 3.11 3.12 3.13; do
             echo "::group::ty check --python-version $version"
-            ty check --output-format=github --python-version "$version" ./src/seqtante
+            ty check --output-format=github --python-version "$version" ./src/seqtante_open
             echo "::endgroup::"
           done
