@@ -296,7 +296,7 @@
   ```python
   class TestT1Fit(FittingTestCase):
       FIT_CLASS = T1Fit
-      DATA = "t1_fit.h5"          # a committed .h5, or a builder called at test time
+      DATA = "t1_fit.h5"  # a committed .h5, or a builder called at test time
       INIT = {"measurement_id": 1, "target": "q1"}
       EXPECTED = {"optimized_params.thresh.1": pytest.approx(DECAY_RATE, rel=0.02)}
   ```

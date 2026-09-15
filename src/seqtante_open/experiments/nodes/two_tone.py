@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any
 from copy import deepcopy
+from typing import Any
 
 import numpy as np
 from qililab import save_platform
@@ -93,11 +93,7 @@ def two_tone_node(platform: Platform, platform_path: str, parameters: dict[str, 
             model = FluxoniumTwoToneModel(measurement_id, target=qubit, path=target_params["data_folder"], lo=drive_LO)
             model.fit()
             model.plot()
-            platform.set_parameter(
-                alias=drive_bus,
-                parameter=Parameter.IF,
-                value=model.results["signal"]["fitted_if"]
-            )
+            platform.set_parameter(alias=drive_bus, parameter=Parameter.IF, value=model.results["signal"]["fitted_if"])
 
     finally:
         platform.set_bias_to_zero()

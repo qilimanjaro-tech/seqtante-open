@@ -121,13 +121,13 @@ def test_basic_parameters(platform, run_experiment):
 
     calls = recorder.calls[FN]
     assert calls, f"Expected {FN} to be called"
-    assert all(c["kwargs"]["r_amp"] == 0.075 for c in calls)
+    assert all(c["kwargs"]["r_amp"] == pytest.approx(0.075) for c in calls)
     assert all(c["kwargs"]["r_duration"] == 2000 for c in calls)
-    assert all(c["kwargs"]["d_amp"] == 0.5 for c in calls)
+    assert all(c["kwargs"]["d_amp"] == pytest.approx(0.5) for c in calls)
     assert all(c["kwargs"]["d_duration"] == 40 for c in calls)
     assert all(c["kwargs"]["averages"] == 1000 for c in calls)
     assert all(c["kwargs"]["relax_duration"] == 200_000 for c in calls)
-    assert all(c["kwargs"]["drive_gain"] == 0.8 for c in calls)
+    assert all(c["kwargs"]["drive_gain"] == pytest.approx(0.8) for c in calls)
     assert all(c["kwargs"]["ringup_time"] == 24 for c in calls)
     assert all(c["kwargs"]["overlap_time"] == 12 for c in calls)
     assert all(c["kwargs"]["flux_parameter"] == Parameter.FLUX for c in calls)
@@ -236,17 +236,17 @@ def test_per_target_overwrite_reaches_execution(platform, run_experiment):
     assert len(qubit_calls) == 2
     drive_if = platform.get_parameter("drive_q1", Parameter.IF)
     for call in qubit_calls:
-        assert call["kwargs"]["r_amp"] == 0.05
+        assert call["kwargs"]["r_amp"] == pytest.approx(0.05)
         assert call["kwargs"]["r_duration"] == 3000
-        assert call["kwargs"]["d_amp"] == 0.9
+        assert call["kwargs"]["d_amp"] == pytest.approx(0.9)
         assert call["kwargs"]["averages"] == 1500
         np.testing.assert_allclose(call["kwargs"]["drive_IF_sweep"], np.linspace(-3e6, 3e6, 41) + drive_if)
         np.testing.assert_allclose(call["kwargs"]["flux_sweep"], np.linspace(-0.5, 0.5, 4))
 
     (coupler_call,) = [c for c in calls if c["kwargs"]["target"] == "c1_2"]
-    assert coupler_call["kwargs"]["r_amp"] == 0.075
+    assert coupler_call["kwargs"]["r_amp"] == pytest.approx(0.075)
     assert coupler_call["kwargs"]["r_duration"] == 2000
-    assert coupler_call["kwargs"]["d_amp"] == 0.5
+    assert coupler_call["kwargs"]["d_amp"] == pytest.approx(0.5)
     assert coupler_call["kwargs"]["averages"] == 1000
     assert len(coupler_call["kwargs"]["drive_IF_sweep"]) == 21
 
@@ -258,7 +258,7 @@ def test_overwrite_does_not_mutate_shared_parameters(run_experiment):
 
     run_experiment(parameters)
 
-    assert parameters["readout_amplitude"] == 0.075
+    assert parameters["readout_amplitude"] == pytest.approx(0.075)
     assert parameters["q1"] == {"readout_amplitude": 0.9}
 
 
@@ -338,9 +338,7 @@ def test_calibration_is_saved_even_when_the_experiment_fails(platform, mock_db_m
 
     with patch(f"{MODULE}.{FN}", autospec=True, side_effect=RuntimeError("instrument exploded")):
         with pytest.raises(RuntimeError, match="instrument exploded"):
-            two_tone_frequency_vs_flux_node(
-                platform=platform, platform_path="unused", parameters=_base_parameters()
-            )
+            two_tone_frequency_vs_flux_node(platform=platform, platform_path="unused", parameters=_base_parameters())
 
     assert len(mock_recorder.calls["serialize_to"]) == 1
 

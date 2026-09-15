@@ -52,6 +52,7 @@ def rotate_iq(arr: np.ndarray):
     rotated = arr * np.exp(1j * angle)
     return rotated
 
+
 def lorentzian(x, amplitude, center, width, offset):
     """
     Lorentzian function.
@@ -75,6 +76,7 @@ def lorentzian(x, amplitude, center, width, offset):
         The Lorentzian function evaluated at `x`.
     """
     return amplitude / (1 + ((x - center) / (0.5 * width)) ** 2) + offset
+
 
 def two_tone_spectroscopy_map(S21: np.ndarray):
     """

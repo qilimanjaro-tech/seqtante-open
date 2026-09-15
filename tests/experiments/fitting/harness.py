@@ -49,10 +49,10 @@ import h5py
 import matplotlib as mpl
 import numpy as np
 import pytest
-import seqtante_open
 from qililab.result.result_management import load_results
 from ruamel.yaml import YAML
 
+import seqtante_open
 from seqtante_open.experiments.fitting.fit_base import FittingClass
 from seqtante_open.outputs import output_controller
 

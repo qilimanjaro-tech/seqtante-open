@@ -45,7 +45,7 @@ def two_tone_frequency(
     target: str | None = None,
     calibration: Calibration | None = None,
     optional_identifier: str | None = None,
-    autocalibration: bool = False
+    autocalibration: bool = False,
 ):
     qprogram = two_tone_spectroscopy(  # type: ignore [misc]
         *sss_from_array(drive_IF_sweep),
@@ -65,7 +65,8 @@ def two_tone_frequency(
         platform.set_parameter(alias=readout_bus, parameter=Parameter.LO_FREQUENCY, value=readout_LO)
     platform.set_parameter(alias=readout_bus, parameter=Parameter.IF, value=readout_if_freq)
     instrument_platform = next(
-        instrument_name for instrument_platform in platform.get_element(drive_bus).instruments
+        instrument_name
+        for instrument_platform in platform.get_element(drive_bus).instruments
         if (instrument_name := instrument_platform.name.name) in ["ROHDE_SCHWARZ", "QCMRF"]
     )
     if instrument_platform is not None:
@@ -93,9 +94,7 @@ def two_tone_frequency(
     )
 
     with stream_array:
-        results = platform.execute_qprogram(
-            qprogram, bus_mapping={"readout": readout_bus, "drive": drive_bus}
-        ).results
+        results = platform.execute_qprogram(qprogram, bus_mapping={"readout": readout_bus, "drive": drive_bus}).results
         stream_array[:,] = results[readout_bus][0].array.T
 
     for instrument in platform.get_element(drive_bus).instruments:
@@ -129,7 +128,7 @@ def two_tone__frequency_vs_flux(
     target: str | None = None,
     calibration: Calibration | None = None,
     optional_identifier: str | None = None,
-    autocalibration: bool = False
+    autocalibration: bool = False,
 ):
     qprogram = two_tone_spectroscopy(  # type: ignore [misc]
         *sss_from_array(drive_IF_sweep),
@@ -149,7 +148,8 @@ def two_tone__frequency_vs_flux(
         platform.set_parameter(alias=readout_bus, parameter=Parameter.LO_FREQUENCY, value=readout_LO)
     platform.set_parameter(alias=readout_bus, parameter=Parameter.IF, value=readout_if_freq)
     instrument_platform = next(
-        instrument_name for instrument_platform in platform.get_element(drive_bus).instruments
+        instrument_name
+        for instrument_platform in platform.get_element(drive_bus).instruments
         if (instrument_name := instrument_platform.name.name) in ["ROHDE_SCHWARZ", "QCMRF"]
     )
     if instrument_platform is not None:

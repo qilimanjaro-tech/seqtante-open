@@ -17,7 +17,7 @@
 # isort: skip_file
 from importlib.metadata import PackageNotFoundError, version
 
-try:
+try:  # ruff: ignore[non-empty-init-module]
     __version__ = version("seqtante-open")
 except PackageNotFoundError:
     __version__ = "0.0.0"
@@ -27,4 +27,4 @@ from . import controllers
 from . import autocalibration
 from .calibration_run import CalibrationRun
 
-__all__ = ["CalibrationRun", "experiments", "controllers", "autocalibration"]
+__all__ = ["CalibrationRun", "autocalibration", "controllers", "experiments"]

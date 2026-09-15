@@ -72,12 +72,8 @@ def test_every_case_tests_a_fit_class(fit_classes, cases) -> None:
     Catches a ``FIT_CLASS`` left behind by a class that was deleted, moved out of
     the package, or that never inherited from ``FittingClass`` to begin with.
     """
-    orphaned = {
-        case.__name__: case.FIT_CLASS for case in cases.values() if case.FIT_CLASS not in fit_classes
-    }
-    assert not orphaned, (
-        f"these cases test something that is not a FittingClass subclass in the package: {orphaned}"
-    )
+    orphaned = {case.__name__: case.FIT_CLASS for case in cases.values() if case.FIT_CLASS not in fit_classes}
+    assert not orphaned, f"these cases test something that is not a FittingClass subclass in the package: {orphaned}"
 
 
 def test_test_cases_mirror_the_source_layout(cases) -> None:

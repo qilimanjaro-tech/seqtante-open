@@ -17,13 +17,30 @@ This module contains the analysis tools to process experiment data.
 """
 
 from .analysis import (
-    array_from_center_span_npoints,
-    center_span_npoints_from_array,
-    decibels,
-    lorentzian,
-    rotate_iq,
-    sss_from_array,
-    sss_from_center_span_npoints,
-    two_tone_spectroscopy_map,
+    array_from_center_span_npoints as array_from_center_span_npoints,
 )
-from .crosstalk import XTalk, crosstalk_matrix_from_vectors, crosstalk_mesh, normalize_crosstalk_matrix
+from .analysis import (
+    center_span_npoints_from_array as center_span_npoints_from_array,
+)
+from .analysis import (
+    decibels as decibels,
+)
+from .analysis import (
+    lorentzian as lorentzian,
+)
+from .analysis import (
+    rotate_iq as rotate_iq,
+)
+from .analysis import (
+    sss_from_array as sss_from_array,
+)
+from .analysis import (
+    sss_from_center_span_npoints as sss_from_center_span_npoints,
+)
+from .analysis import (
+    two_tone_spectroscopy_map as two_tone_spectroscopy_map,
+)
+from .crosstalk import XTalk as XTalk
+from .crosstalk import crosstalk_matrix_from_vectors as crosstalk_matrix_from_vectors
+from .crosstalk import crosstalk_mesh as crosstalk_mesh
+from .crosstalk import normalize_crosstalk_matrix as normalize_crosstalk_matrix

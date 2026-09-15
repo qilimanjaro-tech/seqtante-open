@@ -42,7 +42,9 @@ SINKS = {
 FILTERS = {
     "lt_warning": lambda r: r["level"].no < logger.level("WARNING").no,
     "seqtante_open": lambda r: r["name"].startswith("seqtante_open."),
-    "lt_warning_seqtante_open": lambda r: r["name"].startswith("seqtante_open.") and r["level"].no < logger.level("WARNING").no,
+    "lt_warning_seqtante_open": lambda r: (
+        r["name"].startswith("seqtante_open.") and r["level"].no < logger.level("WARNING").no
+    ),
 }
 
 
@@ -137,11 +139,11 @@ def _requires_initialized(fn):
         if not self._initialized:
             raise AttributeError("Output has not been initialized. Use `Outputs.reset` to initialize.")
         return fn(self, *args, **kwargs)
+
     return wrapper
 
 
 class Outputs:
-
     def __init__(self):
         self._initialize()
 
@@ -291,7 +293,8 @@ class Outputs:
         EXTRAS = {"CALIBRATION_ID": self.calibration_id, "GENERATED_UUID": uuid4()}
 
         extra_cfg: dict[str, Any] = {
-            k.lower() if k in EXTRAS else k: EXTRAS[k] if k in EXTRAS else v for k, v in (cfg.get("extra") or {}).items()
+            k.lower() if k in EXTRAS else k: EXTRAS[k] if k in EXTRAS else v
+            for k, v in (cfg.get("extra") or {}).items()
         }
 
         return logger.configure(
