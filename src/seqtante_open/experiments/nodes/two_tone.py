@@ -29,7 +29,6 @@ from seqtante_open.experiments.utils import get_operating_point, save_parameters
 from seqtante_open.outputs import output_controller
 
 _DEFAULTS = {
-    "drive_gain": 1,
     "overlap_time": 0,
     "ringup_time": 0,
 }
@@ -80,7 +79,6 @@ def two_tone_node(platform: Platform, platform_path: str, parameters: dict[str, 
                 d_amp=target_params["drive_amplitude"],
                 r_amp=target_params["readout_amplitude"],
                 r_duration=target_params["readout_duration"],
-                drive_gain=target_params.get("drive_gain", _DEFAULTS["drive_gain"]),
                 ringup_time=target_params.get("ringup_time", _DEFAULTS["ringup_time"]),
                 overlap_time=target_params.get("overlap_time", _DEFAULTS["overlap_time"]),
                 calibration=calibration_copy,
