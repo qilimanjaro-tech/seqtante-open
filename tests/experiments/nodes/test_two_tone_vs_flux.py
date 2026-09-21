@@ -87,7 +87,6 @@ def _base_parameters() -> dict:
         "drive_amplitude": 0.5,
         "readout_amplitude": 0.075,
         "readout_duration": 2000,
-        "drive_gain": 0.8,
         "ringup_time": 24,
         "overlap_time": 12,
         "x_loop_readout_flux": 0.3,
@@ -129,7 +128,6 @@ def test_basic_parameters(platform, run_experiment):
     assert all(c["kwargs"]["d_duration"] == 40 for c in calls)
     assert all(c["kwargs"]["averages"] == 1000 for c in calls)
     assert all(c["kwargs"]["relax_duration"] == 200_000 for c in calls)
-    assert all(c["kwargs"]["drive_gain"] == pytest.approx(0.8) for c in calls)
     assert all(c["kwargs"]["ringup_time"] == 24 for c in calls)
     assert all(c["kwargs"]["overlap_time"] == 12 for c in calls)
     assert all(c["kwargs"]["flux_parameter"] == Parameter.FLUX for c in calls)
@@ -269,13 +267,12 @@ def test_overwrite_does_not_mutate_shared_parameters(run_experiment):
 def test_defaults_are_used_when_parameters_are_missing(run_experiment):
     """The optional drive and timing parameters fall back to the module defaults."""
     parameters = _base_parameters()
-    for key in ("drive_gain", "ringup_time", "overlap_time"):
+    for key in ("ringup_time", "overlap_time"):
         del parameters[key]
 
     recorder = run_experiment(parameters)
 
     for call in recorder.calls[FN]:
-        assert call["kwargs"]["drive_gain"] == 1
         assert call["kwargs"]["ringup_time"] == 0
         assert call["kwargs"]["overlap_time"] == 0
 
@@ -363,3 +360,22 @@ def test_calibration_without_crosstalk_matrix_is_rejected(platform, mock_db_mana
 
     assert not mock_recorder.calls[FN]
     assert not mock_recorder.calls["serialize_to"]
+
+
+def test_loop_targeting(platform, run_experiment):
+    parameters = _base_parameters() | {"targeted_loops": ["x"]}
+    platform.analog_compilation_settings.qubit_loops = 2
+    recorder = run_experiment(parameters)
+    for call in recorder.calls[FN]:
+        target = call["kwargs"]["target"]
+        assert call["kwargs"]["flux_bus"] == f"flux_{target}_x"
+
+    parameters = _base_parameters() | {"targeted_loops": []}
+    platform.analog_compilation_settings.qubit_loops = 2
+    with pytest.raises(ValueError):
+        run_experiment(parameters)
+
+    parameters = _base_parameters() | {"targeted_loops": ["x"]}
+    platform.analog_compilation_settings.qubit_loops = 1
+    with pytest.raises(ValueError):
+        run_experiment(parameters)
