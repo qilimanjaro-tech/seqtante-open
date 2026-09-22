@@ -14,7 +14,7 @@
 
 """Boiler-plate for testing :class:`~seqtante_open.experiments.fitting.FittingClass` subclasses.
 
-Subclass :class:`FittingTestCase`, declare four things, and you inherit a full
+Subclass :class:`FittingTestCase`, declare five things, and you inherit a full
 test suite for ``__init__``, ``fit`` and ``plot``::
 
     from tests.experiments.fitting.harness import FittingTestCase
@@ -23,13 +23,15 @@ test suite for ``__init__``, ``fit`` and ``plot``::
     class TestT1Fit(FittingTestCase):
         FIT_CLASS = T1Fit
         DATA = "t1_fit.h5"
-        INIT = {"qubit_idx": 0, "measurement_id": 1}
-        EXPECTED = {"optimized_params.thresh.1": pytest.approx(-8.06e-5, rel=0.05)}
+        BUILDER = make_t1_data
+        INIT = {"measurement_id": 1, "target": "q1"}
+        EXPECTED = {"results.1": pytest.approx(-1.0 / 12_400, rel=0.02)}
 
 The test module must live at the mirror of the fit class's own module. ``T1Fit``
-lives in ``src/seqtante_open/experiments/transmons/single_qubit_gates/fit/t1_fit.py``,
-so its case lives in ``tests/experiments/transmons/single_qubit_gates/fit/test_t1_fit.py``.
-``test_registry.py`` enforces that, and that no fit class goes without a case.
+lives in ``src/seqtante_open/experiments/fitting/t1_fit.py``, so its case lives in
+``tests/experiments/fitting/test_t1_fit.py``, which is the worked example this
+docstring is quoting. ``test_registry.py`` enforces that, and that no fit class
+goes without a case.
 
 See ``README.md`` in this folder for the copy-paste template.
 """
@@ -193,7 +195,8 @@ def as_iq(
 def resolve_path(obj: Any, path: str) -> Any:
     """Resolve a dotted ``EXPECTED`` key through attributes, dict keys and indices.
 
-    ``"optimized_params.rot.1"`` resolves to ``obj.optimized_params["rot"][1]``.
+    ``"results.signal.fitted_if"`` resolves to ``obj.results["signal"]["fitted_if"]``,
+    and ``"results.1"`` to ``obj.results[1]``.
     """
     current = obj
     for part in path.split("."):
