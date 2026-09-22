@@ -32,7 +32,6 @@ import numpy as np
 import pytest
 from qililab.qprogram.calibration import Calibration
 from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
-from qililab.typings.enums import Parameter
 
 from seqtante_open.experiments.nodes.t1 import t1_node
 from seqtante_open.experiments.utils.flux_buses import get_all_flux_buses
