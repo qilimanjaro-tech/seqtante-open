@@ -13,12 +13,11 @@
 # limitations under the License.
 
 from typing import cast
-from warnings import warn
 
 import numpy as np
 from qililab import Calibration, Parameter
 from qililab.platform import Platform
-from qililab.result import DatabaseManager, StreamArray
+from qililab.result import AutocalMeasurement, DatabaseManager, StreamArray
 
 from seqtante_open.experiments.qprogram import t1_saturation as t1_qprogram
 
@@ -29,11 +28,8 @@ def t1_saturation(
     readout_bus: str,
     drive_bus: str,
     wait_sweep: np.ndarray,
-    drive_if: float,
     drive_step_duration: int,
     drive_amplitude: float,
-    drive_gain: float,
-    readout_if: int,
     readout_duration: int,
     readout_amplitude: float,
     overlap: int,
@@ -50,7 +46,7 @@ def t1_saturation(
     target: str | None = None,
     autocalibration: bool = False,
     calibration: Calibration | None = None,
-) -> int | None:
+) -> int:
     """T1 measured via a saturation pulse.
 
     Args:
@@ -85,10 +81,8 @@ def t1_saturation(
     """
     qprogram = t1_qprogram(
         wait_sweep=wait_sweep,
-        drive_if=drive_if,
         drive_amplitude=drive_amplitude,
         drive_step_duration=drive_step_duration,
-        readout_if=readout_if,
         readout_amplitude=readout_amplitude,
         readout_duration=readout_duration,
         relax_duration=relax_duration,
@@ -112,18 +106,12 @@ def t1_saturation(
         (
             instrument_name
             for instrument_platform in platform.get_element(drive_bus).instruments
-            if (instrument_name := instrument_platform.name.name) in ["ROHDE_SCHWARZ", "QCMRF"]
+            if (instrument_name := instrument_platform.name.name) == "ROHDE_SCHWARZ"
         ),
         None,
     )
     if instrument_platform is not None:
-        if instrument_platform == "ROHDE_SCHWARZ":
-            platform.set_parameter(alias=drive_bus, parameter=Parameter.POWER, value=drive_gain)
-            platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=True)
-        elif instrument_platform == "QCMRF":
-            platform.set_parameter(alias=drive_bus, parameter=Parameter.GAIN, value=drive_gain)
-    else:
-        warn("No instrument to set power to.")
+        platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=True)
 
     stream_array = StreamArray(
         shape=(len(wait_sweep), 2),
@@ -150,4 +138,4 @@ def t1_saturation(
             if instrument.name.name == "ROHDE_SCHWARZ":
                 platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=False)
 
-    return cast("int", stream_array.measurement.measurement_id) if stream_array.measurement is not None else None
+    return cast("int", cast("AutocalMeasurement", stream_array.measurement).measurement_id)

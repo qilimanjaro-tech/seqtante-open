@@ -23,10 +23,8 @@ from .utils import smooth_ringup_wf
 
 def t1_saturation(
     wait_sweep: Iterable[int],
-    drive_if: float,
     drive_amplitude: float,
     drive_step_duration: int,
-    readout_if: float,
     readout_amplitude: float,
     readout_duration: int,
     relax_duration: int,
@@ -80,9 +78,6 @@ def t1_saturation(
     wf_drive_rup = IQPair(wf_i_drive_rup, wf_q_drive_rup)
 
     qp = QProgram()
-
-    qp.set_frequency(bus="readout", frequency=readout_if)
-    qp.set_frequency(bus="drive", frequency=drive_if)
 
     with qp.average(averages):
         for duration_idle in wait_sweep:

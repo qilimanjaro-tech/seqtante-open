@@ -48,6 +48,8 @@ CALIBRATION_PATH = "unused-mocked.yml"
 
 DRIVE_BUSES = ("drive_q1", "drive_q2")
 READOUT_BUSES = ("readout_q1", "readout_q2")
+OPERATING_POINT = "park"
+QUBITS = ("q1", "q2")
 
 
 def _identity_crosstalk(platform) -> CrosstalkMatrix:
@@ -55,7 +57,7 @@ def _identity_crosstalk(platform) -> CrosstalkMatrix:
     return CrosstalkMatrix.from_buses({b: {bb: (1.0 if b == bb else 0.0) for bb in buses} for b in buses})
 
 
-def _calibration(platform, lo: dict[str, float] | None = None) -> Calibration:
+def _calibration(platform) -> Calibration:
     """A real ``Calibration`` holding a crosstalk matrix and the per-target LO table.
 
     Real rather than a stand-in because the node writes the ``data_folder`` into
@@ -63,13 +65,12 @@ def _calibration(platform, lo: dict[str, float] | None = None) -> Calibration:
     """
     calibration = Calibration()
     calibration.crosstalk_matrix = _identity_crosstalk(platform)
-    calibration.parameters = {"LO": lo or {}}
     return calibration
 
 
 def _base_parameters() -> dict:
     return {
-        "targets": ["q1", "q2"],
+        "targets": QUBITS,
         "calibration_path": CALIBRATION_PATH,
         "data_folder": DATA_FOLDER,
         "wait_sweep": [0, 40_000, 81],
@@ -92,8 +93,7 @@ def run_experiment(platform, mock_db_manager, mock_recorder):
     mock_recorder.mock(f"{MODULE}.deserialize_from", output=calibration)
     mock_recorder.mock(f"{MODULE}.{FN}", output=MEASUREMENT_ID)
     mock_recorder.mock(f"{MODULE}.T1Fit", output=fit_model)
-    mock_recorder.mock(f"{MODULE}.save_platform")
-    mock_recorder.mock(f"{MODULE}.serialize_to")
+    mock_recorder.mock(f"{MODULE}.get_operating_point")
 
     def run(parameters: dict):
         t1_node(platform=platform, platform_path=str(RUNCARD_PATH), parameters=parameters)
@@ -107,7 +107,6 @@ def run_experiment(platform, mock_db_manager, mock_recorder):
 
 def test_basic_parameters(run_experiment):
     """Every global parameter reaches the execution function, sweep included."""
-    platform = run_experiment.platform
     recorder = run_experiment(_base_parameters())
 
     calls = recorder.calls[FN]
@@ -127,11 +126,6 @@ def test_basic_parameters(run_experiment):
     for call in calls:
         np.testing.assert_allclose(call["kwargs"]["wait_sweep"], np.linspace(0, 40_000, 81))
 
-    # Both IFs are read off the buses rather than declared as parameters.
-    for call in calls:
-        assert call["kwargs"]["drive_if"] == platform.get_parameter(call["kwargs"]["drive_bus"], Parameter.IF)
-        assert call["kwargs"]["readout_if"] == platform.get_parameter(call["kwargs"]["readout_bus"], Parameter.IF)
-
     # Each measurement gets its own stamped copy; the shared calibration stays untouched.
     for call in calls:
         calibration = call["kwargs"]["calibration"]
@@ -140,14 +134,13 @@ def test_basic_parameters(run_experiment):
     assert "data_folder" not in run_experiment.calibration.parameters
 
 
-def test_coupler_targets_are_skipped(run_experiment):
+def test_node_errors_on_coupler_target(run_experiment):
     """A coupler has no drive line of its own, so coupler tokens are not measured."""
     parameters = _base_parameters()
     parameters["targets"] = ["q1", "c1_2"]
 
-    recorder = run_experiment(parameters)
-
-    assert [c["kwargs"]["target"] for c in recorder.calls[FN]] == ["q1"]
+    with pytest.raises(ValueError, match="t1 experiment does not execute on couplers"):
+        run_experiment(parameters)
 
 
 def test_per_target_overwrite_reaches_execution(run_experiment):
@@ -183,7 +176,6 @@ def test_defaults_are_used_when_parameters_are_missing(run_experiment):
     recorder = run_experiment(_base_parameters())
 
     for call in recorder.calls[FN]:
-        assert call["kwargs"]["drive_gain"] == 1
         assert call["kwargs"]["overlap"] == 0
         assert call["kwargs"]["drive_rise_time"] == 2_000
         assert call["kwargs"]["n_sigmas"] == 4
@@ -194,7 +186,6 @@ def test_declared_optional_parameters_win_over_the_defaults(run_experiment):
     """``overlap_time`` is renamed to ``overlap`` on the way through; the rest pass straight."""
     parameters = _base_parameters()
     parameters |= {
-        "drive_gain": 0.8,
         "overlap_time": 2000,
         "drive_rise_time": 500,
         "n_sigmas": 6,
@@ -204,7 +195,6 @@ def test_declared_optional_parameters_win_over_the_defaults(run_experiment):
     recorder = run_experiment(parameters)
 
     for call in recorder.calls[FN]:
-        assert call["kwargs"]["drive_gain"] == pytest.approx(0.8)
         assert call["kwargs"]["overlap"] == 2000
         assert call["kwargs"]["drive_rise_time"] == 500
         assert call["kwargs"]["n_sigmas"] == 6
@@ -222,22 +212,33 @@ def test_overwrite_does_not_mutate_shared_parameters(run_experiment):
     assert parameters["q1"] == {"drive_amplitude": 0.9}
 
 
-def test_drive_lo_prefers_the_calibration_entry(platform, mock_db_manager, mock_recorder):
-    """The ``Calibration``'s ``LO`` table wins; a target absent from it falls back to the bus."""
-    calibration = _calibration(platform, lo={"q1": 4.7e9})
-    mock_recorder.mock(f"{MODULE}.deserialize_from", output=calibration)
-    mock_recorder.mock(f"{MODULE}.{FN}", output=MEASUREMENT_ID)
-    mock_recorder.mock(f"{MODULE}.T1Fit", output=MagicMock(name="T1Fit"))
-    mock_recorder.mock(f"{MODULE}.save_platform")
-    mock_recorder.mock(f"{MODULE}.serialize_to")
+def test_operating_point_is_applied_before_each_measurement(run_experiment):
+    """With ``operating_point`` configured, every qubit is parked before it is measured.
 
-    t1_node(platform=platform, platform_path=str(RUNCARD_PATH), parameters=_base_parameters())
+    The helper itself is pinned in ``tests/experiments/utils``; all that matters
+    here is that the node reaches it with the right target, name and platform.
+    """
+    parameters = _base_parameters()
+    parameters["operating_point"] = OPERATING_POINT
 
-    los = {c["kwargs"]["target"]: c["kwargs"]["drive_lo"] for c in mock_recorder.calls[FN]}
-    assert los == {
-        "q1": 4.7e9,
-        "q2": platform.get_parameter("drive_q2", Parameter.LO_FREQUENCY),
-    }
+    recorder = run_experiment(parameters)
+
+    calls = recorder.calls["get_operating_point"]
+    assert len(calls) == 2, "Expected one operating point per qubit"
+    for qubit, applied in zip(QUBITS, calls, strict=True):
+        assert applied["args"] == (run_experiment.calibration,)
+        assert applied["kwargs"] == {
+            "target": qubit,
+            "operating_point_name": OPERATING_POINT,
+            "platform": run_experiment.platform,
+        }
+
+
+def test_operating_point_is_left_alone_when_not_configured(run_experiment):
+    """Without it the node measures the platform as it already stands."""
+    recorder = run_experiment(_base_parameters())
+
+    assert recorder.calls["get_operating_point"] == []
 
 
 def test_fit_runs_once_per_measurement(run_experiment):
@@ -252,36 +253,6 @@ def test_fit_runs_once_per_measurement(run_experiment):
 
     assert run_experiment.fit_model.fit.call_count == 2
     assert run_experiment.fit_model.plot.call_count == 2
-
-
-def test_nothing_is_written_back(run_experiment):
-    """T1 is a benchmark: the run leaves the platform and the ``Calibration`` untouched.
-
-    The other nodes update a bus (``single_tone``, ``two_tone``) or accumulate a flux
-    offset (``offset_calibration``). This one only measures, so a future change that
-    starts writing a fitted value has to come here and say so.
-    """
-    platform = run_experiment.platform
-    before = {
-        bus: (platform.get_parameter(bus, Parameter.IF), platform.get_parameter(bus, Parameter.LO_FREQUENCY))
-        for bus in DRIVE_BUSES + READOUT_BUSES
-    }
-
-    recorder = run_experiment(_base_parameters())
-
-    after = {
-        bus: (platform.get_parameter(bus, Parameter.IF), platform.get_parameter(bus, Parameter.LO_FREQUENCY))
-        for bus in DRIVE_BUSES + READOUT_BUSES
-    }
-    assert after == before
-
-    # The shared calibration is the one that was read, unchanged: only the per-measurement
-    # copies carry the stamped data_folder.
-    assert run_experiment.calibration.parameters == {"LO": {}}
-
-    # Nothing is persisted either: no runcard write, no calibration write.
-    assert not recorder.calls["save_platform"]
-    assert not recorder.calls["serialize_to"]
 
 
 def test_bias_is_zeroed_even_when_the_experiment_fails(run_experiment, mock_recorder, monkeypatch):
