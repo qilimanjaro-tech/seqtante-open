@@ -24,12 +24,11 @@ from qililab.utils.serialization import deserialize_from, serialize_to
 
 from seqtante_open.experiments.experiment_classes import two_tone__frequency_vs_flux as two_tone_vs_flux_experiment
 from seqtante_open.experiments.fitting import FluxoniumTwoToneFluxModel
-from seqtante_open.experiments.utils import coupler_readout_qubit, get_lo_multiple_sources, x_loop_readout_flux
+from seqtante_open.experiments.utils import coupler_readout_qubit, get_operating_point, x_loop_readout_flux
 from seqtante_open.outputs import output_controller
 
 _DEFAULTS = {
     "ringup_time": 0,
-    "drive_gain": 1,
     "overlap_time": 0,
 }
 
@@ -42,9 +41,15 @@ def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, para
     readout_x_couplers = coupler_readout_qubit(
         couplers=couplers, coupler_readout_overwrite=parameters.get("coupler_readout_qubit", {})
     )
+
     qubit_loops = acs.qubit_loops if (acs := platform.analog_compilation_settings) else 1
     coupler_loops = acs.coupler_loops if acs else 1
     db_manager = output_controller.db_manager
+    targeted_loops = tuple(parameters.get("targeted_loops", ("x", "z")))
+    if not targeted_loops or (qubit_loops == coupler_loops == 1 and "z" not in targeted_loops):
+        raise ValueError(f"No valid targeted_loops. targeted_loops: {targeted_loops}")
+    qubit_loops_sweep = (loop for loop in ["z", "x"][:qubit_loops][::-1] if loop in targeted_loops)
+    coupler_loops_sweep = (loop for loop in ["z", "x"][:coupler_loops][::-1] if loop in targeted_loops)
 
     calibration: Calibration = deserialize_from(parameters["calibration_path"], Calibration)
     if not isinstance(crosstalk := calibration.crosstalk_matrix, CrosstalkMatrix):
@@ -64,11 +69,17 @@ def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, para
         if readout_flux:
             platform.set_parameter(readout_flux[0], Parameter.FLUX, readout_flux[1])
         target_params = {**parameters, **parameters[target]}
-        drive_LO = get_lo_multiple_sources(bus=drive_bus, target=target, platform=platform, calibration=calibration)
+        if (operating_point_name := target_params.get("operating_point")) is not None:
+            get_operating_point(
+                calibration,
+                target=target,
+                operating_point_name=operating_point_name,
+                platform=platform,
+            )
         drive_if_freq = platform.get_parameter(alias=drive_bus, parameter=Parameter.IF)
-        readout_if_freq = platform.get_parameter(alias=readout_bus, parameter=Parameter.IF)
         freq_sweep = np.linspace(*target_params["freq_sweep"]) + drive_if_freq
         flux_sweep = np.linspace(*target_params["flux_sweep"])
+        drive_LO = platform.get_parameter(drive_bus, parameter=Parameter.LO_FREQUENCY)
         calibration_copy = deepcopy(calibration)
         calibration_copy.parameters["data_folder"] = target_params["data_folder"] + flux_bus
 
@@ -78,7 +89,6 @@ def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, para
             readout_bus=readout_bus,
             drive_bus=drive_bus,
             flux_bus=flux_bus,
-            readout_if_freq=readout_if_freq,
             drive_IF_sweep=freq_sweep,
             flux_parameter=Parameter.FLUX,
             flux_sweep=flux_sweep,
@@ -88,11 +98,9 @@ def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, para
             d_amp=target_params["drive_amplitude"],
             r_amp=target_params["readout_amplitude"],
             r_duration=target_params["readout_duration"],
-            drive_gain=target_params.get("drive_gain", _DEFAULTS["drive_gain"]),
             ringup_time=target_params.get("ringup_time", _DEFAULTS["ringup_time"]),
             overlap_time=target_params.get("overlap_time", _DEFAULTS["overlap_time"]),
             calibration=calibration_copy,
-            drive_LO=drive_LO,
             target=target,
             autocalibration=True,
         )
@@ -106,7 +114,7 @@ def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, para
             crosstalk.flux_offsets[flux_bus] += float(model.offset)
 
     try:
-        for qubit, loop in product(qubits, ["z", "x"][:qubit_loops][::-1]):
+        for qubit, loop in product(qubits, qubit_loops_sweep):
             readout_flux = x_loop_readout_flux(qubit, qubit_loops, parameters) if loop != "x" else None
             _run_experiment(
                 target=qubit,
@@ -116,7 +124,7 @@ def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, para
                 readout_flux=readout_flux,
             )
 
-        for coupler, loop in product(couplers, ["z", "x"][:coupler_loops][::-1]):
+        for coupler, loop in product(couplers, coupler_loops_sweep):
             readout_qubit = readout_x_couplers[coupler]
             _run_experiment(
                 target=coupler,

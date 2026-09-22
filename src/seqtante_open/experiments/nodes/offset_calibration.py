@@ -27,7 +27,7 @@ from seqtante_open.experiments.experiment_classes import (
     single_tone__frequency_vs_flux as single_tone_vs_flux_experiment,
 )
 from seqtante_open.experiments.fitting import FluxoniumSingleToneFluxModel
-from seqtante_open.experiments.utils import coupler_readout_qubit, x_loop_readout_flux
+from seqtante_open.experiments.utils import coupler_readout_qubit, get_operating_point, x_loop_readout_flux
 from seqtante_open.outputs import output_controller
 
 
@@ -41,6 +41,12 @@ def single_tone_vs_flux(platform: Platform, platform_path: str, parameters: dict
     )
     qubit_loops = acs.qubit_loops if (acs := platform.analog_compilation_settings) else 1
     coupler_loops = acs.coupler_loops if acs else 1
+    targeted_loops = tuple(parameters.get("targeted_loops", ("x", "z")))
+    if not targeted_loops or (qubit_loops == coupler_loops == 1 and "z" not in targeted_loops):
+        raise ValueError(f"No valid targeted_loops. targeted_loops: {targeted_loops}")
+    qubit_loops_sweep = (loop for loop in ["z", "x"][:qubit_loops][::-1] if loop in targeted_loops)
+    coupler_loops_sweep = (loop for loop in ["z", "x"][:coupler_loops][::-1] if loop in targeted_loops)
+
     db_manager = output_controller.db_manager
 
     calibration: Calibration = deserialize_from(parameters["calibration_path"], Calibration)
@@ -53,11 +59,18 @@ def single_tone_vs_flux(platform: Platform, platform_path: str, parameters: dict
         if readout_flux:
             platform.set_parameter(readout_flux[0], Parameter.FLUX, readout_flux[1])
         target_params = {**parameters, **parameters[target]}
-        LO = platform.get_parameter(alias=readout_bus, parameter=Parameter.LO_FREQUENCY)
+        if (operating_point_name := target_params.get("operating_point")) is not None:
+            get_operating_point(
+                calibration,
+                target=target,
+                operating_point_name=operating_point_name,
+                platform=platform,
+            )
         if_sweep = np.linspace(*target_params["if_sweep"]) + platform.get_parameter(
             alias=readout_bus, parameter=Parameter.IF
         )
         flux_sweep = np.linspace(*target_params["flux_sweep"])
+        LO = platform.get_parameter(readout_bus, parameter=Parameter.LO_FREQUENCY)
         calibration_copy = deepcopy(calibration)
         calibration_copy.parameters["data_folder"] = target_params["data_folder"] + flux_bus
 
@@ -73,7 +86,6 @@ def single_tone_vs_flux(platform: Platform, platform_path: str, parameters: dict
             flux_sweep=flux_sweep,
             minimum_wait_after_step_override=target_params.get("minimum_wait_after_step"),
             qdac_stop_ro_before_step_override=target_params.get("qdac_stop_ro_before_step"),
-            lo=LO,
             calibration=calibration_copy,
             flux_parameter=Parameter.FLUX,
             qubit_idx=target,
@@ -88,13 +100,13 @@ def single_tone_vs_flux(platform: Platform, platform_path: str, parameters: dict
         crosstalk.flux_offsets[flux_bus] += float(model.offset)
 
     try:
-        for qubit, loop in product(qubits, ["z", "x"][:qubit_loops][::-1]):
+        for qubit, loop in product(qubits, qubit_loops_sweep):
             readout_bus = f"readout_{qubit}"
             flux_bus = f"flux_{qubit}_{loop}"
             readout_flux = x_loop_readout_flux(qubit, qubit_loops, parameters) if loop != "x" else None
             _run_experiment(target=qubit, flux_bus=flux_bus, readout_bus=readout_bus, readout_flux=readout_flux)
 
-        for coupler, loop in product(couplers, ["z", "x"][:coupler_loops][::-1]):
+        for coupler, loop in product(couplers, coupler_loops_sweep):
             readout_qubit = readout_x_couplers[coupler]
             readout_bus = f"readout_{readout_qubit}"
             flux_bus = f"flux_{coupler}_{loop}"
