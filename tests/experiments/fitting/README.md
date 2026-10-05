@@ -73,7 +73,7 @@ class TestFluxoniumSingleToneFluxModel(FittingTestCase):
 
 ```
 python -m tests.experiments.fitting.data.make_data
-pytest tests/experiments/transmons/single_qubit_gates/fit/test_t1_fit.py
+pytest tests/experiments/fitting/test_single_tone_vs_flux_fit.py
 ```
 
 **5. There is no step 5.** `test_registry.py` discovers both sides by subclassing,
@@ -99,7 +99,7 @@ Required:
 - **`DATA`** either the name of an `.h5` in `data/`, or a builder called at test
   time. A committed file and a builder reach the fit class through an identical
   path, so switching between them changes nothing else.
-- **`EXPECTED`** dotted attribute path to expected value. `"optimized_params.rot.1"`
+- **`EXPECTED`** dotted attribute path to expected value. `"results.signal.fitted_if"`
   resolves through attributes, dict keys and indices. Values compare with `==`, so
   `pytest.approx` works; a callable is used as a predicate instead. Required
   whenever the class overrides `fit`, because a fit test that asserts nothing is
