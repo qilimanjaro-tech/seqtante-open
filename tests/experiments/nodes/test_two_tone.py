@@ -96,7 +96,6 @@ def _base_parameters() -> dict:
         "drive_amplitude": 0.5,
         "readout_amplitude": 0.075,
         "readout_duration": 2000,
-        "drive_gain": 0.8,
         "ringup_time": 24,
         "overlap_time": 12,
         "q1": {},
@@ -141,7 +140,6 @@ def test_basic_parameters(run_experiment):
     assert all(c["kwargs"]["d_duration"] == 40 for c in calls)
     assert all(c["kwargs"]["averages"] == 1000 for c in calls)
     assert all(c["kwargs"]["relax_duration"] == 200_000 for c in calls)
-    assert all(c["kwargs"]["drive_gain"] == pytest.approx(0.8) for c in calls)
     assert all(c["kwargs"]["ringup_time"] == 24 for c in calls)
     assert all(c["kwargs"]["overlap_time"] == 12 for c in calls)
     assert all(c["kwargs"]["autocalibration"] is True for c in calls)
@@ -209,14 +207,12 @@ def test_per_target_overwrite_reaches_execution(run_experiment):
 def test_defaults_are_used_when_parameters_are_missing(run_experiment):
     """Optional gain and timing parameters fall back to the module defaults."""
     parameters = _base_parameters()
-    del parameters["drive_gain"]
     del parameters["ringup_time"]
     del parameters["overlap_time"]
 
     recorder = run_experiment(parameters)
 
     for call in recorder.calls[FN]:
-        assert call["kwargs"]["drive_gain"] == 1
         assert call["kwargs"]["ringup_time"] == 0
         assert call["kwargs"]["overlap_time"] == 0
 

@@ -65,6 +65,7 @@ def _calibration(platform) -> Calibration:
     """
     calibration = Calibration()
     calibration.crosstalk_matrix = _identity_crosstalk(platform)
+
     return calibration
 
 
@@ -286,3 +287,22 @@ def test_operating_point_is_left_alone_when_not_configured(run_experiment):
     recorder = run_experiment(_base_parameters())
 
     assert recorder.calls["get_operating_point"] == []
+
+
+def test_loop_targeting(platform, run_experiment):
+    parameters = _base_parameters() | {"targeted_loops": ["x"]}
+    platform.analog_compilation_settings.qubit_loops = 2
+    recorder = run_experiment(parameters)
+    for call in recorder.calls[FN]:
+        target = call["kwargs"]["qubit_idx"]
+        assert call["kwargs"]["flux_bus"] == f"flux_{target}_x"
+
+    parameters = _base_parameters() | {"targeted_loops": []}
+    platform.analog_compilation_settings.qubit_loops = 2
+    with pytest.raises(ValueError):
+        run_experiment(parameters)
+
+    parameters = _base_parameters() | {"targeted_loops": ["x"]}
+    platform.analog_compilation_settings.qubit_loops = 1
+    with pytest.raises(ValueError):
+        run_experiment(parameters)

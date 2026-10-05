@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from typing import cast
-from warnings import warn
 
 import numpy as np
 from qililab import Calibration, Parameter
@@ -65,10 +64,12 @@ def two_tone_frequency(
     if readout_if_freq is not None:
         platform.set_parameter(alias=readout_bus, parameter=Parameter.IF, value=readout_if_freq)
     instrument_platform = next(
-        (instrument_name
-        for instrument_platform in platform.get_element(drive_bus).instruments
-        if (instrument_name := instrument_platform.name.name) == "ROHDE_SCHWARZ"),
-        None
+        (
+            instrument_name
+            for instrument_platform in platform.get_element(drive_bus).instruments
+            if (instrument_name := instrument_platform.name.name) == "ROHDE_SCHWARZ"
+        ),
+        None,
     )
     if instrument_platform is not None:
         platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=True)
@@ -89,12 +90,14 @@ def two_tone_frequency(
     )
     try:
         with stream_array:
-            results = platform.execute_qprogram(qprogram, bus_mapping={"readout": readout_bus, "drive": drive_bus}).results
+            results = platform.execute_qprogram(
+                qprogram, bus_mapping={"readout": readout_bus, "drive": drive_bus}
+            ).results
             stream_array[:,] = results[readout_bus][0].array.T
 
     finally:
         if instrument_platform is not None:
-                platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=True)
+            platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=True)
 
     return cast("int", cast("AutocalMeasurement", stream_array.measurement).measurement_id)
 
@@ -143,10 +146,12 @@ def two_tone__frequency_vs_flux(
     if readout_if_freq is not None:
         platform.set_parameter(alias=readout_bus, parameter=Parameter.IF, value=readout_if_freq)
     instrument_platform = next(
-        (instrument_name
-        for instrument_platform in platform.get_element(drive_bus).instruments
-        if (instrument_name := instrument_platform.name.name) == "ROHDE_SCHWARZ"),
-        None
+        (
+            instrument_name
+            for instrument_platform in platform.get_element(drive_bus).instruments
+            if (instrument_name := instrument_platform.name.name) == "ROHDE_SCHWARZ"
+        ),
+        None,
     )
     if instrument_platform is not None:
         platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=True)

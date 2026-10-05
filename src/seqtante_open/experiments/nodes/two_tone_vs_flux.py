@@ -41,9 +41,15 @@ def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, para
     readout_x_couplers = coupler_readout_qubit(
         couplers=couplers, coupler_readout_overwrite=parameters.get("coupler_readout_qubit", {})
     )
+
     qubit_loops = acs.qubit_loops if (acs := platform.analog_compilation_settings) else 1
     coupler_loops = acs.coupler_loops if acs else 1
     db_manager = output_controller.db_manager
+    targeted_loops = tuple(parameters.get("targeted_loops", ("x", "z")))
+    if not targeted_loops or (qubit_loops == coupler_loops == 1 and "z" not in targeted_loops):
+        raise ValueError(f"No valid targeted_loops. targeted_loops: {targeted_loops}")
+    qubit_loops_sweep = (loop for loop in ["z", "x"][:qubit_loops][::-1] if loop in targeted_loops)
+    coupler_loops_sweep = (loop for loop in ["z", "x"][:coupler_loops][::-1] if loop in targeted_loops)
 
     calibration: Calibration = deserialize_from(parameters["calibration_path"], Calibration)
     if not isinstance(crosstalk := calibration.crosstalk_matrix, CrosstalkMatrix):
@@ -108,7 +114,7 @@ def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, para
             crosstalk.flux_offsets[flux_bus] += float(model.offset)
 
     try:
-        for qubit, loop in product(qubits, ["z", "x"][:qubit_loops][::-1]):
+        for qubit, loop in product(qubits, qubit_loops_sweep):
             readout_flux = x_loop_readout_flux(qubit, qubit_loops, parameters) if loop != "x" else None
             _run_experiment(
                 target=qubit,
@@ -118,7 +124,7 @@ def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, para
                 readout_flux=readout_flux,
             )
 
-        for coupler, loop in product(couplers, ["z", "x"][:coupler_loops][::-1]):
+        for coupler, loop in product(couplers, coupler_loops_sweep):
             readout_qubit = readout_x_couplers[coupler]
             _run_experiment(
                 target=coupler,
