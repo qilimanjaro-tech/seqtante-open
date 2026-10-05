@@ -45,6 +45,8 @@ MEASUREMENT_ID = 777
 FITTED_OFFSET = 0.123
 DATA_FOLDER = "unused-mocked-folder"
 
+OPERATING_POINT = "park"
+
 MEASURED_BUSES = ("flux_q1_x", "flux_q1_z", "flux_c1_2_z")
 """The flux buses of ``["q1", "c1_2"]``, in the order the node sweeps them."""
 
@@ -54,15 +56,14 @@ def _identity_crosstalk(platform) -> CrosstalkMatrix:
     return CrosstalkMatrix.from_buses({b: {bb: (1.0 if b == bb else 0.0) for bb in buses} for b in buses})
 
 
-def _calibration(platform, lo: dict[str, float] | None = None) -> Calibration:
-    """A real ``Calibration`` holding a crosstalk matrix and the per-bus LO table.
+def _calibration(platform) -> Calibration:
+    """A real ``Calibration`` holding nothing but an identity crosstalk matrix.
 
     Real rather than a stand-in because the node writes the per-measurement
     ``data_folder`` into ``parameters`` of a copy of it.
     """
     calibration = Calibration()
     calibration.crosstalk_matrix = _identity_crosstalk(platform)
-    calibration.parameters = {"LO": lo or {}}
     return calibration
 
 
@@ -86,7 +87,6 @@ def _base_parameters() -> dict:
         "drive_amplitude": 0.5,
         "readout_amplitude": 0.075,
         "readout_duration": 2000,
-        "drive_gain": 0.8,
         "ringup_time": 24,
         "overlap_time": 12,
         "x_loop_readout_flux": 0.3,
@@ -104,6 +104,7 @@ def run_experiment(platform, mock_db_manager, mock_recorder):
     mock_recorder.mock(f"{MODULE}.{FN}", output=MEASUREMENT_ID)
     mock_recorder.mock(f"{MODULE}.FluxoniumTwoToneFluxModel", output=model)
     mock_recorder.mock(f"{MODULE}.serialize_to")
+    mock_recorder.mock(f"{MODULE}.get_operating_point")
 
     def run(parameters: dict):
         two_tone_frequency_vs_flux_node(platform=platform, platform_path="unused", parameters=parameters)
@@ -127,7 +128,6 @@ def test_basic_parameters(platform, run_experiment):
     assert all(c["kwargs"]["d_duration"] == 40 for c in calls)
     assert all(c["kwargs"]["averages"] == 1000 for c in calls)
     assert all(c["kwargs"]["relax_duration"] == 200_000 for c in calls)
-    assert all(c["kwargs"]["drive_gain"] == pytest.approx(0.8) for c in calls)
     assert all(c["kwargs"]["ringup_time"] == 24 for c in calls)
     assert all(c["kwargs"]["overlap_time"] == 12 for c in calls)
     assert all(c["kwargs"]["flux_parameter"] == Parameter.FLUX for c in calls)
@@ -143,12 +143,14 @@ def test_basic_parameters(platform, run_experiment):
     # The flux sweep is the raw linspace; the frequency sweep is offset by the drive bus IF.
     for call in calls:
         drive_bus = call["kwargs"]["drive_bus"]
-        readout_bus = call["kwargs"]["readout_bus"]
         expected_freq = np.linspace(-1.5e6, 1.5e6, 21) + platform.get_parameter(drive_bus, Parameter.IF)
         np.testing.assert_allclose(call["kwargs"]["drive_IF_sweep"], expected_freq)
         np.testing.assert_allclose(call["kwargs"]["flux_sweep"], np.linspace(-1, 1, 11))
-        assert call["kwargs"]["readout_if_freq"] == platform.get_parameter(readout_bus, Parameter.IF)
-        assert call["kwargs"]["drive_LO"] == platform.get_parameter(drive_bus, Parameter.LO_FREQUENCY)
+
+    fits = recorder.calls["FluxoniumTwoToneFluxModel"]
+    assert [f["kwargs"]["lo"] for f in fits] == [
+        platform.get_parameter(c["kwargs"]["drive_bus"], Parameter.LO_FREQUENCY) for c in calls
+    ]
 
 
 def test_loops_over_all_loops(run_experiment):
@@ -265,36 +267,40 @@ def test_overwrite_does_not_mutate_shared_parameters(run_experiment):
 def test_defaults_are_used_when_parameters_are_missing(run_experiment):
     """The optional drive and timing parameters fall back to the module defaults."""
     parameters = _base_parameters()
-    for key in ("drive_gain", "ringup_time", "overlap_time"):
+    for key in ("ringup_time", "overlap_time"):
         del parameters[key]
 
     recorder = run_experiment(parameters)
 
     for call in recorder.calls[FN]:
-        assert call["kwargs"]["drive_gain"] == 1
         assert call["kwargs"]["ringup_time"] == 0
         assert call["kwargs"]["overlap_time"] == 0
 
 
-def test_lo_from_the_calibration_is_per_target(platform, mock_db_manager, mock_recorder):
-    """With no ``LO`` parameter, the calibration's per-bus table is consulted next."""
-    calibration = _calibration(platform, lo={"c1_2": 4.7e9})
-    mock_recorder.mock(f"{MODULE}.deserialize_from", output=calibration)
-    mock_recorder.mock(f"{MODULE}.{FN}", output=MEASUREMENT_ID)
-    mock_recorder.mock(f"{MODULE}.FluxoniumTwoToneFluxModel", output=_fit_model())
-    mock_recorder.mock(f"{MODULE}.serialize_to")
+def test_operating_point_is_applied_before_each_measurement(platform, run_experiment):
+    """With ``operating_point`` configured, every target is parked before it is measured.
 
+    The helper itself is pinned in ``tests/experiments/utils``; all that matters
+    here is that the node reaches it with the right target, name and platform.
+    """
     parameters = _base_parameters()
-    parameters["coupler_readout_qubit"] = {"c1_2": "q1"}
-    parameters["q1"] = {}
+    parameters["operating_point"] = OPERATING_POINT
 
-    two_tone_frequency_vs_flux_node(platform=platform, platform_path="unused", parameters=parameters)
+    recorder = run_experiment(parameters)
 
-    los = {c["kwargs"]["target"]: c["kwargs"]["drive_LO"] for c in mock_recorder.calls[FN]}
-    assert los == {
-        "q1": platform.get_parameter("drive_q1", Parameter.LO_FREQUENCY),
-        "c1_2": 4.7e9,
-    }
+    applied = recorder.calls["get_operating_point"]
+    assert [c["kwargs"]["target"] for c in applied] == [c["kwargs"]["target"] for c in recorder.calls[FN]]
+    for call in applied:
+        assert call["args"] == (run_experiment.calibration,)
+        assert call["kwargs"]["operating_point_name"] == OPERATING_POINT
+        assert call["kwargs"]["platform"] is platform
+
+
+def test_operating_point_is_left_alone_when_not_configured(run_experiment):
+    """Without it the node measures the platform as it already stands."""
+    recorder = run_experiment(_base_parameters())
+
+    assert recorder.calls["get_operating_point"] == []
 
 
 def test_fitted_offsets_are_written_to_the_calibration(run_experiment):
@@ -354,3 +360,22 @@ def test_calibration_without_crosstalk_matrix_is_rejected(platform, mock_db_mana
 
     assert not mock_recorder.calls[FN]
     assert not mock_recorder.calls["serialize_to"]
+
+
+def test_loop_targeting(platform, run_experiment):
+    parameters = _base_parameters() | {"targeted_loops": ["x"]}
+    platform.analog_compilation_settings.qubit_loops = 2
+    recorder = run_experiment(parameters)
+    for call in recorder.calls[FN]:
+        target = call["kwargs"]["target"]
+        assert call["kwargs"]["flux_bus"] == f"flux_{target}_x"
+
+    parameters = _base_parameters() | {"targeted_loops": []}
+    platform.analog_compilation_settings.qubit_loops = 2
+    with pytest.raises(ValueError):
+        run_experiment(parameters)
+
+    parameters = _base_parameters() | {"targeted_loops": ["x"]}
+    platform.analog_compilation_settings.qubit_loops = 1
+    with pytest.raises(ValueError):
+        run_experiment(parameters)

@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from typing import cast
-from warnings import warn
 
 import numpy as np
 from qililab import Calibration, Parameter
@@ -27,7 +26,6 @@ from seqtante_open.experiments.qprogram import two_tone_spectroscopy
 def two_tone_frequency(
     platform: Platform,
     db_manager: DatabaseManager,
-    readout_if_freq: int,
     averages: int,
     r_duration: int,
     r_amp: float,
@@ -38,8 +36,8 @@ def two_tone_frequency(
     relax_duration: int,
     readout_bus: str,
     drive_bus: str,
-    drive_gain: float,
     drive_IF_sweep: np.ndarray,
+    readout_if_freq: int | None = None,
     drive_LO: int | None = None,
     readout_LO: int | None = None,
     target: str | None = None,
@@ -63,20 +61,18 @@ def two_tone_frequency(
         platform.set_parameter(alias=drive_bus, parameter=Parameter.LO_FREQUENCY, value=drive_LO)
     if readout_LO is not None:
         platform.set_parameter(alias=readout_bus, parameter=Parameter.LO_FREQUENCY, value=readout_LO)
-    platform.set_parameter(alias=readout_bus, parameter=Parameter.IF, value=readout_if_freq)
+    if readout_if_freq is not None:
+        platform.set_parameter(alias=readout_bus, parameter=Parameter.IF, value=readout_if_freq)
     instrument_platform = next(
-        instrument_name
-        for instrument_platform in platform.get_element(drive_bus).instruments
-        if (instrument_name := instrument_platform.name.name) in ["ROHDE_SCHWARZ", "QCMRF"]
+        (
+            instrument_name
+            for instrument_platform in platform.get_element(drive_bus).instruments
+            if (instrument_name := instrument_platform.name.name) == "ROHDE_SCHWARZ"
+        ),
+        None,
     )
     if instrument_platform is not None:
-        if instrument_platform == "ROHDE_SCHWARZ":
-            platform.set_parameter(alias=drive_bus, parameter=Parameter.POWER, value=drive_gain)
-            platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=True)
-        elif instrument_platform == "QCMRF":
-            platform.set_parameter(alias=drive_bus, parameter=Parameter.GAIN, value=drive_gain)
-    else:
-        warn("No instrument to set power to.")
+        platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=True)
 
     stream_array = StreamArray(
         shape=(len(drive_IF_sweep), 2),
@@ -92,14 +88,16 @@ def two_tone_frequency(
         autocalibration=autocalibration,
         qubit_idx=target,
     )
+    try:
+        with stream_array:
+            results = platform.execute_qprogram(
+                qprogram, bus_mapping={"readout": readout_bus, "drive": drive_bus}
+            ).results
+            stream_array[:,] = results[readout_bus][0].array.T
 
-    with stream_array:
-        results = platform.execute_qprogram(qprogram, bus_mapping={"readout": readout_bus, "drive": drive_bus}).results
-        stream_array[:,] = results[readout_bus][0].array.T
-
-    for instrument in platform.get_element(drive_bus).instruments:
-        if instrument.name.name == "ROHDE_SCHWARZ":
-            platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=False)
+    finally:
+        if instrument_platform is not None:
+            platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=True)
 
     return cast("int", cast("AutocalMeasurement", stream_array.measurement).measurement_id)
 
@@ -107,7 +105,6 @@ def two_tone_frequency(
 def two_tone__frequency_vs_flux(
     platform: Platform,
     db_manager: DatabaseManager,
-    readout_if_freq: int,
     averages: int,
     r_duration: int,
     r_amp: float,
@@ -118,11 +115,11 @@ def two_tone__frequency_vs_flux(
     relax_duration: int,
     readout_bus: str,
     drive_bus: str,
-    drive_gain: float,
     drive_IF_sweep: np.ndarray,
     flux_bus: str,
     flux_parameter: Parameter,
     flux_sweep: np.ndarray,
+    readout_if_freq: int | None = None,
     drive_LO: int | None = None,
     readout_LO: int | None = None,
     target: str | None = None,
@@ -146,20 +143,18 @@ def two_tone__frequency_vs_flux(
         platform.set_parameter(alias=drive_bus, parameter=Parameter.LO_FREQUENCY, value=drive_LO)
     if readout_LO is not None:
         platform.set_parameter(alias=readout_bus, parameter=Parameter.LO_FREQUENCY, value=readout_LO)
-    platform.set_parameter(alias=readout_bus, parameter=Parameter.IF, value=readout_if_freq)
+    if readout_if_freq is not None:
+        platform.set_parameter(alias=readout_bus, parameter=Parameter.IF, value=readout_if_freq)
     instrument_platform = next(
-        instrument_name
-        for instrument_platform in platform.get_element(drive_bus).instruments
-        if (instrument_name := instrument_platform.name.name) in ["ROHDE_SCHWARZ", "QCMRF"]
+        (
+            instrument_name
+            for instrument_platform in platform.get_element(drive_bus).instruments
+            if (instrument_name := instrument_platform.name.name) == "ROHDE_SCHWARZ"
+        ),
+        None,
     )
     if instrument_platform is not None:
-        if instrument_platform == "ROHDE_SCHWARZ":
-            platform.set_parameter(alias=drive_bus, parameter=Parameter.POWER, value=drive_gain)
-            platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=True)
-        elif instrument_platform == "QCMRF":
-            platform.set_parameter(alias=drive_bus, parameter=Parameter.GAIN, value=drive_gain)
-    else:
-        warn("No instrument to set power to.")
+        platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=True)
 
     if flux_parameter == Parameter.FLUX:
         unit = "phi_0"
@@ -189,17 +184,18 @@ def two_tone__frequency_vs_flux(
         qubit_idx=target,
     )
 
-    with stream_array:
-        for ii, flux in enumerate(flux_sweep):
-            platform.set_parameter(alias=flux_bus, parameter=flux_parameter, value=flux)
+    try:
+        with stream_array:
+            for ii, flux in enumerate(flux_sweep):
+                platform.set_parameter(alias=flux_bus, parameter=flux_parameter, value=flux)
 
-            results = platform.execute_qprogram(
-                qprogram, bus_mapping={"readout": readout_bus, "drive": drive_bus}
-            ).results
-            stream_array[ii,] = results[readout_bus][0].array.T
+                results = platform.execute_qprogram(
+                    qprogram, bus_mapping={"readout": readout_bus, "drive": drive_bus}
+                ).results
+                stream_array[ii,] = results[readout_bus][0].array.T
 
-    for instrument in platform.get_element(drive_bus).instruments:
-        if instrument.name.name == "ROHDE_SCHWARZ":
-            platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=False)
+    finally:
+        if instrument_platform is not None:
+            platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=True)
 
     return cast("int", cast("AutocalMeasurement", stream_array.measurement).measurement_id)

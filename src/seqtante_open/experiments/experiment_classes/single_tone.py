@@ -38,7 +38,7 @@ def single_tone__frequency_vs_flux(
     flux_sweep: np.ndarray,
     minimum_wait_after_step_override=None,
     qdac_stop_ro_before_step_override=None,
-    lo: int | None = None,
+    lo: float | None = None,
     calibration=None,
     optional_identifier: str | None = None,
     flux_parameter: Parameter = Parameter.FLUX,
