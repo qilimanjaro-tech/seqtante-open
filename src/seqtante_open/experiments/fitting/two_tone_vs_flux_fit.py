@@ -22,7 +22,7 @@ from qililab.typings.enums import Parameter
 from .fit_base import FittingClass
 
 # Fit logic constants
-_MIN_TRACE_R_SQUARED = 0.9
+_MIN_TRACE_R_SQUARED = 0.7
 _MAX_TRACE_ATTEMPTS = 20
 _MIN_TRACES_FOR_PARABOLA = 3
 
@@ -80,15 +80,15 @@ class FluxoniumTwoToneFluxModel(FittingClass):
         platform = build_platform(cast("dict", self.measurement.platform_before))
         return platform.get_parameter(alias=self.drive_bus, parameter=Parameter.LO_FREQUENCY)
 
-    def fit(self):
+    def fit(self, min_r2=_MIN_TRACE_R_SQUARED):
         """Fit the qubit IF at every flux, then the parabola whose vertex is the sweet spot."""
         for ii in range(len(self.fluxes)):
             self.rotated[ii] = np.real(self.rotate_iq(self.array[ii, :, 0] + 1j * self.array[ii, :, 1]))
             r_squared, attempts, fitted_if = 0.0, 0, np.nan
-            while r_squared < _MIN_TRACE_R_SQUARED and attempts < _MAX_TRACE_ATTEMPTS:
+            while r_squared < min_r2 and attempts < _MAX_TRACE_ATTEMPTS:
                 fitted_if, _, r_squared = self.lorentzian_fit(self.rotated[ii], self.frequencies)
                 attempts += 1
-            if r_squared >= _MIN_TRACE_R_SQUARED:
+            if r_squared >= min_r2:
                 self.mask[ii] = True
                 self.fitted_if[ii] = fitted_if
 
@@ -119,16 +119,16 @@ class FluxoniumTwoToneFluxModel(FittingClass):
 
         fig = go.Figure(
             go.Heatmap(
-                x=frequencies_ghz,
-                y=self.fluxes,
-                z=self.rotated,
+                x=self.fluxes,
+                y=frequencies_ghz,
+                z=np.asarray(self.rotated).T,
                 colorscale="Viridis",
                 colorbar={"title": {"text": "Integrated Voltage (a.u.)", "side": "right"}},
             )
         )
         fig.add_scatter(
-            x=(self.fitted_if[self.mask] + lo) * 1e-9,
-            y=self.fluxes[self.mask],
+            x=self.fluxes[self.mask],
+            y=(self.fitted_if[self.mask] + lo) * 1e-9,
             mode="markers",
             name="Fitted IF",
             marker={"color": "red", "size": 12},
@@ -136,20 +136,20 @@ class FluxoniumTwoToneFluxModel(FittingClass):
         if self.fitted:
             fluxes = np.linspace(self.fluxes.min(), self.fluxes.max(), 101)
             fig.add_scatter(
-                x=(np.polyval(self.coefficients, fluxes) + lo) * 1e-9,
-                y=fluxes,
+                x=fluxes,
+                y=(np.polyval(self.coefficients, fluxes) + lo) * 1e-9,
                 mode="lines",
                 name=f"Parabola (r² = {self.r_squared:.3f})",
                 line={"color": "red", "width": 2},
             )
-            fig.add_hline(
-                y=self.center,
+            fig.add_vline(
+                x=self.center,
                 line={"color": "darkorange", "dash": "dot", "width": 3},
                 annotation_text=f"Sweet spot = {self.center:.4f}, offset = {self.offset:.4f}",
             )
 
-        fig.update_xaxes(title_text="Qubit Frequency (GHz)")
-        fig.update_yaxes(title_text="Flux (phi_0)")
+        fig.update_yaxes(title_text="Qubit Frequency (GHz)")
+        fig.update_xaxes(title_text="Flux (phi_0)")
         fig.update_layout(
             title={
                 "text": f"{title}, ID: {self.id}".replace("\n", "<br>"),
@@ -157,7 +157,7 @@ class FluxoniumTwoToneFluxModel(FittingClass):
                 "xanchor": "center",
                 "font": {"size": 22},
             },
-            width=1000,
+            width=800,
             height=700,
             legend={"x": 0.02, "y": 0.98, "xanchor": "left", "yanchor": "top", "bgcolor": "rgba(0,0,0,0.2)"},
             showlegend=True,

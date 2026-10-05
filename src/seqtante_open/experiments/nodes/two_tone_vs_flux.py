@@ -16,6 +16,7 @@ from itertools import product
 from typing import Any
 
 import numpy as np
+from loguru import logger
 from qililab.platform.platform import Platform
 from qililab.qprogram.calibration import Calibration
 from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
@@ -108,10 +109,18 @@ def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, para
         model = FluxoniumTwoToneFluxModel(
             measurement_id, target=target, path=target_params["data_folder"] + flux_bus, lo=drive_LO, flux_bus=flux_bus
         )
-        model.fit()
+        model.fit(min_r2=min_r2) if (min_r2 := target_params.get("min_r2_x_trace")) else model.fit()
         model.plot()
         if model.fitted:
             crosstalk.flux_offsets[flux_bus] += float(model.offset)
+        else:
+            logger.opt(colors=True).warning(
+                "<r>FluxoniumTwoToneFluxModel</r> couldn't fit the measurement with id: {measurement_id}."
+                "Check the plot, if the peeks are visible, it might be the r2 threshold (current {min_r2})."
+                "You can change it using the 'min_r2_x_trace' parameter for the experiment in the config_file",
+                measurement_id=measurement_id,
+                min_r2=min_r2,
+            )
 
     try:
         for qubit, loop in product(qubits, qubit_loops_sweep):
