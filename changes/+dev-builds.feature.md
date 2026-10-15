@@ -1,0 +1,1 @@
+Every merge to `main` that passes Tests and Code Quality now publishes a development version (for example `0.1.3.dev2`) to CodeArtifact. The version is derived from git tags with hatch-vcs instead of being set in `pyproject.toml`. Dependency resolution no longer allows pre-releases by default, so sibling development versions are only used when pinned.

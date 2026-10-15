@@ -52,21 +52,25 @@ Installable with `pip` as shown below.
 
 ## Installation
 
+Releases are published to Qilimanjaro's internal CodeArtifact index, together with `qililab` and `qpysequence`. With that index configured, install an exact version:
+
 ```bash
-# clone your project
+uv pip install "seqtante-open==0.1.2"
+```
+
+Every merge to `main` that passes Tests and Code Quality also publishes a development version, for example `0.1.3.dev2`, where `2` is the number of merges since the last release. Installers skip development versions unless you ask for one, so pin the exact version you need in the same way. `import seqtante_open; seqtante_open.__version__` shows the version installed. Quote it in bug reports and calibration records.
+
+For development, clone the repository and sync the environment with [uv](https://docs.astral.sh/uv/):
+
+```bash
 git clone https://github.com/qilimanjaro-tech/seqtante-open.git
 cd seqtante-open
-
-# (recommended) create a virtualenv
-python -m venv .venv
-source .venv/bin/activate
-
-# install
-pip install -U pip
-pip install -r requirements.txt   # if present
-# or, editable
-pip install -e .
+uv sync
 ```
+
+### Releases
+
+The version comes from git tags, so there is no version to edit in `pyproject.toml`. To cut a release, run `towncrier build --version X.Y.Z`, merge that pull request, then publish a GitHub release whose tag is the bare version (for example `0.1.2`, no `v` prefix) on the merge commit. The Publish workflow builds the tagged commit and fails if the built version differs from the tag.
 
 ---
 
@@ -90,7 +94,7 @@ Artifacts:
 ## CLI Usage
 
 ```bash
-python -m seqtante.autocalibration \
+python -m seqtante_open.autocalibration \
   --platform_path ./platforms/my_device.yaml \
   --config_path   ./calibrations/calibration.yaml
 ```
