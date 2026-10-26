@@ -1,6 +1,6 @@
 [project]
 name = "seqtante_open"
-version = "0.1.1"
+dynamic = ["version"]
 description = "Fundamental package for fast calibration of quantum chips."
 authors = [{name = "Qilimanjaro Quantum Tech", email = "info@qilimanjaro.tech"}]
 urls = {Repository = "https://github.com/qilimanjaro-tech/seqtante-open"}
@@ -60,13 +60,25 @@ docs = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+# The version comes from git: a release tag such as `0.1.2` builds as `0.1.2`, and each commit
+# after it builds as a development version such as `0.1.3.dev2+g1a2b3c4`, where 2 counts the
+# commits on main's first-parent line since the tag (one per merged pull request, merge commit
+# or squash). Only bare `MAJOR.MINOR.PATCH` tags count.
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.version.raw-options.scm.git]
+describe_command = [
+    "git", "describe", "--dirty", "--tags", "--long", "--first-parent",
+    "--match", "[0-9]*.[0-9]*.[0-9]*", "--exclude", "*[!0-9.]*",
+]
 
 
 [tool.uv]
 keyring-provider = "subprocess"
-prerelease = "allow"
 
 [[tool.uv.index]]
 name = "qilimanjaro"
