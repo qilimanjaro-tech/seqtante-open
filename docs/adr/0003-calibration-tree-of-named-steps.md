@@ -30,20 +30,23 @@ steps:
     analysis: readout_levels
     operating_point: readout
     targets: [q14]
-    overrides: {q14: {amplitude_sweep: [0.02, 0.5, 25]}}
+    overrides:
+      - {targets: [q14], amplitude_sweep: [0.02, 0.5, 25]}
 ```
 
 - A step name says what the step is for; `experiment` says what it measures. The same experiment can appear in any number of steps.
 - Each experiment registers the analyses it supports and a default one.
 - A step writes into the operating point it runs at; its analysis decides which fields. Writing to an experiment section is the explicit exception.
 - `after` names the step (or list of steps) that must have succeeded for that target first. When omitted, it defaults to the previous step in the file, so a linear tree needs no `after` at all.
-- Parameters resolve in three levels, each overriding the one before: `defaults.<experiment>`, the step's own values, and `overrides.<target>`.
+- Parameters resolve in three levels, each overriding the one before: `defaults.<experiment>`, the step's own values, and every `overrides` entry whose `targets` include the target.
+- `overrides` is a list of entries, each with a `targets` list and the values it sets, so one entry covers any number of targets. Entries matching the same target apply in file order, the later one winning per field.
 - `targets` at the top is the default for every step; a step can narrow it and set its own `simultaneous`.
 - A `check` command validates the file without touching hardware (unknown experiments or analyses, unknown `after` names, cycles, operating points that nothing provides) and prints the resulting graph per target. The same graph opens the PDF report.
 
 ## Considered options
 
 - **Grouped branches** (`branches: {t1: {after: …, steps: […]}}`), mirroring the proposal page: rejected, because a step shared by two branches has to live outside both and be referenced anyway, and the file gains a level of nesting. Branch structure is shown by `check` instead.
+- **`overrides` as a mapping keyed by target** (`overrides: {q14: {…}}`): rejected, because it does not scale; overriding 20 of 50 qubits the same way repeats the same values 20 times.
 
 ## Consequences
 

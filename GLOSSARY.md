@@ -12,7 +12,11 @@ _Avoid_: Calibration graph, pipeline config, calibration file
 
 **Step**:
 One named entry of a calibration tree: an experiment run with a given analysis at a given operating point, after another step. The same experiment can appear in many steps.
-_Avoid_: Node, node type, pipeline entry
+_Avoid_: Node (the class that runs a step), node type, pipeline entry
+
+**Node**:
+The code-level class that implements an experiment (`CalibrationNode` and its subclasses). The parser builds one node per step; in the calibration tree and when talking about runs, say step.
+_Avoid_: Experiment function, step class
 
 **Analysis**:
 The fit that turns a step's measurement into results, and so decides what the step extracts and writes (for example readout levels or pi amplitude from the same Rabi measurement).
