@@ -7,12 +7,24 @@ Automatic calibration and benchmarking of qubits and couplers, driven by a calib
 ### Calibration runs
 
 **Calibration tree**:
-The configuration of one Seqtante-Open run: which experiments run on which targets, in what dependency order, with what sweep settings and benchmark thresholds.
+The configuration of one Seqtante-Open run: which pipelines and steps run on which targets, in what dependency order, with what sweep settings and benchmark thresholds.
 _Avoid_: Calibration graph, pipeline config, calibration file
 
+**Pipeline**:
+A named, ordered group of steps in a calibration tree that calibrates or benchmarks one thing, such as the sweet spot, T1 or the reset point for Landau-Zener. It is the unit an operator turns on or off for a run, and a failure stops only the rest of it and the pipelines that come after it.
+_Avoid_: Branch, node type
+
 **Step**:
-One named entry of a calibration tree: an experiment run with a given analysis at a given operating point, after another step. The same experiment can appear in many steps.
-_Avoid_: Node, node type, pipeline entry
+One named entry of a pipeline: an experiment run with a given analysis at a given operating point. The same experiment can appear in many steps.
+_Avoid_: Pipeline entry, node type
+
+**Experiment**:
+A measurement procedure on a target, such as two-tone, Rabi or T1, independent of where and why it runs.
+_Avoid_: Experiment function, measurement
+
+**Node**:
+The implementation of an experiment in Seqtante-Open's code; the run builds one for each step. A step is what the tree says, a node is what runs it.
+_Avoid_: Experiment class
 
 **Analysis**:
 The fit that turns a step's measurement into results, and so decides what the step extracts and writes (for example readout levels or pi amplitude from the same Rabi measurement).
@@ -23,7 +35,7 @@ An experiment whose result is written back to the calibration file, updating an 
 _Avoid_: Calibration experiment, tuning
 
 **Benchmark**:
-An experiment that measures a figure of merit of a target (T1, Landau-Zener agreement) and writes nothing back to the calibration file; it ends in a verdict.
+An experiment that measures a figure of merit of a target (T1, T2, Landau-Zener agreement) and writes nothing back to the calibration file; it ends in a verdict.
 _Avoid_: Characterisation, test
 
 **Verdict**:
@@ -31,13 +43,13 @@ The qualitative outcome of a benchmark against its thresholds: Passed, Warning o
 _Avoid_: Status, grade, result
 
 **Report**:
-The PDF produced at the end of a run, gathering calibrated values, fitted plots and benchmark verdicts per target.
+The PDF produced at the end of a run, gathering calibrated values, fitted plots and benchmark verdicts per target, and the steps that failed or were skipped.
 _Avoid_: Summary, dashboard
 
 ### Operating points
 
 **Calibration file**:
-The per-device file holding what calibration has learnt about the chip: flux crosstalk and offsets, operating points, and experiment sections. Together with the runcard it is all a consumer needs to operate the device.
+The per-device file holding what calibration has learnt about the chip: flux crosstalk and offsets, operating points, pulses and experiment sections. Together with the runcard it is all a consumer needs to operate the device.
 _Avoid_: Calibration, cal file, calibration tree
 
 **Runcard**:
@@ -45,21 +57,25 @@ The per-device file describing the instruments and buses and their baseline sett
 _Avoid_: Platform file, config
 
 **Operating point**:
-A named configuration of one qubit or coupler (its fluxes, its drive and readout frequencies, and the default pulses used there) that experiments place the target in before measuring. It belongs to the target and is shared by every experiment that runs there.
+A named configuration of one qubit or coupler (its fluxes and its drive and readout frequencies) that experiments place the target in before measuring. It belongs to the target and is shared by every experiment that runs there.
 _Avoid_: Operation point, working point, bias point
 
 **Sweet spot**:
 The operating point at the bottom of the qubit's frequency-versus-flux parabola, where the frequency is first-order insensitive to flux noise.
 _Avoid_: SS, flux sweet spot, symmetry point
 
-**Experiment section**:
-The part of the calibration file holding what is specific to one experiment on one qubit: which operating point it runs at, its own parameters, and any pulse settings it does not share with other experiments.
-_Avoid_: Experiment profile, experiment settings, experiment config
-
-**Readout point**:
-The operating point at which the qubit frequency equals a fixed target frequency chosen for reading it out.
-_Avoid_: RO point, RO flux point, idle point
-
 **Reset point**:
-The operating point a target is returned to between and after experiments.
-_Avoid_: Park point, home
+The operating point at which the qubit frequency equals a fixed target frequency, where the qubit is read out and to which it returns between and after experiments.
+_Avoid_: Idle point, park point, home, RO point
+
+**Pulse**:
+A named waveform played on one bus of a target, such as a readout pulse or a pi pulse, stored once in the calibration file and chosen by name wherever it is played.
+_Avoid_: Default pulse, pulse settings
+
+**Readout levels**:
+The measured signal of |0⟩ and |1⟩ at an operating point, used to turn a signal into a population.
+_Avoid_: Rabi levels, amplitudes
+
+**Experiment section**:
+The part of the calibration file holding what is specific to one experiment on one qubit: which operating point it runs at, which pulses it plays, and its own parameters.
+_Avoid_: Experiment profile, experiment settings, experiment config
