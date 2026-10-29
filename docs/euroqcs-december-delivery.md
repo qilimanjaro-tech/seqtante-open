@@ -27,7 +27,7 @@ Goal: Seqtante-Open runs the EuroQCS 1q calibration tree unattended. That means 
 | D17 | An analysis that does not converge or falls below its quality threshold raises an analysis error, and the target fails that step. A Failed verdict is not a step failure. | 0006, 0002 |
 | D18 | The reset-point search ports the experimentalists' calibration script as its own experiment, `reset_point_search` (see below). | 0006, this page |
 | D19 | **Changed.** The tree keeps sweeps, averages, timings and thresholds; pulses come from the calibration file by name. | 0001, 0005 |
-| D20, D21 | Thresholds in the tree, in the benchmark's unit, with the direction declared by the node; benchmarks write nothing back. | 0002, 0003 |
+| D20, D21 | Thresholds in the tree, written with their unit (`50 us`) and converted by the parser; the direction is declared by the node. Benchmarks write nothing back. | 0002, 0003 |
 | D22 | PDF report contents fixed by the acceptance criteria. It can be turned off at launch, and PDF reporting is an optional install extra. How it is built gets its own ADR. | 0002 |
 | D23 | **Changed.** The tree is a set of pipelines, each an ordered set of uniquely named steps. A pipeline can be switched off in the file or left out at launch (`--pipelines`), so the Landau-Zener recalibration can run on its own. | 0003 |
 | D24, D25 | Each step names its analysis and writes into the operating point it runs at. | 0003 |
@@ -118,7 +118,7 @@ Sizes are first guesses (S ≈ 1–2 days, M ≈ 3–5, L ≈ 1–2 weeks) and s
 | 0 | Fix the `DatabaseManager` file name that collides when the same experiment runs on another loop of the same qubit; own PR ahead of the redesign | S | — | to file |
 | 1 | Agree on the pulse naming convention in `Calibration.waveforms` and the section format with the qili-experiments and qili-runtime developers | S | — | to file |
 | 2 | Calibration-file model: `operating_points` (version key, `sweet_spot`, `reset`, LO/IF, attenuation, readout levels with their pulse name), named pulses, sections naming point and pulses; read/write helpers; seeding the file from the experimentalists' manual calibration instead of migrating the QHC-1608 format | M | 1 | QHC-1608 (rework) |
-| 3 | Tree parser: pipelines of named steps, pipeline `after`, `enabled`, `--pipelines`, target narrowing (`all_q`/`all_c`), `defaults` → step → `overrides`, `loop`, `pulses`, thresholds; exhaustive unit tests; rewrite the example tree | L | — | to file |
+| 3 | Tree parser: pipelines of named steps, pipeline `after`, `enabled`, `--pipelines`, target narrowing (`all_q`/`all_c`), `defaults` → step → `overrides`, `loop`, `pulses`, thresholds with units (converted to the benchmark's unit, an error when missing or of the wrong kind); exhaustive unit tests; rewrite the example tree | L | — | to file |
 | 4 | Graph: edges from `after` via `add_dependency`, per-pipeline failure skipping per target, dependencies on unselected pipelines read from the calibration file | M | 3 | to file |
 | 5 | `CalibrationNode` base: `NODE_REGISTRY` with legacy support, run context (one `Calibration`, `--calibration_path`), operating-point helper with LO placement, restore context manager, execute/analyze/apply, analysis error, benchmark results and verdicts | L | 2 | to file |
 | 6 | First slice: T1 at the sweet spot as a node, with call-assertion test | M | 4, 5 | QHC-1596 (restart) |

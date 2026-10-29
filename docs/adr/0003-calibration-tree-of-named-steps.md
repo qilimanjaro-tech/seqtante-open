@@ -35,7 +35,7 @@ pipelines:
       t1_sweet_spot:
         experiment: t1
         operating_point: sweet_spot
-        thresholds: {passed: 50e3, warning: 20e3}   # ns; for T1, higher is better
+        thresholds: {passed: 50 us, warning: 20 us}
 
   t2:
     after: two_tone_sweet_spot
@@ -76,7 +76,7 @@ pipelines:
 - Steps in a pipeline run in order, each after the one before. A pipeline's `after` names the step, or list of steps, that must have succeeded for that target before its first step runs. Branches are separate pipelines; joins are an `after` list.
 - A failure for a target skips the rest of its pipeline and, transitively, every pipeline whose `after` names a failed or skipped step, for that target only. The run continues for other targets and for every other pipeline: if `two_tone_sweet_spot` fails for q14, `t1` and `t2` are skipped for q14, but `lz`, which is `after: sweet_spot_flux`, still runs.
 - A pipeline is switched off in the file with `enabled: false`, and a run can be launched with only some pipelines (`--pipelines lz`). A dependency on a step that is not run this time is satisfied by the values already in the calibration file.
-- Benchmark `thresholds` are in the unit of the value the benchmark reports. The node class declares that unit and the direction, so the tree does not set them: T1 and T2 are in ns and better higher, the Landau-Zener χ²ᵣ is dimensionless and better lower. With higher-is-better, a value at or above `passed` is Passed, at or above `warning` is Warning, and below it Failed; lower-is-better mirrors this. The report shows the unit and the direction next to the threshold.
+- Benchmark `thresholds` carry their unit, so a reader sees `50 us` rather than `50e3`. The parser converts each value to the unit the benchmark reports, which the node class declares, and a threshold with no unit, or with a unit of the wrong kind, is an error. Time thresholds take `ns`, `us` (or `µs`) and `ms`; a dimensionless metric such as the Landau-Zener χ²ᵣ takes a plain number. The node class also declares the direction, so the tree does not set it: T1 and T2 are better higher, χ²ᵣ is better lower. With higher-is-better, a value at or above `passed` is Passed, at or above `warning` is Warning, and below it Failed; lower-is-better mirrors this. The report shows the unit and the direction next to the threshold.
 - `targets` at the top is the default for every pipeline; a pipeline or a step can narrow it. `all_q` and `all_c` keep working.
 - A flux sweep names the flux `loop` it sweeps (`z` or `x`).
 - A step names the pulses it plays (`pulses`) when it does not use its experiment's default (ADR-0001).
