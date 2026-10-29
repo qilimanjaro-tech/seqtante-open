@@ -35,7 +35,7 @@ pipelines:
       t1_sweet_spot:
         experiment: t1
         operating_point: sweet_spot
-        thresholds: {passed: 50e3, warning: 20e3}
+        thresholds: {passed: 50e3, warning: 20e3}   # ns; for T1, higher is better
 
   t2:
     after: two_tone_sweet_spot
@@ -55,8 +55,7 @@ pipelines:
     targets: [q14]
     steps:
       reset_flux:
-        experiment: two_tone
-        analysis: reset_point_search
+        experiment: reset_point_search
         operating_point: reset
         target_frequency: [2.79e9, 2.81e9]
       rabi_reset:
@@ -73,10 +72,11 @@ pipelines:
 
 - A step name says what the step is for and is unique across the file; `experiment` says what it measures. The same experiment can appear in any number of steps.
 - Each experiment registers the analyses it supports and a default one.
-- A step writes into the operating point it runs at; its analysis decides which fields. Writing to an experiment section is the explicit exception.
+- A step writes into the operating point it runs at; its analysis decides which fields. There are three exceptions, all explicit: a pulse value goes into the named pulse (`rabi_sweet_spot` writes the pi amplitude of `drag`), sweet-spot recalibration writes the device-level crosstalk offset (`sweet_spot_flux`, ADR-0006), and a result goes into an experiment section only when the tree says so.
 - Steps in a pipeline run in order, each after the one before. A pipeline's `after` names the step, or list of steps, that must have succeeded for that target before its first step runs. Branches are separate pipelines; joins are an `after` list.
-- A failure for a target skips the rest of its pipeline and every pipeline after it, for that target only. The run continues for other targets and for unrelated pipelines, so a T1 failure does not cancel the same qubit's LZ pipeline.
+- A failure for a target skips the rest of its pipeline and, transitively, every pipeline whose `after` names a failed or skipped step, for that target only. The run continues for other targets and for every other pipeline: if `two_tone_sweet_spot` fails for q14, `t1` and `t2` are skipped for q14, but `lz`, which is `after: sweet_spot_flux`, still runs.
 - A pipeline is switched off in the file with `enabled: false`, and a run can be launched with only some pipelines (`--pipelines lz`). A dependency on a step that is not run this time is satisfied by the values already in the calibration file.
+- Benchmark `thresholds` are in the unit of the value the benchmark reports. The node class declares that unit and the direction, so the tree does not set them: T1 and T2 are in ns and better higher, the Landau-Zener χ²ᵣ is dimensionless and better lower. With higher-is-better, a value at or above `passed` is Passed, at or above `warning` is Warning, and below it Failed; lower-is-better mirrors this. The report shows the unit and the direction next to the threshold.
 - `targets` at the top is the default for every pipeline; a pipeline or a step can narrow it. `all_q` and `all_c` keep working.
 - A flux sweep names the flux `loop` it sweeps (`z` or `x`).
 - A step names the pulses it plays (`pulses`) when it does not use its experiment's default (ADR-0001).

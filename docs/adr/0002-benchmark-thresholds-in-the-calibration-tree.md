@@ -15,5 +15,5 @@ The EuroQCS experiment proposal put the Passed/Warning/Failed thresholds "in the
 
 ## Open questions
 
-- **Landau-Zener theory curve.** It is not in any repository; it comes from the theory team, or the experimentalists may already have it in a notebook. One candidate: a data file referenced from the calibration tree, with the verdict "Not evaluated" until it is configured. Owner: experimentalists, theory team.
-- **Landau-Zener agreement metric.** Candidate: the reduced χ² of the normalised transition probability against the theory curve, with a binomial σ per point (√(p(1−p)/N), N the number of averages) and thresholds on χ²ᵣ in the calibration tree, reporting the largest single-point deviation in σ alongside. Owner: team, theory team.
+- **Landau-Zener theory curve.** It is not in any repository; it comes from the theory team, or the experimentalists may already have it in a notebook. One candidate: a data file referenced from the calibration tree, with the verdict "Not evaluated" until it is configured. Owner: Ameer Azzam, by 12 November 2026.
+- **Landau-Zener agreement metric.** Candidate: the reduced χ² of the normalised transition probability against the theory curve, with a binomial σ per point (√(p(1−p)/N), N the number of averages) and thresholds on χ²ᵣ in the calibration tree, reporting the largest single-point deviation in σ alongside. Owner: Ameer Azzam, by 12 November 2026.

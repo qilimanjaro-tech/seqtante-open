@@ -15,7 +15,7 @@ Each step of the calibration tree (ADR-0003) runs an experiment. Today an experi
 - A platform setting an experiment changes temporarily (a detuned IF, a parked flux) goes through a base-class context manager that restores it in `finally`. QProgram resets what it sets itself, not what is set through `platform.set_parameter`.
 - The run deserialises the `Calibration` once and hands it to every node in a small run context, with the platform and the runcard path. Its path becomes a CLI argument next to `--platform_path` and `--config_path`; the tree may still set it.
 - A variation point becomes a hook only if at least three subclasses use it non-trivially; otherwise the subclass overrides `execute_node` and calls base helpers.
-- Scheduling and failure propagation live on `CalibrationGraph`: a node reports which targets failed, and the graph skips, for those targets only, the rest of the pipeline and the pipelines that come `after` it (ADR-0003).
+- Scheduling and failure propagation live on `CalibrationGraph`: a node reports which targets failed, and the graph skips, for those targets only, the rest of the pipeline and, transitively, every pipeline whose `after` names a failed or skipped step (ADR-0003).
 
 ## Considered options
 

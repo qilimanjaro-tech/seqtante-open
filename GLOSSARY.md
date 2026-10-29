@@ -11,7 +11,7 @@ The configuration of one Seqtante-Open run: which pipelines and steps run on whi
 _Avoid_: Calibration graph, pipeline config, calibration file
 
 **Pipeline**:
-A named, ordered group of steps in a calibration tree that calibrates or benchmarks one thing, such as the sweet spot, T1 or the reset point for Landau-Zener. It is the unit an operator turns on or off for a run, and a failure stops only the rest of it and the pipelines that come after it.
+A named, ordered group of steps in a calibration tree that calibrates or benchmarks one thing, such as the sweet spot, T1 or the reset point for Landau-Zener. It is the unit an operator turns on or off for a run. A failure for a target stops, for that target only, the rest of the pipeline and every pipeline whose `after` names a failed or skipped step.
 _Avoid_: Branch, node type
 
 **Step**:
@@ -27,15 +27,15 @@ The implementation of an experiment in Seqtante-Open's code; the run builds one 
 _Avoid_: Experiment class
 
 **Analysis**:
-The fit that turns a step's measurement into results, and so decides what the step extracts and writes (for example readout levels or pi amplitude from the same Rabi measurement).
+The fit that turns a step's measurement into results, and so decides what the step extracts and writes (for example readout levels or pi amplitude from the same Rabi measurement). It is read-only and runs once, after the measurement; an experiment whose next measurement depends on a fit, such as the reset-point search, fits inside its own loop instead.
 _Avoid_: Fitting, model, post-processing
 
 **Recalibration**:
-An experiment whose result is written back to the calibration file, updating an operating point or a pulse.
+A step whose result is written back to the calibration file, updating an operating point, a pulse or the crosstalk offset. It is a kind of step, not of experiment: the same experiment can run in several steps that write different things (Rabi for readout levels or a pi amplitude).
 _Avoid_: Calibration experiment, tuning
 
 **Benchmark**:
-An experiment that measures a figure of merit of a target (T1, T2, Landau-Zener agreement) and writes nothing back to the calibration file; it ends in a verdict.
+A step that measures a figure of merit of a target (T1, T2, Landau-Zener agreement) and writes nothing back to the calibration file; it ends in a verdict.
 _Avoid_: Characterisation, test
 
 **Verdict**:
