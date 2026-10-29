@@ -10,7 +10,8 @@ The EuroQCS experiment proposal put the Passed/Warning/Failed thresholds "in the
 - The report can be turned off when the run is launched, for quick debugging runs.
 - It is saved to the folder set in the configuration, with the timestamp in the filename, so it never overwrites an older one.
 - It shows the timestamp, the Seqtante-Open version and the qililab version; per target, each operating point before and after the run and every fit plot; per benchmark, the value ± uncertainty when there is one, the plot, the verdict and the threshold used; and the steps that failed or were skipped, with the reason.
-- How the report is built (library, a CLI that reads fitted parameters back by calibration id, or the `outputs` service) gets its own ADR before it is implemented.
+- PDF reporting is an optional install extra (`seqtante_open[report]`), as agreed on 22 October 2026, so running calibrations does not pull in the PDF dependencies.
+- How the report is built (library, a CLI that reads fitted parameters back by calibration id, or the `outputs` service) gets its own ADR before it is implemented. That ADR records the install extra and what a run does when the extra is not installed.
 
 ## Open questions
 

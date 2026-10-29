@@ -50,7 +50,8 @@ predistortion:
 
 ## Consequences
 
-- qili-experiments must change its contract (read operating points from the target level and pulses by name) before it can run from a calibration file written in this shape. The pulse naming convention is agreed with the qili-experiments and qili-runtime developers before either side codes against it.
+- The calibration-file format is a one-way door: qili-experiments and qili-runtime read it, so a change after they code against it means changing three repositories. Natàlia Padilla's approval of the December design covers this contract.
+- qili-experiments must change its contract (read operating points from the target level and pulses by name) before it can run from a calibration file written in this shape. The pulse naming convention is agreed with the qili-experiments and qili-runtime developers before either side codes against it, by 4 November 2026, because every task on the critical path builds on it.
 - The temporary operating-point format on the QHC-1608 branch is superseded, and the T1 node on QHC-1596 builds on it; both restart from this design, reusing parts.
 - Applying an operating point and saving calibrated values move out of each experiment function and into `CalibrationNode` (ADR-0004, ADR-0006).
 - Changing the readout pulse of a point invalidates its readout levels, so the Rabi step that writes them has to run again.
