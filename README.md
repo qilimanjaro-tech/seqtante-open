@@ -104,6 +104,31 @@ Options:
 * `--platform_path` : path to `qililab` runcard / platform configuration
 * `--config_path`   : path to the YAML calibration DAG
 
+## Storage & database
+
+The optional `storage.db_manager` block of the calibration YAML sets the database the run is recorded in:
+
+```yaml
+sample: "chip_name"
+cooldown: "CD42"
+storage:
+  root_dir: "data"
+  db_manager:
+    path: "~/database.ini"
+    database_name: "postgresql"
+    database_schema: "autocal"
+```
+
+* `path` and `database_name` select the `.ini` file and its section. They default to `~/database.ini` and `postgresql`. Any other key raises a warning.
+* `database_schema` declares which database the manager is connected to, and so the run type:
+  * `autocal` records a calibration run and requires `cooldown` in the YAML.
+  * `measurements` records a sequence run and requires `sequence_name` in the YAML.
+  * `qaas` is not supported and raises an error.
+
+  If it is not set here, the `database_schema` key of the `.ini` section is used. Set it in one of the two, since `qililab` falls back to `measurements`.
+
+In the `extra` section of the log config, `RUN_ID` is replaced by the id of the current calibration or sequence run in the database.
+
 ## License
 
 Apache 2.0.
