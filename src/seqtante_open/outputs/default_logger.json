@@ -1,7 +1,7 @@
 {
   "extra": {
     "app": "seqtante_open",
-    "CALIBRATION_ID": true,
+    "RUN_ID": true,
     "GENERATED_UUID": true
   },
   "handlers": [

@@ -70,8 +70,11 @@ class CalibrationRun:
 
         # Setup the output_controller
         output_controller.reset(storage_conf=storage_conf)
-        output_controller.add_calibration_run(
-            calibration_tree=config, sample_name=config["sample"], cooldown=config["cooldown"]
+        output_controller.start_run(
+            run_tree=config,
+            sample_name=config["sample"],
+            cooldown=config.get("cooldown"),
+            sequence_name=config.get("sequence_name"),
         )
 
         output_controller.setup_logger()
@@ -118,6 +121,6 @@ class CalibrationRun:
     def _end_calibration(self):
         """End the calibration run and disconnect from platform."""
         self._display_time()
-        output_controller.end_calibration()
+        output_controller.end_run()
         self.platform.disconnect()
         output_controller.calibration_data.save_file()
