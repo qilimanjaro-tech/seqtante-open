@@ -19,7 +19,7 @@ from enum import Enum
 from functools import wraps
 from importlib.resources import files
 from pathlib import Path
-from typing import Any, Literal, TypedDict, assert_never
+from typing import Any, Literal, TypedDict, assert_never, cast
 from uuid import uuid4
 from warnings import warn
 
@@ -28,6 +28,7 @@ from loguru import logger
 from qililab.result.database import CalibrationRun, DatabaseManager, DatabaseSchema, SequenceRun, get_db_manager
 
 DB_MANAGER_KEYS = ["path", "database_name", "database_schema"]
+RunSchema = Literal["autocal", "measurements"]
 
 # ---------------------Logger constants-----------------------
 DEFAULT_LOG_CONFIG = Path(str(files("seqtante_open.outputs") / "default_logger.json"))
@@ -234,7 +235,8 @@ class Outputs:
 
     def start_run(self, run_tree: dict, sample_name: str, cooldown: str | None, sequence_name: str | None):
         """Start a sequence run ('measurements' schema) or a calibration run ('autocal' schema) in the database"""
-        schema: DatabaseSchema = self.db_manager.database_schema
+        # _create_db_manager rejects 'qaas'
+        schema = cast("RunSchema", self.db_manager.database_schema)
         match schema:
             case "measurements":
                 if sequence_name is None:
@@ -256,9 +258,6 @@ class Outputs:
                     sample_name=sample_name,
                     cooldown=cooldown,
                 )
-            case "qaas":
-                # Unreachable, _create_db_manager already rejects it
-                raise ValueError("Seqtante cannot run on the 'qaas' database schema, use 'autocal' or 'measurements'.")
             case _:
                 assert_never(schema)
 
