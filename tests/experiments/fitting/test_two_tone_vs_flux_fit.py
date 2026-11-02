@@ -19,7 +19,7 @@ Lorentzian the per-trace fit can find, and the fitted IFs together trace a
 parabola whose vertex sits inside the swept flux range.
 
 ``lo`` is left unset on purpose, so ``plot()`` reads the drive LO off a platform
-built from ``measurement.platform_before``. The bus aliases below therefore have
+built from ``measurement.platform``. The bus aliases below therefore have
 to exist in the test runcard: ``drive_q1`` resolves to ``QCM-RF1`` at 4.5 GHz
 there.
 

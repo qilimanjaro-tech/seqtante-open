@@ -14,14 +14,21 @@
 
 import os
 from abc import ABC
+from functools import cached_property
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import plotly.graph_objects as go
 from lmfit import Model
+from qililab.data_management import build_platform
 from scipy.special import erf as _erf
 from xarray import DataArray
 
 from seqtante_open.outputs import output_controller
+
+if TYPE_CHECKING:
+    from qililab.platform.platform import Platform
+    from qililab.result.database import AutocalMeasurement, Measurement
 
 RENDER_FORMAT = "png"
 
@@ -40,19 +47,26 @@ class FittingClass(ABC):
         """Base class for all fittings. It includes many functions for the fittings.
 
         Args:
-            measurement_id (int): ID of the experiment to fit in the autocalibration database.
+            measurement_id (int): ID of the experiment to fit in the database of the `output_controller` schema.
             target (str | None, optional): Qubit or coupler token the fit belongs to, e.g. ``"q1"`` or ``"c1_2"``. Defaults to None.
             path (str | None, optional): Directory of the folder where the plot/s are saved, if None it shows the plot. Defaults to None.
         """
         self.id = measurement_id
-        measurement = output_controller.db_manager.load_calibration_by_id(measurement_id)
-        if measurement is None:
-            raise LookupError(f"No measurement found for measurement_id: {measurement_id}")
-        self.measurement = measurement
+        # The output_controller rejects the 'qaas' schema, so the entry is never a QaaS_Experiment
+        self.measurement = cast(
+            "Measurement | AutocalMeasurement", output_controller.db_manager.load_entry_by_id(measurement_id)
+        )
         self.array, self.loops = self.measurement.load_h5()
 
         self.path = path
         self.target = target
+
+    @cached_property
+    def platform(self) -> "Platform":
+        """Platform the measurement was taken with, built from the runcard stored in the database."""
+        if self.measurement.platform is None:
+            raise ValueError(f"Measurement {self.id} has no platform stored in the database.")
+        return build_platform(self.measurement.platform)
 
     def fit(self):
         """Fits the experimental data to the corresponding function."""

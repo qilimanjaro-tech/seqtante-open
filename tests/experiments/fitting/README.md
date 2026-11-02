@@ -109,7 +109,7 @@ Optional:
 
 - **`BUILDER`** the builder that produced a committed `DATA` file, so
   `make_data` can rewrite it.
-- **`MEASUREMENT`** overrides on the fake measurement. `platform_before` defaults
+- **`MEASUREMENT`** overrides on the fake measurement. `platform` defaults
   to the test runcard and `data_shape` to the results shape, so most cases need
   nothing here. `T2Fit` needs a `calibration` blob.
 - **`PLOTS`** exact filenames `plot()` must produce, if you want them pinned.
@@ -123,9 +123,9 @@ Optional:
 ## How the harness fakes a measurement
 
 `__init__` on most fit classes calls
-`output_controller.db_manager.load_calibration_by_id(id).load_h5()`. The harness
+`output_controller.db_manager.load_entry_by_id(id).load_h5()`. The harness
 mocks `db_manager` and hands back a stand-in measurement carrying your data,
-along with `platform_before`, `data_shape` and `calibration`.
+along with `platform`, `data_shape` and `calibration`.
 
 `store_parameter` is replaced by a no-op. It is on its way out, and left alone it
 raises `AttributeError`, because `Outputs.storage_conf` is only ever set by

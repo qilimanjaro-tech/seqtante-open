@@ -12,11 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import TypedDict, cast
+from typing import TypedDict
 
 import numpy as np
 import plotly.graph_objects as go
-from qililab.data_management import build_platform
 from qililab.typings.enums import Parameter
 
 from seqtante_open.experiments.fitting.fit_base import FittingClass
@@ -64,8 +63,7 @@ class FluxoniumSingleToneModel(FittingClass):
 
     def _readout_lo(self) -> float:
         """Readout-bus LO frequency in Hz, taken from the runcard stored with the measurement."""
-        platform = build_platform(cast("dict", self.measurement.platform_before))
-        return platform.get_parameter(alias=self.readout_bus, parameter=Parameter.LO_FREQUENCY)
+        return self.platform.get_parameter(alias=self.readout_bus, parameter=Parameter.LO_FREQUENCY)
 
     def fit(self):
         """Take the deepest point of the magnitude trace as the resonance.

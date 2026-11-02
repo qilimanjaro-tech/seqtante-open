@@ -119,8 +119,8 @@ def all_subclasses(cls: type) -> set[type]:
 
 
 @functools.lru_cache(maxsize=1)
-def default_platform_before() -> dict:
-    """The test runcard as a dict, used as the default ``measurement.platform_before``.
+def default_platform() -> dict:
+    """The test runcard as a dict, used as the default ``measurement.platform``.
 
     Fits that need instrument settings (``TwoToneFluxFit``, ``CZConditionalAmpFit``,
     ``FluxoniumSingleToneFluxModel``) call ``build_platform`` on this, so the bus
@@ -258,7 +258,7 @@ class FittingTestCase:
         Required unless the class does not override ``fit``.
 
     Optional: ``MEASUREMENT`` to override attributes of the fake measurement
-    (``platform_before``, ``calibration``, ``data_shape``, ...), ``PLOTS`` to pin
+    (``platform``, ``calibration``, ``data_shape``, ...), ``PLOTS`` to pin
     the exact filenames ``plot`` must produce, ``WAIVED`` to justify an added
     method that needs no test of its own, and ``SEED`` for a ``DATA`` callable and
     for the global RNG the fit itself draws on.
@@ -338,7 +338,7 @@ class FittingTestCase:
     def environment(self, data: tuple[np.ndarray, dict]) -> Iterator[MagicMock]:
         """Patch the boundaries every fit class touches, for the whole test class.
 
-        ``db_manager`` is a MagicMock whose ``load_calibration_by_id`` returns a
+        ``db_manager`` is a MagicMock whose ``load_entry_by_id`` returns a
         stand-in measurement. ``store_parameter`` is replaced by a no-op: it is on
         its way out, and untouched it raises ``AttributeError`` (``Outputs.storage_conf``
         is only ever set by ``reset()``), so seven fit classes could not run at all.
@@ -347,7 +347,7 @@ class FittingTestCase:
         attrs = {
             "load_h5": lambda: (results, loops),
             "load_old_h5": lambda: (results, loops),
-            "platform_before": default_platform_before(),
+            "platform": default_platform(),
             "data_shape": np.shape(results),
             "calibration": None,
             "experiment_name": self.FIT_CLASS.__name__,
@@ -356,7 +356,7 @@ class FittingTestCase:
         measurement = SimpleNamespace(**attrs)
 
         db_manager = MagicMock(name="db_manager")
-        db_manager.load_calibration_by_id.return_value = measurement
+        db_manager.load_entry_by_id.return_value = measurement
 
         monkeypatch = pytest.MonkeyPatch()
         monkeypatch.setattr(output_controller, "_initialized", True)

@@ -15,7 +15,7 @@
 """``FluxoniumSingleToneModel`` against a resonator dip at a known IF.
 
 Like the flux-swept sibling, this fit plots with plotly and reads the readout LO
-off a platform built from ``measurement.platform_before`` (``lo`` is left unset),
+off a platform built from ``measurement.platform`` (``lo`` is left unset),
 so the ``readout_q1`` alias its loop metadata names has to exist in the test
 runcard, where it resolves to ``QRM-RF1`` at 6.3 GHz.
 
