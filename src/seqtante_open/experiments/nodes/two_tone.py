@@ -87,7 +87,6 @@ def two_tone_node(platform: Platform, platform_path: str, parameters: dict[str, 
                 calibration=calibration_copy,
                 drive_LO=drive_LO,
                 target=qubit,
-                autocalibration=True,
             )
 
             model = FluxoniumTwoToneModel(measurement_id, target=qubit, path=target_params["data_folder"], lo=drive_LO)

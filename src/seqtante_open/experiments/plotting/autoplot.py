@@ -103,7 +103,7 @@ def auto_plot(
         # The default is to read it automatically here. But if you want to do some post-processing you can pass an xarray as input as well
         xarr = get_xarray_from_meas(measurement)
     if measurement.platform:
-        xarr = correct_tof(xarr, platform=build_platform(measurement.platform), tof=tof)  # type: ignore
+        xarr = correct_tof(xarr, platform=build_platform(measurement.platform), tof=tof)
 
     xarr = convert_plot_units(xarr)
     coords = xarr.coords

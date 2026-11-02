@@ -94,7 +94,6 @@ def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, para
             calibration=calibration_copy,
             drive_LO=drive_LO,
             target=target,
-            autocalibration=True,
         )
 
         model = FluxoniumTwoToneFluxModel(

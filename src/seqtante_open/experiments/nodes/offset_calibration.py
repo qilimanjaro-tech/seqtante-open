@@ -77,7 +77,6 @@ def single_tone_vs_flux(platform: Platform, platform_path: str, parameters: dict
             calibration=calibration_copy,
             flux_parameter=Parameter.FLUX,
             qubit_idx=target,
-            autocalibration=True,
         )
 
         model = FluxoniumSingleToneFluxModel(

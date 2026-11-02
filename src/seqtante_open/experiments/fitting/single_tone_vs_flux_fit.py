@@ -12,10 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import cast
-
 import numpy as np
-from qililab.data_management import build_platform
 from qililab.typings.enums import Parameter
 
 from seqtante_open.experiments.fitting.fit_base import FittingClass
@@ -60,8 +57,7 @@ class FluxoniumSingleToneFluxModel(FittingClass):
 
     def _readout_lo(self) -> float:
         """Readout-bus LO frequency, taken from the runcard stored with the measurement."""
-        platform = build_platform(cast("dict", self.measurement.platform_before))
-        return platform.get_parameter(alias=self.readout_bus, parameter=Parameter.LO_FREQUENCY)
+        return self.platform.get_parameter(alias=self.readout_bus, parameter=Parameter.LO_FREQUENCY)
 
     @staticmethod
     def _auto_convolve_trace(z_col, axis, mode="abs", p=0.5, half=8, unwrap=True):

@@ -117,6 +117,7 @@ def test_basic_parameters(platform, run_experiment):
     assert all(c["kwargs"]["averages"] == 1000 for c in calls)
     assert all(c["kwargs"]["duration"] == 2000 for c in calls)
     assert all(c["kwargs"]["flux_parameter"] == Parameter.FLUX for c in calls)
+    assert all("autocalibration" not in c["kwargs"] for c in calls)
 
     # Each measurement gets its own stamped copy; the shared calibration stays untouched.
     for call in calls:

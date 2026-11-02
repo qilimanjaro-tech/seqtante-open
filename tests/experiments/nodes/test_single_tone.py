@@ -126,6 +126,7 @@ def test_basic_parameters(run_experiment):
     assert all(c["kwargs"]["relax_duration"] == 200_000 for c in calls)
     assert [c["kwargs"]["qubit_idx"] for c in calls] == ["q1", "q2"]
     assert [c["kwargs"]["readout_bus"] for c in calls] == list(READOUT_BUSES)
+    assert all("autocalibration" not in c["kwargs"] for c in calls)
 
     # Each measurement gets its own stamped copy; the shared calibration stays untouched.
     for call in calls:

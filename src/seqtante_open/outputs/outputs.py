@@ -19,16 +19,16 @@ from enum import Enum
 from functools import wraps
 from importlib.resources import files
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
+from typing import Any, Literal, TypedDict, assert_never, cast
 from uuid import uuid4
 from warnings import warn
 
 import yaml
 from loguru import logger
-from qililab.result import CalibrationRun, DatabaseManager, get_db_manager
+from qililab.result.database import CalibrationRun, DatabaseManager, DatabaseSchema, SequenceRun, get_db_manager
 
-if TYPE_CHECKING:
-    from qililab.result.database import SequenceRun
+DB_MANAGER_KEYS = ["path", "database_name", "database_schema"]
+RunSchema = Literal["autocal", "measurements"]
 
 # ---------------------Logger constants-----------------------
 DEFAULT_LOG_CONFIG = Path(str(files("seqtante_open.outputs") / "default_logger.json"))
@@ -53,6 +53,7 @@ class DbManagerConf(TypedDict, total=False):
 
     path: str
     database_name: str
+    database_schema: DatabaseSchema
 
 
 class CalibrationDataConf(TypedDict, total=False):
@@ -152,8 +153,7 @@ class Outputs:
         self._calibration_data: CalibrationData | None = None
 
         self._db_manager: DatabaseManager | None = None
-        self.calibration_run: CalibrationRun | SequenceRun | None = None
-        self.calibration_id: int = -1
+        self.run: CalibrationRun | SequenceRun | None = None
 
         self._storage_path: str | None = None
 
@@ -197,19 +197,22 @@ class Outputs:
         return self._db_manager
 
     def _create_db_manager(self) -> DatabaseManager:
-        db_conf = self.storage_conf.get("db_manager")
-        if not db_conf:
-            return get_db_manager()
+        db_conf = self.storage_conf.get("db_manager") or {}
 
-        key_warning = [key for key in db_conf if key not in ["path", "database_name"]]
+        key_warning = [key for key in db_conf if key not in DB_MANAGER_KEYS]
         if key_warning:
             warn(
-                f"Invalid key/s {key_warning} found in db_manager config, only 'path', 'database_name' are valid.",
+                f"Invalid key/s {key_warning} found in db_manager config, only {DB_MANAGER_KEYS} are valid.",
                 RuntimeWarning,
             )
-        return get_db_manager(
-            path=db_conf.get("path", "~/database.ini"), database_name=db_conf.get("database_name", "postgresql")
+        db_manager = get_db_manager(
+            path=db_conf.get("path", "~/database.ini"),
+            database_name=db_conf.get("database_name", "postgresql"),
+            database_schema=db_conf.get("database_schema"),
         )
+        if db_manager.database_schema == "qaas":
+            raise ValueError("Seqtante cannot run on the 'qaas' database schema, use 'autocal' or 'measurements'.")
+        return db_manager
 
     @property
     @_requires_initialized
@@ -228,28 +231,58 @@ class Outputs:
         """Stores a parameter for later serialization if configured"""
         self.calibration_data._store_parameter(parameter=parameter, target=target, value=value)
 
-    # Functions related to calibration run
+    # Functions related to the run entry
 
-    def add_calibration_run(self, calibration_tree: dict, sample_name: str, cooldown: str):
-        """Start a calibration run entry in the autocalibration database"""
-        self.calibration_run = self.db_manager.add_calibration_run(
-            calibration_tree=calibration_tree,
-            sample_name=sample_name,
-            cooldown=cooldown,
-        )
-        self.calibration_id = cast("int", self.calibration_run.calibration_id) if self.calibration_run else -1
+    def start_run(self, run_tree: dict, sample_name: str, cooldown: str | None, sequence_name: str | None):
+        """Start a sequence run ('measurements' schema) or a calibration run ('autocal' schema) in the database"""
+        # _create_db_manager rejects 'qaas'
+        schema = cast("RunSchema", self.db_manager.database_schema)
+        match schema:
+            case "measurements":
+                if sequence_name is None:
+                    raise ValueError(
+                        "'sequence_name' is required in the config for the 'measurements' database schema."
+                    )
+                self.db_manager.set_sample_and_cooldown(sample_name, cooldown)
+                self.run = self.db_manager.add_sequence_run(
+                    sequence_name=sequence_name,
+                    sequence_tree=run_tree,
+                    sample_name=sample_name,
+                    cooldown=cooldown,
+                )
+            case "autocal":
+                if cooldown is None:
+                    raise ValueError("'cooldown' is required in the config for the 'autocal' database schema.")
+                self.run = self.db_manager.add_calibration_run(
+                    calibration_tree=run_tree,
+                    sample_name=sample_name,
+                    cooldown=cooldown,
+                )
+            case _:
+                assert_never(schema)
 
-    def end_calibration(self):
-        """End the calibration run and saves it to the database if one has been started"""
-        if self.calibration_run:
-            self.calibration_run.end_calibration(self.db_manager.session)
+    def end_run(self):
+        """End the run entry and save it to the database if one has been started"""
+        if isinstance(self.run, SequenceRun):
+            self.run.end_sequence(self.db_manager.session)
+        elif isinstance(self.run, CalibrationRun):
+            self.run.end_calibration(self.db_manager.session)
+
+    @property
+    def run_id(self) -> int:
+        """Id of the current sequence or calibration run in the database, -1 if none has been started"""
+        if isinstance(self.run, SequenceRun):
+            return self.run.sequence_id
+        if isinstance(self.run, CalibrationRun):
+            return self.run.calibration_id
+        return -1
 
     def setup_logger(self):
         """Sets up the loguru logger with the given or default configuration
 
         Args:
             data_folder (str): Folder where the standard calibration outputs (.h5 and plots) are saved. Used if the field "sink" starts with "SEQTANTE_FOLDER"
-            calibration_id (int, optional): Id for the calibration in the calibration database. Used if CALIBRATION_ID in config["extras"].
+            run_id (int, optional): Id of the sequence or calibration run in the database. Used if RUN_ID in config["extras"].
             config (dict, optional): Log configuration dict, if one isn't provided or "file_dir" not in the dict, it uses the default file.
 
         Returns:
@@ -290,7 +323,7 @@ class Outputs:
             params.pop("name", None)
             handlers.append(params)
 
-        EXTRAS = {"CALIBRATION_ID": self.calibration_id, "GENERATED_UUID": uuid4()}
+        EXTRAS = {"RUN_ID": self.run_id, "GENERATED_UUID": uuid4()}
 
         extra_cfg: dict[str, Any] = {
             k.lower() if k in EXTRAS else k: EXTRAS[k] if k in EXTRAS else v

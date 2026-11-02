@@ -12,11 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import cast
-
 import numpy as np
 import plotly.graph_objects as go
-from qililab.data_management import build_platform
 from qililab.typings.enums import Parameter
 
 from .fit_base import FittingClass
@@ -77,8 +74,7 @@ class FluxoniumTwoToneFluxModel(FittingClass):
 
     def _drive_lo(self) -> float:
         """Drive-bus LO frequency in Hz, taken from the runcard stored with the measurement."""
-        platform = build_platform(cast("dict", self.measurement.platform_before))
-        return platform.get_parameter(alias=self.drive_bus, parameter=Parameter.LO_FREQUENCY)
+        return self.platform.get_parameter(alias=self.drive_bus, parameter=Parameter.LO_FREQUENCY)
 
     def fit(self):
         """Fit the qubit IF at every flux, then the parabola whose vertex is the sweet spot."""

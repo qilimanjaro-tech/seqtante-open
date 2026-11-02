@@ -18,7 +18,7 @@ from warnings import warn
 import numpy as np
 from qililab import Calibration, Parameter
 from qililab.platform import Platform
-from qililab.result import AutocalMeasurement, DatabaseManager, StreamArray
+from qililab.result import AutocalMeasurement, DatabaseManager, Measurement, StreamArray
 
 from seqtante_open.experiments.analysis import sss_from_array
 from seqtante_open.experiments.qprogram import two_tone_spectroscopy
@@ -45,7 +45,6 @@ def two_tone_frequency(
     target: str | None = None,
     calibration: Calibration | None = None,
     optional_identifier: str | None = None,
-    autocalibration: bool = False,
 ):
     qprogram = two_tone_spectroscopy(  # type: ignore [misc]
         *sss_from_array(drive_IF_sweep),
@@ -89,7 +88,6 @@ def two_tone_frequency(
         qprogram=qprogram,
         optional_identifier=optional_identifier,
         calibration=calibration,
-        autocalibration=autocalibration,
         qubit_idx=target,
     )
 
@@ -101,7 +99,7 @@ def two_tone_frequency(
         if instrument.name.name == "ROHDE_SCHWARZ":
             platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=False)
 
-    return cast("int", cast("AutocalMeasurement", stream_array.measurement).measurement_id)
+    return cast("Measurement | AutocalMeasurement", stream_array.measurement).measurement_id
 
 
 def two_tone__frequency_vs_flux(
@@ -128,7 +126,6 @@ def two_tone__frequency_vs_flux(
     target: str | None = None,
     calibration: Calibration | None = None,
     optional_identifier: str | None = None,
-    autocalibration: bool = False,
 ):
     qprogram = two_tone_spectroscopy(  # type: ignore [misc]
         *sss_from_array(drive_IF_sweep),
@@ -185,7 +182,6 @@ def two_tone__frequency_vs_flux(
         qprogram=qprogram,
         optional_identifier=optional_identifier,
         calibration=calibration,
-        autocalibration=autocalibration,
         qubit_idx=target,
     )
 
@@ -202,4 +198,4 @@ def two_tone__frequency_vs_flux(
         if instrument.name.name == "ROHDE_SCHWARZ":
             platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=False)
 
-    return cast("int", cast("AutocalMeasurement", stream_array.measurement).measurement_id)
+    return cast("Measurement | AutocalMeasurement", stream_array.measurement).measurement_id

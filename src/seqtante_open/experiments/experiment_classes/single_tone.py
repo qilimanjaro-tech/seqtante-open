@@ -19,7 +19,7 @@ from typing import cast
 import numpy as np
 from qililab import Calibration, Parameter
 from qililab.platform import Platform
-from qililab.result import AutocalMeasurement, DatabaseManager, StreamArray
+from qililab.result import AutocalMeasurement, DatabaseManager, Measurement, StreamArray
 
 from seqtante_open.experiments.analysis import sss_from_array
 from seqtante_open.experiments.qprogram import resonator_spectroscopy, single_tone_vs_flux
@@ -44,7 +44,6 @@ def single_tone__frequency_vs_flux(
     flux_parameter: Parameter = Parameter.FLUX,
     qubit_idx: str | None = None,
     secondary_idx: str | None = None,
-    autocalibration: bool = False,
     readout_attenuation: int | None = None,
 ) -> int:
     """Continuous-wave single-tone spectroscopy vs. flux, hardware-looping over the readout IF
@@ -129,7 +128,6 @@ def single_tone__frequency_vs_flux(
         calibration=calibration,
         qubit_idx=qubit_idx,
         secondary_idx=secondary_idx,
-        autocalibration=autocalibration,
     )
 
     with stream_array:
@@ -146,7 +144,7 @@ def single_tone__frequency_vs_flux(
             ).results
         stream_array[()] = results[readout_bus][0].array.transpose(1, 2, 0)
 
-    return cast("int", cast("AutocalMeasurement", stream_array.measurement).measurement_id)
+    return cast("Measurement | AutocalMeasurement", stream_array.measurement).measurement_id
 
 
 def single_tone__frequency_sweep(
@@ -163,7 +161,6 @@ def single_tone__frequency_sweep(
     qubit_idx: str | None = None,
     calibration: Calibration | None = None,
     optional_identifier: str | None = None,
-    autocalibration: bool = False,
 ) -> int | None:
     """Pulsed single-tone spectroscopy (resonator spectroscopy), hardware-looping over the readout IF.
 
@@ -181,7 +178,6 @@ def single_tone__frequency_sweep(
         qubit_idx: Qubit index to associate with the measurement. Defaults to None.
         calibration: Calibration to use when executing the qprogram. Defaults to None.
         optional_identifier: Identifier for the measurement in the database. Defaults to None.
-        autocalibration: If True the measurement is saved in the autocalibration database. Defaults to False.
 
     Returns:
         int | None: ID of the measurement in the database.
@@ -210,10 +206,9 @@ def single_tone__frequency_sweep(
         optional_identifier=optional_identifier,
         calibration=calibration,
         qubit_idx=qubit_idx,
-        autocalibration=autocalibration,
     )
 
     with stream_array:
         results = platform.execute_qprogram(qprogram, bus_mapping={"readout": readout_bus}).results
         stream_array[()] = results[readout_bus][0].array.T
-    return cast("int", cast("AutocalMeasurement", stream_array.measurement).measurement_id)
+    return cast("Measurement | AutocalMeasurement", stream_array.measurement).measurement_id

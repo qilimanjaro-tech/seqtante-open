@@ -68,7 +68,6 @@ def single_tone_node(platform: Platform, platform_path: str, parameters: dict[st
                 ringup_time=target_params.get("ringup_time", _DEFAULTS["ringup_time"]),
                 calibration=calibration_copy,
                 qubit_idx=qubit,
-                autocalibration=True,
             )
 
             model = FluxoniumSingleToneModel(

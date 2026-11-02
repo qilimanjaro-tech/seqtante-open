@@ -1,0 +1,8 @@
+The run type is now decided by the database the `DatabaseManager` is connected to, following qililab 0.35.2's `database_schema`. Before, every run was recorded as a calibration run.
+
+- A run is recorded as a calibration run when the manager uses the `autocal` schema and as a sequence run when it uses `measurements`. Set `database_schema` in `storage.db_manager` or in the `.ini` section; if neither declares it, qililab falls back to `measurements`, so existing configs need `database_schema: "autocal"` to keep recording calibration runs.
+- `cooldown` is required in the calibration tree for the `autocal` schema, and `sequence_name` for the `measurements` schema. A missing one raises a `ValueError` before anything is written to the database.
+- The `qaas` schema raises a `ValueError`, since Seqtante-Open can't record runs in it.
+- The logger `extra` keyword `CALIBRATION_ID` is renamed to `RUN_ID`. Custom log configs that bind `CALIBRATION_ID` need to be updated.
+- `Outputs.add_calibration_run` and `Outputs.end_calibration` are replaced by `Outputs.start_run` and `Outputs.end_run`, which pick the entry from the schema. `Outputs.calibration_id` is replaced by the `Outputs.run_id` property, which returns the sequence or calibration id of the current run, or `-1` if none has started. The `Outputs.calibration_run` attribute, which holds either entry, is renamed to `Outputs.run`.
+- The `autocalibration` parameter is removed from `single_tone__frequency_vs_flux`, `single_tone__frequency_sweep`, `two_tone_frequency` and `two_tone__frequency_vs_flux`. qililab deprecated the flag; the schema of the `db_manager` decides the table instead.

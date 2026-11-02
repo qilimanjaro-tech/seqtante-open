@@ -15,7 +15,7 @@
 """``FluxoniumTwoToneModel`` against a qubit peak at a known IF.
 
 Like its single-tone sibling, this fit plots with plotly and reads the drive LO
-off a platform built from ``measurement.platform_before`` (``lo`` is left unset),
+off a platform built from ``measurement.platform`` (``lo`` is left unset),
 so the ``drive_q1`` alias its loop metadata names has to exist in the test
 runcard.
 

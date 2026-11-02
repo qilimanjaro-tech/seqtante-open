@@ -19,7 +19,7 @@ plots with plotly rather than matplotlib, and it writes to the database from
 inside ``plot()`` rather than ``fit()``.
 
 ``lo`` is left unset on purpose, so ``plot()`` goes and reads the readout LO off
-a platform built from ``measurement.platform_before``. The bus aliases below
+a platform built from ``measurement.platform``. The bus aliases below
 therefore have to exist in the test runcard: ``readout_q1`` resolves to
 ``QRM-RF1`` at 6.3 GHz there.
 """
