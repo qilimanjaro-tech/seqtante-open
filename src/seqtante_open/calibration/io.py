@@ -22,24 +22,31 @@ object the calibration nodes already read and write.
 from qililab.qprogram.calibration import Calibration
 from qililab.utils.serialization import deserialize_from, serialize_to
 
-from seqtante_open.calibration.bus_alias import Role, bus_alias
+from seqtante_open.calibration.bus_alias import bus_alias
 from seqtante_open.calibration.model import CalibrationFile, ReadoutLevels
 
 #: Keys under ``Calibration.parameters`` that hold the calibration-file content.
 _CONTENT_KEYS = ("operating_points_version", "operating_points", "experiments")
 
 
-def read_calibration_file(calibration: Calibration) -> CalibrationFile:
+def read_calibration_file(calibration: Calibration, *, check_pulses: bool = True) -> CalibrationFile:
     """Parse and validate the operating points and sections from a ``Calibration``.
 
+    When ``check_pulses`` (the default), every pulse a section names must also exist on its bus in
+    ``Calibration.waveforms`` — the load-time guarantee of ADR-0008. Pass ``check_pulses=False`` to read
+    a file whose waveforms are not populated yet (e.g. while seeding, where points are written first).
+
     Raises:
-        ValueError: if the ``Calibration`` carries no calibration-file content.
+        ValueError: if the ``Calibration`` carries no content, or (when checking) a named pulse is missing.
         pydantic.ValidationError: if the content does not match the model.
     """
     if "operating_points_version" not in calibration.parameters:
         raise ValueError("no calibration-file content in Calibration.parameters (missing 'operating_points_version')")
     data = {key: calibration.parameters[key] for key in _CONTENT_KEYS if key in calibration.parameters}
-    return CalibrationFile.model_validate(data)
+    file = CalibrationFile.model_validate(data)
+    if check_pulses:
+        check_section_pulses_exist(file, calibration)
+    return file
 
 
 def write_calibration_file(calibration: Calibration, file: CalibrationFile) -> None:
@@ -84,24 +91,31 @@ def check_section_pulses_exist(file: CalibrationFile, calibration: Calibration) 
                     )
 
 
-def readout_levels_for(file: CalibrationFile, experiment: str, target: str) -> ReadoutLevels | None:
-    """The readout levels to use for a section, or ``None`` if its operating point has none.
+def readout_levels_for(
+    file: CalibrationFile, experiment: str, target: str, readout_pulse: str
+) -> ReadoutLevels | None:
+    """The readout levels for ``target`` at its section's operating point, for a consumer playing ``readout_pulse``.
 
-    Readout levels are tagged with the readout pulse they were taken with. A section that plays a
-    different readout pulse must not use them (ADR-0001, D8).
+    Readout levels are tagged with the readout pulse they were taken with; a consumer playing a
+    different readout pulse must not use them (ADR-0001, D8). Because ``pulses`` is sparse (a section
+    lists only the roles it overrides, ADR-0008), the section alone may not name the readout pulse —
+    so the caller passes the one it will actually play, resolved from the section's override or the
+    experiment's default.
+
+    Returns:
+        The levels, or ``None`` if the operating point stores none.
 
     Raises:
-        ValueError: if the section plays a readout pulse other than the one the levels were taken with.
+        ValueError: if ``readout_pulse`` differs from the pulse the levels were taken with.
     """
     section = file.experiments[experiment][target]
     levels = file.operating_points[target][section.operating_point].readout.levels
     if levels is None:
         return None
-    played = section.pulses.get(Role.readout)
-    if played is not None and played != levels.pulse:
+    if readout_pulse != levels.pulse:
         raise ValueError(
             f"experiment '{experiment}' target '{target}': readout levels at operating point "
-            f"'{section.operating_point}' were taken with pulse '{levels.pulse}', but the section plays "
-            f"'{played}'; refusing to use them (ADR-0001, D8)"
+            f"'{section.operating_point}' were taken with pulse '{levels.pulse}', but the consumer plays "
+            f"'{readout_pulse}'; refusing to use them (ADR-0001, D8)"
         )
     return levels

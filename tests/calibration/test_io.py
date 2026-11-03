@@ -32,7 +32,21 @@ def test_round_trips_through_a_calibration(valid_file: dict, tmp_path: Path) -> 
     save_calibration(calibration, path)
     reloaded = load_calibration(path)
 
-    assert read_calibration_file(reloaded) == model
+    # check_pulses=False: this test exercises the structure round-trip, not waveform presence.
+    assert read_calibration_file(reloaded, check_pulses=False) == model
+
+
+def test_read_checks_named_pulses_exist(valid_file: dict) -> None:
+    model = CalibrationFile.model_validate(valid_file)
+    calibration = Calibration()
+    write_calibration_file(calibration, model)
+
+    # No waveforms registered yet: the load-time pulse check fails (ADR-0008).
+    with pytest.raises(ValueError, match="not defined on bus"):
+        read_calibration_file(calibration)
+
+    _waveforms_for(calibration)
+    assert read_calibration_file(calibration) == model  # passes once the waveforms exist
 
 
 def test_write_preserves_unrelated_parameters(valid_file: dict) -> None:
@@ -69,19 +83,20 @@ def test_check_section_pulses_exist_errors_when_missing(valid_file: dict) -> Non
 
 def test_readout_levels_for_returns_levels_when_pulse_matches(valid_file: dict) -> None:
     model = CalibrationFile.model_validate(valid_file)
-    levels = readout_levels_for(model, "rabi", "q14")
+    levels = readout_levels_for(model, "rabi", "q14", "readout-reset")
     assert levels is not None
     assert levels.pulse == "readout-reset"
 
 
 def test_readout_levels_for_refuses_on_pulse_mismatch(valid_file: dict) -> None:
-    valid_file["experiments"]["rabi"]["q14"]["pulses"]["readout"] = "readout-other"
     model = CalibrationFile.model_validate(valid_file)
+    # The consumer plays a readout pulse other than the one the levels were taken with (D8),
+    # even though the sparse section does not override readout.
     with pytest.raises(ValueError, match="D8"):
-        readout_levels_for(model, "rabi", "q14")
+        readout_levels_for(model, "rabi", "q14", "readout-other")
 
 
 def test_readout_levels_for_none_when_point_has_no_levels(valid_file: dict) -> None:
     valid_file["experiments"]["t1"] = {"q14": {"operating_point": "sweet_spot", "pulses": {}}}
     model = CalibrationFile.model_validate(valid_file)
-    assert readout_levels_for(model, "t1", "q14") is None
+    assert readout_levels_for(model, "t1", "q14", "readout-sweet_spot") is None
