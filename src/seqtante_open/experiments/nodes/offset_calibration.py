@@ -89,14 +89,14 @@ def single_tone_vs_flux(platform: Platform, platform_path: str, parameters: dict
     try:
         for qubit, loop in product(qubits, ["z", "x"][:qubit_loops][::-1]):
             readout_bus = f"readout_{qubit}"
-            flux_bus = f"flux_{qubit}_{loop}"
+            flux_bus = f"flux_{loop}_{qubit}"
             readout_flux = x_loop_readout_flux(qubit, qubit_loops, parameters) if loop != "x" else None
             _run_experiment(target=qubit, flux_bus=flux_bus, readout_bus=readout_bus, readout_flux=readout_flux)
 
         for coupler, loop in product(couplers, ["z", "x"][:coupler_loops][::-1]):
             readout_qubit = readout_x_couplers[coupler]
             readout_bus = f"readout_{readout_qubit}"
-            flux_bus = f"flux_{coupler}_{loop}"
+            flux_bus = f"flux_{loop}_{coupler}"
             _run_experiment(
                 target=coupler,
                 flux_bus=flux_bus,

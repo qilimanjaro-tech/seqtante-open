@@ -11,11 +11,11 @@ from seqtante_open.targets import CouplerTarget, QubitTarget
     [
         ("q14", Role.drive, None, "drive_q14"),
         ("q14", Role.readout, None, "readout_q14"),
-        ("q14", Role.flux, "z", "flux_q14_z"),
-        ("q14", Role.flux, "x", "flux_q14_x"),
+        ("q14", Role.flux, "z", "flux_z_q14"),
+        ("q14", Role.flux, "x", "flux_x_q14"),
         ("q14", Role.flux, None, "flux_q14"),
-        ("c2_3", Role.flux, "z", "flux_c2_3_z"),
-        ("c1_10", Role.flux, "z", "flux_c1_10_z"),
+        ("c2_3", Role.flux, "z", "flux_z_c2_3"),
+        ("c1_10", Role.flux, "z", "flux_z_c1_10"),
     ],
 )
 def test_bus_alias(target: str, role: Role, axis: str | None, expected: str) -> None:
@@ -24,7 +24,7 @@ def test_bus_alias(target: str, role: Role, axis: str | None, expected: str) -> 
 
 def test_bus_alias_accepts_a_target_object() -> None:
     assert bus_alias(QubitTarget(14), Role.readout) == "readout_q14"
-    assert bus_alias(CouplerTarget.between(3, 2), Role.flux, "z") == "flux_c2_3_z"
+    assert bus_alias(CouplerTarget.between(3, 2), Role.flux, "z") == "flux_z_c2_3"
 
 
 def test_bus_alias_rejects_a_misordered_coupler() -> None:
@@ -53,9 +53,9 @@ def test_bus_alias_rejects_unknown_axis() -> None:
     [
         ("drive_q14", ("q14", Role.drive, None)),
         ("readout_q14", ("q14", Role.readout, None)),
-        ("flux_q14_z", ("q14", Role.flux, "z")),
+        ("flux_z_q14", ("q14", Role.flux, "z")),
         ("flux_q14", ("q14", Role.flux, None)),  # no axis
-        ("flux_c2_3_z", ("c2_3", Role.flux, "z")),  # coupler target, not axis-first
+        ("flux_z_c2_3", ("c2_3", Role.flux, "z")),  # axis first, coupler target is the remainder
         ("flux_c2_3", ("c2_3", Role.flux, None)),
     ],
 )

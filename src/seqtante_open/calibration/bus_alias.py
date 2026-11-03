@@ -16,9 +16,9 @@
 Bus keys keep qililab's existing convention:
 
 - drive and readout are ``<line>_<target>`` (``drive_q14``, ``readout_q14``);
-- flux is target-first, axis last: ``flux_<target>[_<axis>]`` (``flux_q14_z``,
-  ``flux_c2_3_z``), never ``flux_<axis>_<target>``, so crosstalk calibration, the
-  bus sorter and the fit-manager target parsing keep working.
+- flux is axis-first: ``flux_<axis>_<target>`` (``flux_z_q14``, ``flux_z_c2_3``),
+  following qililab's flux bus naming, so crosstalk calibration, the bus sorter and
+  the fit-manager target parsing keep working.
 
 Target names are validated and canonicalised through :mod:`seqtante_open.targets` (``q<n>``,
 ``c<n>_<m>`` with ``n < m``), so a mis-ordered coupler like ``c3_2`` is rejected rather than silently
@@ -55,7 +55,7 @@ def bus_alias(target: str | Target, role: Role, axis: str | None = None) -> str:
         axis: the flux axis (``x``/``y``/``z``); only for :attr:`Role.flux`.
 
     Returns:
-        The bus alias, e.g. ``drive_q14``, ``readout_q14``, ``flux_q14_z``.
+        The bus alias, e.g. ``drive_q14``, ``readout_q14``, ``flux_z_q14``.
 
     Raises:
         ValueError: if ``target`` is not a valid target, if ``axis`` is given for a non-flux line, or
@@ -67,7 +67,7 @@ def bus_alias(target: str | Target, role: Role, axis: str | None = None) -> str:
             return f"flux_{target_name}"
         if axis not in _AXES:
             raise ValueError(f"unknown flux axis {axis!r}: expected one of {AXES}")
-        return f"flux_{target_name}_{axis}"
+        return f"flux_{axis}_{target_name}"
     if axis is not None:
         raise ValueError(f"{role} buses take no axis (got {axis!r})")
     return f"{role.value}_{target_name}"
@@ -76,8 +76,8 @@ def bus_alias(target: str | Target, role: Role, axis: str | None = None) -> str:
 def parse_bus_alias(bus: str) -> tuple[str, Role, str | None]:
     """Split a bus alias into ``(target, role, axis)``.
 
-    The inverse of :func:`bus_alias`. For flux, the target (not the axis) follows
-    ``flux_``; the optional axis is the last ``_``-separated token (ADR-0008).
+    The inverse of :func:`bus_alias`. For flux, the axis (when present) follows ``flux_`` and the
+    target is the remainder (ADR-0008).
 
     Raises:
         ValueError: if ``bus`` is not a ``<line>_...`` alias with a known line.
@@ -87,8 +87,8 @@ def parse_bus_alias(bus: str) -> tuple[str, Role, str | None]:
         raise ValueError(f"not a bus alias: {bus!r}")
     role = Role(line)
     if role is Role.flux:
-        target, _, tail = rest.rpartition("_")
-        if target and tail in _AXES:
-            return target, role, tail
+        head, _, target = rest.partition("_")
+        if target and head in _AXES:
+            return target, role, head
         return rest, role, None
     return rest, role, None
