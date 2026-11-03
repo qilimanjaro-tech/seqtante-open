@@ -125,11 +125,16 @@ class CalibrationParser:
                     )
                 step_pipeline[step.name] = pipeline.name
 
-        # Pipeline after names existing steps
+        # Pipeline after names existing steps of other pipelines
         for pipeline in pipelines:
             for name in pipeline.after:
                 if name not in step_pipeline:
                     raise TreeParseError(f"pipelines.{pipeline.name}.after: unknown step '{name}'.")
+                if step_pipeline[name] == pipeline.name:
+                    raise TreeParseError(
+                        f"pipelines.{pipeline.name}.after: '{name}' is a step of this pipeline. "
+                        "Steps in a pipeline already run in order."
+                    )
         return pipelines
 
     def _pipeline(
@@ -139,11 +144,7 @@ class CalibrationParser:
         path = f"pipelines.{name}"
         if not isinstance(raw, Mapping):
             raise TreeParseError(f"{path}: must be a mapping.")
-        targets = (
-            self._targets(raw["targets"], parent=parent_targets, path=f"{path}.targets")
-            if "targets" in raw
-            else list(parent_targets)
-        )
+        targets = self._narrowed_targets(raw, parent_targets, path)
 
         enabled = raw.get("enabled", True)
         if not isinstance(enabled, bool):
@@ -188,11 +189,7 @@ class CalibrationParser:
         if not spec.flux_sweep and loop is not None:
             raise TreeParseError(f"{path}.loop: '{experiment}' does not sweep flux, so it takes no loop.")
 
-        targets = (
-            self._targets(raw["targets"], parent=parent_targets, path=f"{path}.targets")
-            if "targets" in raw
-            else list(parent_targets)
-        )
+        targets = self._narrowed_targets(raw, parent_targets, path)
 
         own = {key: value for key, value in raw.items() if key not in _STEP_KEYS}
         _check_reserved(own, path)
@@ -201,10 +198,10 @@ class CalibrationParser:
         base = {**defaults.get(experiment, {}), **own}
         parameters: dict[Target, dict[str, Any]] = {}
         for target in targets:
-            resolved = dict(base)
+            resolved = base
             for override_targets, values in overrides:
                 if target in override_targets:
-                    resolved.update(values)
+                    resolved = resolved | values
             parameters[target] = copy.deepcopy(resolved)
 
         return Step(
@@ -232,8 +229,10 @@ class CalibrationParser:
                 raise TreeParseError(f"{entry_path}: must be a mapping.")
             if "targets" not in entry:
                 raise TreeParseError(f"{entry_path}.targets: missing.")
-            targets = self._targets(entry["targets"], parent=None, path=f"{entry_path}.targets")
-            ignored = [target for target in targets if target not in step_targets]
+            kept: list[Target] = []
+            ignored: list[Target] = []
+            for target in self._targets(entry["targets"], parent=None, path=f"{entry_path}.targets"):
+                (kept if target in step_targets else ignored).append(target)
             if ignored:
                 logger.warning(
                     "{path}.targets: {ignored} are not targets of the step. (Ignored)",
@@ -243,7 +242,7 @@ class CalibrationParser:
             values = {key: value for key, value in entry.items() if key != "targets"}
             _check_structural(values, entry_path)
             _check_reserved(values, entry_path)
-            overrides.append(([target for target in targets if target in step_targets], values))
+            overrides.append((kept, values))
         return overrides
 
     @staticmethod
@@ -260,6 +259,12 @@ class CalibrationParser:
             _check_reserved(values, path)
             defaults[experiment] = dict(values)
         return defaults
+
+    def _narrowed_targets(self, raw: Mapping[str, Any], parent: list[Target], path: str) -> list[Target]:
+        """Returns the ``targets`` of a pipeline or step, or ``parent`` when it sets none."""
+        if "targets" not in raw:
+            return list(parent)
+        return self._targets(raw["targets"], parent=parent, path=f"{path}.targets")
 
     def _targets(self, raw: Any, parent: list[Target] | None, path: str) -> list[Target]:
         """Parses target names, expands ``all_q`` and ``all_c`` in place, drops repeats keeping the first, and checks
@@ -285,7 +290,7 @@ class CalibrationParser:
     def _all_qubits(self, path: str) -> list[Target]:
         """Returns every qubit in the runcard's analog settings."""
         settings = self.platform.analog_compilation_settings
-        if settings is None or settings.qubits is None:
+        if settings is None or not settings.qubits:
             raise TreeParseError(f"{path}: all_q needs the qubits in the runcard's analog settings.")
         try:
             return [QubitTarget(qubit) for qubit in settings.qubits]
@@ -295,7 +300,7 @@ class CalibrationParser:
     def _all_couplers(self, path: str) -> list[Target]:
         """Returns every coupler in the runcard's analog topology, with its qubits in either order."""
         settings = self.platform.analog_compilation_settings
-        if settings is None or settings.topology is None:
+        if settings is None or not settings.topology:
             raise TreeParseError(f"{path}: all_c needs the topology in the runcard's analog settings.")
         try:
             return [CouplerTarget.between(edge[0], edge[1]) for edge in settings.topology]

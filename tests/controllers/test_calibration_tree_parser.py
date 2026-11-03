@@ -273,6 +273,17 @@ class TestPipelines:
         with pytest.raises(TreeParseError, match=r"^pipelines\.p\.after: unknown step 'nope'"):
             parse(tree, platform)
 
+    @pytest.mark.parametrize("after", ["s2", ["s1"], ["other", "s2"]])
+    def test_after_cannot_name_a_step_of_the_same_pipeline(self, platform, after):
+        tree = make_tree(
+            pipelines={
+                "o": {"steps": {"other": make_step()}},
+                "p": {"after": after, "steps": {"s1": make_step(), "s2": make_step()}},
+            }
+        )
+        with pytest.raises(TreeParseError, match=r"^pipelines\.p\.after: 's\d' is a step of this pipeline"):
+            parse(tree, platform)
+
     def test_after_must_name_a_step_not_a_pipeline(self, platform):
         tree = make_tree(
             pipelines={"a": {"steps": {"a1": make_step()}}, "b": {"after": "a", "steps": {"b1": make_step()}}}
@@ -466,19 +477,19 @@ class TestTargets:
             pytest.param(None, "all_q", r"^targets: all_q needs the qubits", id="all_q_without_analog_settings"),
             pytest.param(None, "all_c", r"^targets: all_c needs the topology", id="all_c_without_analog_settings"),
             pytest.param(
-                SimpleNamespace(qubits=None, topology=[[1, 2]]),
+                SimpleNamespace(qubits=[], topology=[[1, 2]]),
                 "all_q",
                 r"^targets: all_q needs the qubits",
                 id="all_q_without_qubits",
             ),
             pytest.param(
-                SimpleNamespace(qubits=[1, 2], topology=None),
+                SimpleNamespace(qubits=[1, 2], topology=[]),
                 "all_c",
                 r"^targets: all_c needs the topology",
                 id="all_c_without_topology",
             ),
             pytest.param(
-                SimpleNamespace(qubits=[-1], topology=None),
+                SimpleNamespace(qubits=[-1], topology=[]),
                 "all_q",
                 r"^targets: all_q: Invalid qubit_id",
                 id="all_q_with_an_invalid_qubit",
