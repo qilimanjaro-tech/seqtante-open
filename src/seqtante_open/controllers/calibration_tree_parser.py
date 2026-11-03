@@ -23,8 +23,8 @@ from loguru import logger
 from qililab import Platform
 
 from seqtante_open.controllers.experiment_specs import experiment_spec, known_experiments
+from seqtante_open.targets import CouplerTarget, ExperimentTarget, QubitTarget, Target
 
-Target = str
 Loop = Literal["z", "x"]
 
 _LOOPS: tuple[Loop, ...] = ("z", "x")
@@ -236,7 +236,9 @@ class CalibrationParser:
             ignored = [target for target in targets if target not in step_targets]
             if ignored:
                 logger.warning(
-                    "{path}.targets: {ignored} are not targets of the step. (Ignored)", path=entry_path, ignored=ignored
+                    "{path}.targets: {ignored} are not targets of the step. (Ignored)",
+                    path=entry_path,
+                    ignored=_names(ignored),
                 )
             values = {key: value for key, value in entry.items() if key != "targets"}
             _check_structural(values, entry_path)
@@ -260,21 +262,21 @@ class CalibrationParser:
         return defaults
 
     def _targets(self, raw: Any, parent: list[Target] | None, path: str) -> list[Target]:
-        """Expands ``all_q`` and ``all_c`` in place and checks the result is within ``parent``, when given."""
+        """Parses target names, expands ``all_q`` and ``all_c`` in place and checks the result is within ``parent``, when given."""
         if not isinstance(raw, list) or not raw:
             raise TreeParseError(f"{path}: must be a non-empty list of targets.")
         targets: list[Target] = []
-        for target in raw:
-            if target == "all_q":
+        for name in raw:
+            if name == "all_q":
                 targets += self._all_qubits(path)
-            elif target == "all_c":
+            elif name == "all_c":
                 targets += self._all_couplers(path)
             else:
-                targets.append(target)
+                targets.append(_target(name, path))
         if parent is not None:
             outside = [target for target in targets if target not in parent]
             if outside:
-                raise TreeParseError(f"{path}: {outside} are not in the enclosing targets {parent}.")
+                raise TreeParseError(f"{path}: {_names(outside)} are not in the enclosing targets {_names(parent)}.")
         return targets
 
     def _all_qubits(self, path: str) -> list[Target]:
@@ -282,14 +284,33 @@ class CalibrationParser:
         settings = self.platform.analog_compilation_settings
         if settings is None or settings.qubits is None:
             raise TreeParseError(f"{path}: all_q needs the qubits in the runcard's analog settings.")
-        return [f"q{qubit}" for qubit in settings.qubits]
+        try:
+            return [QubitTarget(qubit) for qubit in settings.qubits]
+        except ValueError as error:
+            raise TreeParseError(f"{path}: all_q: {error}") from error
 
     def _all_couplers(self, path: str) -> list[Target]:
-        """Returns every coupler in the runcard's analog topology."""
+        """Returns every coupler in the runcard's analog topology, with its qubits in either order."""
         settings = self.platform.analog_compilation_settings
         if settings is None or settings.topology is None:
             raise TreeParseError(f"{path}: all_c needs the topology in the runcard's analog settings.")
-        return [f"c{edge[0]}_{edge[1]}" for edge in settings.topology]
+        try:
+            return [CouplerTarget.between(edge[0], edge[1]) for edge in settings.topology]
+        except ValueError as error:
+            raise TreeParseError(f"{path}: all_c: {error}") from error
+
+
+def _target(name: Any, path: str) -> Target:
+    """Parses one target name written in the tree."""
+    try:
+        return ExperimentTarget.from_str(name)
+    except ValueError as error:
+        raise TreeParseError(f"{path}: {error}") from error
+
+
+def _names(targets: list[Target]) -> list[str]:
+    """Target names, for messages."""
+    return [str(target) for target in targets]
 
 
 def _after(raw: Any, path: str) -> list[str]:

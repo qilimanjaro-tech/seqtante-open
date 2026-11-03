@@ -22,6 +22,7 @@ import pytest
 from ruamel.yaml import YAML
 
 from seqtante_open.controllers import CalibrationParser, Pipeline, Step, TreeParseError
+from seqtante_open.targets import CouplerTarget, QubitTarget
 
 
 @pytest.fixture
@@ -217,13 +218,15 @@ class TestPipelines:
             parse(tree, platform)
 
     def test_pipeline_must_be_a_mapping(self, platform):
+        tree = make_tree(pipelines={"p": ["s"]})
         with pytest.raises(TreeParseError, match=r"^pipelines\.p: must be a mapping"):
-            parse(make_tree(pipelines={"p": ["s"]}), platform)
+            parse(tree, platform)
 
     @pytest.mark.parametrize("steps", [None, {}, [make_step()]])
     def test_steps_must_be_a_non_empty_mapping(self, platform, steps):
+        tree = make_tree(pipelines={"p": {"steps": steps}})
         with pytest.raises(TreeParseError, match=r"^pipelines\.p\.steps:"):
-            parse(make_tree(pipelines={"p": {"steps": steps}}), platform)
+            parse(tree, platform)
 
     def test_enabled_false(self, platform):
         (pipeline,) = parse(make_tree(pipelines={"p": {"enabled": False, "steps": {"s": make_step()}}}), platform)
@@ -236,27 +239,34 @@ class TestPipelines:
 
     @pytest.mark.parametrize("enabled", ["false", 0, None])
     def test_enabled_must_be_a_bool(self, platform, enabled):
+        tree = make_tree(pipelines={"p": {"enabled": enabled, "steps": {"s": make_step()}}})
         with pytest.raises(TreeParseError, match=r"^pipelines\.p\.enabled:"):
-            parse(make_tree(pipelines={"p": {"enabled": enabled, "steps": {"s": make_step()}}}), platform)
+            parse(tree, platform)
 
-    def test_after_a_list_of_steps(self, platform):
-        tree = make_tree(
-            pipelines={
-                "a": {"steps": {"a1": make_step(), "a2": make_step()}},
-                "b": {"steps": {"b1": make_step()}},
-                "c": {"after": ["a2", "b1"], "steps": {"c1": make_step()}},
-            }
-        )
-        assert parse(tree, platform)[2].after == ["a2", "b1"]
-
-    def test_after_may_name_a_step_of_a_disabled_pipeline(self, platform):
-        tree = make_tree(
-            pipelines={
-                "a": {"enabled": False, "steps": {"a1": make_step()}},
-                "b": {"after": "a1", "steps": {"b1": make_step()}},
-            }
-        )
-        assert parse(tree, platform)[1].after == ["a1"]
+    @pytest.mark.parametrize(
+        ("pipelines", "expected"),
+        [
+            pytest.param(
+                {
+                    "a": {"steps": {"a1": make_step(), "a2": make_step()}},
+                    "b": {"steps": {"b1": make_step()}},
+                    "c": {"after": ["a2", "b1"], "steps": {"c1": make_step()}},
+                },
+                ["a2", "b1"],
+                id="a_list_of_steps",
+            ),
+            pytest.param(
+                {
+                    "a": {"enabled": False, "steps": {"a1": make_step()}},
+                    "c": {"after": "a1", "steps": {"c1": make_step()}},
+                },
+                ["a1"],
+                id="a_step_of_a_disabled_pipeline",
+            ),
+        ],
+    )
+    def test_after(self, platform, pipelines, expected):
+        assert parse(make_tree(pipelines=pipelines), platform)[-1].after == expected
 
     def test_after_must_name_an_existing_step(self, platform):
         tree = make_tree(pipelines={"p": {"after": "nope", "steps": {"s": make_step()}}})
@@ -291,42 +301,55 @@ class TestPipelines:
 
 class TestSteps:
     def test_step_must_be_a_mapping(self, platform):
+        tree = single_step_tree(["two_tone"])  # type: ignore[arg-type]
         with pytest.raises(TreeParseError, match=r"^pipelines\.p\.steps\.s: must be a mapping"):
-            parse(single_step_tree(["two_tone"]), platform)  # type: ignore[arg-type]
+            parse(tree, platform)
 
     def test_experiment_is_required(self, platform):
+        tree = single_step_tree({"operating_point": "sweet_spot"})
         with pytest.raises(TreeParseError, match=r"^pipelines\.p\.steps\.s\.experiment: missing"):
-            parse(single_step_tree({"operating_point": "sweet_spot"}), platform)
+            parse(tree, platform)
 
     def test_unknown_experiment(self, platform):
+        tree = single_step_tree(make_step(experiment="two_tones"))
         with pytest.raises(TreeParseError, match=r"steps\.s\.experiment: unknown experiment 'two_tones'"):
-            parse(single_step_tree(make_step(experiment="two_tones")), platform)
+            parse(tree, platform)
 
     def test_the_same_experiment_in_several_steps(self, platform):
         tree = make_tree(pipelines={"p": {"steps": {"a": make_step(), "b": make_step()}}})
         assert [s.experiment for s in parse(tree, platform)[0].steps] == ["two_tone", "two_tone"]
 
-    def test_default_analysis(self, platform):
-        assert only_step(single_step_tree(make_step()), platform).analysis == "lorentzian_peak"
-
-    def test_named_analysis(self, platform):
-        step = only_step(single_step_tree(make_step(experiment="rabi", analysis="readout_levels")), platform)
-        assert step.analysis == "readout_levels"
+    @pytest.mark.parametrize(
+        ("step", "expected"),
+        [
+            pytest.param(make_step(), "lorentzian_peak", id="default"),
+            pytest.param(make_step(experiment="rabi"), "pi_amplitude", id="default_of_several"),
+            pytest.param(make_step(experiment="rabi", analysis="readout_levels"), "readout_levels", id="named"),
+        ],
+    )
+    def test_analysis(self, platform, step, expected):
+        assert only_step(single_step_tree(step), platform).analysis == expected
 
     def test_analysis_of_another_experiment(self, platform):
+        tree = single_step_tree(make_step(analysis="readout_levels"))
         with pytest.raises(
             TreeParseError, match=r"steps\.s\.analysis: unknown analysis 'readout_levels' for 'two_tone'"
         ):
-            parse(single_step_tree(make_step(analysis="readout_levels")), platform)
+            parse(tree, platform)
 
-    @pytest.mark.parametrize("operating_point", [None, "", 3])
-    def test_operating_point_is_required(self, platform, operating_point):
+    @pytest.mark.parametrize(
+        "step",
+        [
+            pytest.param({"experiment": "two_tone"}, id="absent"),
+            pytest.param(make_step(operating_point=None), id="None"),
+            pytest.param(make_step(operating_point=""), id="empty"),
+            pytest.param(make_step(operating_point=3), id="not_a_string"),
+        ],
+    )
+    def test_operating_point_is_required(self, platform, step):
+        tree = single_step_tree(step)
         with pytest.raises(TreeParseError, match=r"steps\.s\.operating_point: missing"):
-            parse(single_step_tree(make_step(operating_point=operating_point)), platform)
-
-    def test_operating_point_missing(self, platform):
-        with pytest.raises(TreeParseError, match=r"steps\.s\.operating_point: missing"):
-            parse(single_step_tree({"experiment": "two_tone"}), platform)
+            parse(tree, platform)
 
     @pytest.mark.parametrize("loop", ["z", "x"])
     def test_flux_sweep_loop(self, platform, loop):
@@ -338,12 +361,14 @@ class TestSteps:
         step = make_step(experiment="two_tone_vs_flux")
         if loop is not None:
             step["loop"] = loop
+        tree = single_step_tree(step)
         with pytest.raises(TreeParseError, match=r"steps\.s\.loop: 'two_tone_vs_flux' sweeps flux"):
-            parse(single_step_tree(step), platform)
+            parse(tree, platform)
 
     def test_loop_on_a_fixed_flux_experiment(self, platform):
+        tree = single_step_tree(make_step(loop="z"))
         with pytest.raises(TreeParseError, match=r"steps\.s\.loop: 'two_tone' does not sweep flux"):
-            parse(single_step_tree(make_step(loop="z")), platform)
+            parse(tree, platform)
 
 
 # ------------------------- Targets -------------------------
@@ -358,8 +383,9 @@ class TestTargets:
 
     @pytest.mark.parametrize("targets", [[], "q1", None])
     def test_targets_must_be_a_non_empty_list(self, platform, targets):
+        tree = make_tree(targets=targets)
         with pytest.raises(TreeParseError, match=r"^targets: must be a non-empty list"):
-            parse(make_tree(targets=targets), platform)
+            parse(tree, platform)
 
     def test_top_level_targets_reach_every_step(self, platform):
         step = only_step(make_tree(), platform)
@@ -394,94 +420,196 @@ class TestTargets:
         with pytest.raises(TreeParseError, match=r"^pipelines\.p\.targets: must be a non-empty list"):
             parse(tree, platform)
 
-    def test_all_q(self, platform):
-        assert only_step(make_tree(targets=["all_q"]), platform).targets == ["q1", "q2"]
-
-    def test_all_c(self, platform):
-        assert only_step(make_tree(targets=["all_c"]), platform).targets == ["c1_2"]
-
-    def test_expansion_keeps_its_place(self, platform):
-        assert only_step(make_tree(targets=["c1_2", "all_q"]), platform).targets == ["c1_2", "q1", "q2"]
+    @pytest.mark.parametrize(
+        ("targets", "expected"),
+        [
+            pytest.param(["all_q"], ["q1", "q2"], id="all_q"),
+            pytest.param(["all_c"], ["c1_2"], id="all_c"),
+            pytest.param(["c1_2", "all_q"], ["c1_2", "q1", "q2"], id="expansion_keeps_its_place"),
+            pytest.param(["all_q", "all_c"], ["q1", "q2", "c1_2"], id="all_q_and_all_c"),
+        ],
+    )
+    def test_expansion(self, platform, targets, expected):
+        assert only_step(make_tree(targets=targets), platform).targets == expected
 
     def test_all_q_in_a_narrowing(self, platform):
         tree = make_tree(targets=["all_q", "all_c"], pipelines={"p": {"steps": {"s": make_step(targets=["all_q"])}}})
         assert only_step(tree, platform).targets == ["q1", "q2"]
 
-    @pytest.mark.parametrize("target", ["all_q", "all_c"])
-    def test_expansion_without_analog_settings(self, target):
-        platform = SimpleNamespace(analog_compilation_settings=None)
-        with pytest.raises(TreeParseError, match=rf"^targets: {target} needs"):
-            parse(make_tree(targets=[target]), platform)
+    def test_all_c_orders_the_topology(self):
+        platform = SimpleNamespace(analog_compilation_settings=SimpleNamespace(qubits=[1, 2], topology=[[2, 1]]))
+        assert only_step(make_tree(targets=["all_c"]), platform).targets == [CouplerTarget(1, 2)]
 
-    def test_all_q_without_qubits(self):
-        platform = SimpleNamespace(analog_compilation_settings=SimpleNamespace(qubits=None, topology=[[1, 2]]))
-        with pytest.raises(TreeParseError, match="all_q needs the qubits"):
-            parse(make_tree(targets=["all_q"]), platform)
+    @pytest.mark.parametrize(
+        ("settings", "target", "match"),
+        [
+            pytest.param(None, "all_q", r"^targets: all_q needs the qubits", id="all_q_without_analog_settings"),
+            pytest.param(None, "all_c", r"^targets: all_c needs the topology", id="all_c_without_analog_settings"),
+            pytest.param(
+                SimpleNamespace(qubits=None, topology=[[1, 2]]),
+                "all_q",
+                r"^targets: all_q needs the qubits",
+                id="all_q_without_qubits",
+            ),
+            pytest.param(
+                SimpleNamespace(qubits=[1, 2], topology=None),
+                "all_c",
+                r"^targets: all_c needs the topology",
+                id="all_c_without_topology",
+            ),
+            pytest.param(
+                SimpleNamespace(qubits=[-1], topology=None),
+                "all_q",
+                r"^targets: all_q: Invalid qubit_id",
+                id="all_q_with_an_invalid_qubit",
+            ),
+            pytest.param(
+                SimpleNamespace(qubits=[1], topology=[[1, 1]]),
+                "all_c",
+                r"^targets: all_c: Invalid coupler",
+                id="all_c_with_a_self_coupling",
+            ),
+        ],
+    )
+    def test_expansion_needs_valid_analog_settings(self, settings, target, match):
+        platform = SimpleNamespace(analog_compilation_settings=settings)
+        tree = make_tree(targets=[target])
+        with pytest.raises(TreeParseError, match=match):
+            parse(tree, platform)
 
-    def test_all_c_without_topology(self):
-        platform = SimpleNamespace(analog_compilation_settings=SimpleNamespace(qubits=[1, 2], topology=None))
-        with pytest.raises(TreeParseError, match="all_c needs the topology"):
-            parse(make_tree(targets=["all_c"]), platform)
+
+class TestTargetObjects:
+    def test_targets_and_parameter_keys_are_target_objects(self, platform):
+        (pipeline,) = parse(make_tree(targets=["q1", "c1_2"]), platform)
+        step = pipeline.steps[0]
+        assert [type(target) for target in pipeline.targets] == [QubitTarget, CouplerTarget]
+        assert [type(target) for target in step.targets] == [QubitTarget, CouplerTarget]
+        assert [type(target) for target in step.parameters] == [QubitTarget, CouplerTarget]
+
+    def test_expanded_targets_are_target_objects(self, platform):
+        step = only_step(make_tree(targets=["all_q", "all_c"]), platform)
+        assert step.targets == [QubitTarget(1), QubitTarget(2), CouplerTarget(1, 2)]
+        assert [type(target) for target in step.targets] == [QubitTarget, QubitTarget, CouplerTarget]
+
+    @pytest.mark.parametrize("name", ["q01", "c2_1", "c1_1", "Q1", "qubit1", 1, None, ["q1"]])
+    def test_invalid_top_level_target(self, platform, name):
+        tree = make_tree(targets=["q1", name])
+        with pytest.raises(TreeParseError, match=r"^targets: Invalid target"):
+            parse(tree, platform)
+
+    @pytest.mark.parametrize(
+        ("tree", "match"),
+        [
+            pytest.param(
+                make_tree(pipelines={"p": {"targets": ["c2_1"], "steps": {"s": make_step()}}}),
+                r"^pipelines\.p\.targets: Invalid target 'c2_1'",
+                id="pipeline",
+            ),
+            pytest.param(
+                single_step_tree(make_step(targets=["q01"])),
+                r"^pipelines\.p\.steps\.s\.targets: Invalid target 'q01'",
+                id="step",
+            ),
+            pytest.param(
+                single_step_tree(make_step(overrides=[{"targets": ["q1", "q-2"], "averages": 1}])),
+                r"^pipelines\.p\.steps\.s\.overrides\[0\]\.targets: Invalid target 'q-2'",
+                id="override",
+            ),
+        ],
+    )
+    def test_invalid_target_below_the_top(self, platform, tree, match):
+        with pytest.raises(TreeParseError, match=match):
+            parse(tree, platform)
+
+    def test_messages_name_targets(self, platform):
+        tree = make_tree(targets=["q1"], pipelines={"p": {"targets": ["q1", "c1_2"], "steps": {"s": make_step()}}})
+        with pytest.raises(
+            TreeParseError, match=r"^pipelines\.p\.targets: \['c1_2'\] are not in the enclosing targets \['q1'\]\.$"
+        ):
+            parse(tree, platform)
 
 
 # ------------------------- Parameter resolution -------------------------
 
 
 class TestResolution:
-    def test_defaults_only(self, platform):
-        step = only_step(make_tree(defaults={"two_tone": {"averages": 1000}}), platform)
-        assert step.parameters == {"q1": {"averages": 1000}, "q2": {"averages": 1000}}
-
-    def test_no_parameters(self, platform):
-        assert only_step(make_tree(), platform).parameters == {"q1": {}, "q2": {}}
-
-    def test_defaults_of_another_experiment_do_not_apply(self, platform):
-        step = only_step(make_tree(defaults={"rabi": {"averages": 1000}}), platform)
-        assert step.parameters == {"q1": {}, "q2": {}}
-
-    def test_defaults_for_an_experiment_no_step_uses_are_accepted(self, platform):
-        assert only_step(make_tree(defaults={"not_yet_an_experiment": {"a": 1}}), platform).parameters["q1"] == {}
-
-    def test_step_overrides_defaults(self, platform):
-        tree = single_step_tree(make_step(averages=500), defaults={"two_tone": {"averages": 1000, "span": 5e6}})
-        assert only_step(tree, platform).parameters["q1"] == {"averages": 500, "span": 5e6}
-
-    def test_override_overrides_step(self, platform):
-        step = make_step(averages=500, overrides=[{"targets": ["q2"], "averages": 100}])
-        parameters = only_step(single_step_tree(step), platform).parameters
-        assert parameters == {"q1": {"averages": 500}, "q2": {"averages": 100}}
-
-    def test_override_overrides_defaults(self, platform):
-        step = make_step(overrides=[{"targets": ["q2"], "averages": 100}])
-        tree = single_step_tree(step, defaults={"two_tone": {"averages": 1000}})
-        assert only_step(tree, platform).parameters == {"q1": {"averages": 1000}, "q2": {"averages": 100}}
-
-    def test_overrides_apply_in_file_order(self, platform):
-        step = make_step(
-            overrides=[
-                {"targets": ["q1", "q2"], "averages": 100, "span": 1},
-                {"targets": ["q2"], "averages": 200},
-                {"targets": ["q2"], "span": 3},
-            ]
-        )
-        parameters = only_step(single_step_tree(step), platform).parameters
-        assert parameters == {"q1": {"averages": 100, "span": 1}, "q2": {"averages": 200, "span": 3}}
-
-    def test_override_with_all_q(self, platform):
-        step = make_step(overrides=[{"targets": ["all_q"], "averages": 100}])
-        assert only_step(single_step_tree(step), platform).parameters == {
-            "q1": {"averages": 100},
-            "q2": {"averages": 100},
-        }
-
-    def test_override_replaces_a_whole_value(self, platform):
-        step = make_step(
-            pulses={"drive": "pi-reset", "readout": "readout-reset"},
-            overrides=[{"targets": ["q2"], "pulses": {"drive": "pi-sweet_spot"}}],
-        )
-        parameters = only_step(single_step_tree(step), platform).parameters
-        assert parameters["q1"]["pulses"] == {"drive": "pi-reset", "readout": "readout-reset"}
-        assert parameters["q2"]["pulses"] == {"drive": "pi-sweet_spot"}
+    @pytest.mark.parametrize(
+        ("tree", "expected"),
+        [
+            pytest.param(make_tree(), {"q1": {}, "q2": {}}, id="no_parameters"),
+            pytest.param(
+                make_tree(defaults={"two_tone": {"averages": 1000}}),
+                {"q1": {"averages": 1000}, "q2": {"averages": 1000}},
+                id="defaults_only",
+            ),
+            pytest.param(
+                make_tree(defaults={"rabi": {"averages": 1000}}),
+                {"q1": {}, "q2": {}},
+                id="defaults_of_another_experiment_do_not_apply",
+            ),
+            pytest.param(
+                make_tree(defaults={"not_yet_an_experiment": {"a": 1}}),
+                {"q1": {}, "q2": {}},
+                id="defaults_for_an_experiment_no_step_uses_are_accepted",
+            ),
+            pytest.param(
+                single_step_tree(make_step(averages=500), defaults={"two_tone": {"averages": 1000, "span": 5e6}}),
+                {"q1": {"averages": 500, "span": 5e6}, "q2": {"averages": 500, "span": 5e6}},
+                id="step_overrides_defaults",
+            ),
+            pytest.param(
+                single_step_tree(make_step(averages=500, overrides=[{"targets": ["q2"], "averages": 100}])),
+                {"q1": {"averages": 500}, "q2": {"averages": 100}},
+                id="override_overrides_step",
+            ),
+            pytest.param(
+                single_step_tree(
+                    make_step(overrides=[{"targets": ["q2"], "averages": 100}]),
+                    defaults={"two_tone": {"averages": 1000}},
+                ),
+                {"q1": {"averages": 1000}, "q2": {"averages": 100}},
+                id="override_overrides_defaults",
+            ),
+            pytest.param(
+                single_step_tree(
+                    make_step(
+                        overrides=[
+                            {"targets": ["q1", "q2"], "averages": 100, "span": 1},
+                            {"targets": ["q2"], "averages": 200},
+                            {"targets": ["q2"], "span": 3},
+                        ]
+                    )
+                ),
+                {"q1": {"averages": 100, "span": 1}, "q2": {"averages": 200, "span": 3}},
+                id="overrides_apply_in_file_order",
+            ),
+            pytest.param(
+                single_step_tree(make_step(overrides=[{"targets": ["all_q"], "averages": 100}])),
+                {"q1": {"averages": 100}, "q2": {"averages": 100}},
+                id="override_with_all_q",
+            ),
+            pytest.param(
+                single_step_tree(
+                    make_step(
+                        pulses={"drive": "pi-reset", "readout": "readout-reset"},
+                        overrides=[{"targets": ["q2"], "pulses": {"drive": "pi-sweet_spot"}}],
+                    )
+                ),
+                {
+                    "q1": {"pulses": {"drive": "pi-reset", "readout": "readout-reset"}},
+                    "q2": {"pulses": {"drive": "pi-sweet_spot"}},
+                },
+                id="override_replaces_a_whole_value",
+            ),
+            pytest.param(
+                single_step_tree(make_step(overrides=[{"targets": ["q1"]}])),
+                {"q1": {}, "q2": {}},
+                id="override_with_only_targets",
+            ),
+        ],
+    )
+    def test_resolution(self, platform, tree, expected):
+        assert only_step(tree, platform).parameters == expected
 
     def test_override_target_outside_the_step_is_warned_and_ignored(self, platform, warnings_log):
         step = make_step(targets=["q1"], overrides=[{"targets": ["q1", "q2"], "averages": 100}])
@@ -489,10 +617,6 @@ class TestResolution:
         assert warnings_log == [
             "pipelines.p.steps.s.overrides[0].targets: ['q2'] are not targets of the step. (Ignored)"
         ]
-
-    def test_override_with_only_targets(self, platform):
-        step = make_step(overrides=[{"targets": ["q1"]}])
-        assert only_step(single_step_tree(step), platform).parameters == {"q1": {}, "q2": {}}
 
     def test_targets_do_not_share_values(self, platform):
         tree = single_step_tree(make_step(sweep=[0, 1, 2]), defaults={"two_tone": {"nested": {"a": 1}}})
@@ -511,53 +635,72 @@ class TestResolution:
 
     @pytest.mark.parametrize("overrides", [{"targets": ["q1"]}, {"q1": {"averages": 1}}, "q1"])
     def test_overrides_must_be_a_list(self, platform, overrides):
+        tree = single_step_tree(make_step(overrides=overrides))
         with pytest.raises(TreeParseError, match=r"steps\.s\.overrides: must be a list"):
-            parse(single_step_tree(make_step(overrides=overrides)), platform)
+            parse(tree, platform)
 
     def test_override_must_be_a_mapping(self, platform):
+        tree = single_step_tree(make_step(overrides=[["q1"]]))
         with pytest.raises(TreeParseError, match=r"steps\.s\.overrides\[0\]: must be a mapping"):
-            parse(single_step_tree(make_step(overrides=[["q1"]])), platform)
+            parse(tree, platform)
 
     def test_override_needs_targets(self, platform):
+        tree = single_step_tree(make_step(overrides=[{"targets": ["q1"]}, {"averages": 1}]))
         with pytest.raises(TreeParseError, match=r"steps\.s\.overrides\[1\]\.targets: missing"):
-            parse(single_step_tree(make_step(overrides=[{"targets": ["q1"]}, {"averages": 1}])), platform)
+            parse(tree, platform)
 
     @pytest.mark.parametrize("targets", [[], "q1"])
     def test_override_targets_must_be_a_non_empty_list(self, platform, targets):
+        tree = single_step_tree(make_step(overrides=[{"targets": targets, "averages": 1}]))
         with pytest.raises(TreeParseError, match=r"steps\.s\.overrides\[0\]\.targets: must be a non-empty list"):
-            parse(single_step_tree(make_step(overrides=[{"targets": targets, "averages": 1}])), platform)
+            parse(tree, platform)
 
     @pytest.mark.parametrize("key", ["experiment", "analysis", "operating_point", "loop", "overrides"])
     def test_structural_keys_cannot_be_overridden(self, platform, key):
         step = make_step(overrides=[{"targets": ["q1"], key: "x"}])
+        tree = single_step_tree(step)
         with pytest.raises(TreeParseError, match=rf"steps\.s\.overrides\[0\]: \['{key}'\] can only be set on the step"):
-            parse(single_step_tree(step), platform)
+            parse(tree, platform)
 
     @pytest.mark.parametrize("key", ["experiment", "analysis", "operating_point", "loop", "targets", "overrides"])
     def test_structural_keys_cannot_be_defaults(self, platform, key):
+        tree = make_tree(defaults={"two_tone": {key: "x"}})
         with pytest.raises(TreeParseError, match=rf"^defaults\.two_tone: \['{key}'\] can only be set on the step"):
-            parse(make_tree(defaults={"two_tone": {key: "x"}}), platform)
+            parse(tree, platform)
 
     @pytest.mark.parametrize("defaults", [["two_tone"], "two_tone"])
     def test_defaults_must_be_a_mapping(self, platform, defaults):
+        tree = make_tree(defaults=defaults)
         with pytest.raises(TreeParseError, match=r"^defaults: must be a mapping"):
-            parse(make_tree(defaults=defaults), platform)
+            parse(tree, platform)
 
     def test_defaults_of_an_experiment_must_be_a_mapping(self, platform):
+        tree = make_tree(defaults={"two_tone": [1, 2]})
         with pytest.raises(TreeParseError, match=r"^defaults\.two_tone: must be a mapping"):
-            parse(make_tree(defaults={"two_tone": [1, 2]}), platform)
+            parse(tree, platform)
 
 
 class TestDataFolder:
-    def test_not_in_a_step(self, platform):
-        with pytest.raises(TreeParseError, match=r"^pipelines\.p\.steps\.s: \['data_folder'\] cannot be set"):
-            parse(single_step_tree(make_step(data_folder="x")), platform)
-
-    def test_not_in_defaults(self, platform):
-        with pytest.raises(TreeParseError, match=r"^defaults\.two_tone: \['data_folder'\] cannot be set"):
-            parse(make_tree(defaults={"two_tone": {"data_folder": "x"}}), platform)
-
-    def test_not_in_an_override(self, platform):
-        step = make_step(overrides=[{"targets": ["q1"], "data_folder": "x"}])
-        with pytest.raises(TreeParseError, match=r"steps\.s\.overrides\[0\]: \['data_folder'\] cannot be set"):
-            parse(single_step_tree(step), platform)
+    @pytest.mark.parametrize(
+        ("tree", "match"),
+        [
+            pytest.param(
+                single_step_tree(make_step(data_folder="x")),
+                r"^pipelines\.p\.steps\.s: \['data_folder'\] cannot be set",
+                id="step",
+            ),
+            pytest.param(
+                make_tree(defaults={"two_tone": {"data_folder": "x"}}),
+                r"^defaults\.two_tone: \['data_folder'\] cannot be set",
+                id="defaults",
+            ),
+            pytest.param(
+                single_step_tree(make_step(overrides=[{"targets": ["q1"], "data_folder": "x"}])),
+                r"^pipelines\.p\.steps\.s\.overrides\[0\]: \['data_folder'\] cannot be set",
+                id="override",
+            ),
+        ],
+    )
+    def test_cannot_be_set(self, platform, tree, match):
+        with pytest.raises(TreeParseError, match=match):
+            parse(tree, platform)
