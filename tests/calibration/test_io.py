@@ -59,8 +59,9 @@ def test_write_preserves_unrelated_parameters(valid_file: dict) -> None:
 
 
 def test_read_without_content_errors() -> None:
+    empty = Calibration()
     with pytest.raises(ValueError, match="no calibration-file content"):
-        read_calibration_file(Calibration())
+        read_calibration_file(empty)
 
 
 def test_check_section_pulses_exist_passes_when_present(valid_file: dict) -> None:
