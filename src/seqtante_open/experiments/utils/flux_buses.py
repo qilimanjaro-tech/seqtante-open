@@ -19,6 +19,7 @@ from typing import Any
 from qililab.platform.platform import Platform
 
 from seqtante_open.calibration.bus_alias import Role, bus_alias
+from seqtante_open.targets import CouplerTarget
 
 
 def apply_flux_filters(
@@ -80,7 +81,7 @@ def _ch_qubit(q: int, axis: str) -> str:
 
 
 def _ch_coupler(a: int, b: int, axis: str) -> str:
-    return bus_alias(f"c{a}_{b}", Role.flux, axis)
+    return bus_alias(CouplerTarget.between(a, b), Role.flux, axis)
 
 
 def coupler_readout_qubit(couplers: list[str], coupler_readout_overwrite: dict[str, str]):

@@ -76,3 +76,15 @@ def test_section_referencing_unknown_operating_point_rejected(valid_file: dict) 
     valid_file["experiments"]["rabi"]["q14"]["operating_point"] = "nope"
     with pytest.raises(ValidationError, match="is not defined under operating_points"):
         CalibrationFile.model_validate(valid_file)
+
+
+def test_invalid_operating_point_target_rejected(valid_file: dict) -> None:
+    valid_file["operating_points"]["not_a_qubit"] = valid_file["operating_points"]["q14"]
+    with pytest.raises(ValidationError, match="Invalid target"):
+        CalibrationFile.model_validate(valid_file)
+
+
+def test_invalid_parked_flux_target_rejected(valid_file: dict) -> None:
+    valid_file["operating_points"]["q14"]["reset"]["parked_flux"]["nope"] = {"z": 0.0}
+    with pytest.raises(ValidationError, match="Invalid target"):
+        CalibrationFile.model_validate(valid_file)

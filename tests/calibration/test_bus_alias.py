@@ -3,6 +3,7 @@
 import pytest
 
 from seqtante_open.calibration.bus_alias import Role, bus_alias, parse_bus_alias
+from seqtante_open.targets import CouplerTarget, QubitTarget
 
 
 @pytest.mark.parametrize(
@@ -14,12 +15,27 @@ from seqtante_open.calibration.bus_alias import Role, bus_alias, parse_bus_alias
         ("q14", Role.flux, "x", "flux_q14_x"),
         ("q14", Role.flux, None, "flux_q14"),
         ("c2_3", Role.flux, "z", "flux_c2_3_z"),
-        ("c3_2", Role.flux, "z", "flux_c2_3_z"),  # coupler indices normalised ascending
         ("c1_10", Role.flux, "z", "flux_c1_10_z"),
     ],
 )
 def test_bus_alias(target: str, role: Role, axis: str | None, expected: str) -> None:
     assert bus_alias(target, role, axis) == expected
+
+
+def test_bus_alias_accepts_a_target_object() -> None:
+    assert bus_alias(QubitTarget(14), Role.readout) == "readout_q14"
+    assert bus_alias(CouplerTarget.between(3, 2), Role.flux, "z") == "flux_c2_3_z"
+
+
+def test_bus_alias_rejects_a_misordered_coupler() -> None:
+    # Canonicalisation is targets.py's job; callers order couplers with CouplerTarget.between.
+    with pytest.raises(ValueError, match="Invalid target"):
+        bus_alias("c3_2", Role.flux, "z")
+
+
+def test_bus_alias_rejects_an_invalid_target() -> None:
+    with pytest.raises(ValueError, match="Invalid target"):
+        bus_alias("not_a_target", Role.flux, "z")
 
 
 def test_bus_alias_rejects_axis_on_non_flux_line() -> None:

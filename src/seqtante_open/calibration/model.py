@@ -29,6 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from seqtante_open.calibration.bus_alias import Role
 from seqtante_open.calibration.pulses import parse_pulse_name
+from seqtante_open.targets import ExperimentTarget
 
 
 class _Base(BaseModel):
@@ -89,6 +90,13 @@ class OperatingPoint(_Base):
     drive: DriveFreqs
     readout: ReadoutFreqs
 
+    @field_validator("parked_flux")
+    @classmethod
+    def _neighbour_targets_valid(cls, value: dict[str, Flux]) -> dict[str, Flux]:
+        for target in value:
+            ExperimentTarget.from_str(target)
+        return value
+
 
 class ExperimentSection(_Base):
     """An experiment at one target: the operating point it runs at and the pulses it plays (by name)."""
@@ -113,6 +121,23 @@ class CalibrationFile(_Base):
     operating_points_version: int
     operating_points: dict[str, dict[str, OperatingPoint]] = Field(default_factory=dict)
     experiments: dict[str, dict[str, ExperimentSection]] = Field(default_factory=dict)
+
+    @field_validator("operating_points")
+    @classmethod
+    def _targets_valid(cls, value: dict[str, dict[str, OperatingPoint]]) -> dict[str, dict[str, OperatingPoint]]:
+        for target in value:
+            ExperimentTarget.from_str(target)
+        return value
+
+    @field_validator("experiments")
+    @classmethod
+    def _section_targets_valid(
+        cls, value: dict[str, dict[str, ExperimentSection]]
+    ) -> dict[str, dict[str, ExperimentSection]]:
+        for by_target in value.values():
+            for target in by_target:
+                ExperimentTarget.from_str(target)
+        return value
 
     @model_validator(mode="after")
     def _sections_name_known_points(self) -> Self:
