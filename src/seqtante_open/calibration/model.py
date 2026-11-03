@@ -15,8 +15,8 @@
 
 Operating points are stored once per target; an experiment section names the point it runs at
 and the pulses it plays. Pulses themselves are named waveforms in qililab's ``Calibration.waveforms``
-(not here), referenced by name (ADR-0008). Fluxes are plain measured values (ADR-0010); an operating
-point also parks the fluxes of its neighbours (ADR-0009).
+(not here), referenced by name (ADR-0008). Fluxes are plain measured values (ADR-0011); an operating
+point also parks the fluxes of its neighbours (ADR-0010).
 
 This module is pure: it validates the structure and the naming grammar. Whether a referenced pulse
 name actually exists in ``Calibration.waveforms`` is checked in :mod:`seqtante_open.calibration.io`,
@@ -46,7 +46,7 @@ class Measured(_Base):
 
 
 class Flux(_Base):
-    """A flux setpoint on a target's loops, as a measured bias (ADR-0010). ``x`` is absent on z-only loops."""
+    """A flux setpoint on a target's loops, as a measured bias (ADR-0011). ``x`` is absent on z-only loops."""
 
     z: float
     x: float | None = None

@@ -1,4 +1,4 @@
-"""Tests for the calibration-file pydantic model (ADR-0001, ADR-0008, ADR-0009, ADR-0010)."""
+"""Tests for the calibration-file pydantic model (ADR-0001, ADR-0008, ADR-0010, ADR-0011)."""
 
 import pytest
 from pydantic import ValidationError
@@ -12,11 +12,11 @@ def test_parses_a_valid_file(valid_file: dict) -> None:
 
     assert model.operating_points_version == 1
     reset = model.operating_points["q14"]["reset"]
-    assert reset.flux.z == pytest.approx(0.615)  # plain measured value (ADR-0010)
+    assert reset.flux.z == pytest.approx(0.615)  # plain measured value (ADR-0011)
     assert reset.drive.if_ == pytest.approx(-100e6)  # `if` read through the alias
     assert reset.readout.levels is not None
     assert reset.readout.levels.pulse == "readout-reset"
-    assert set(reset.parked_flux) == {"c13_14", "c14_15"}  # neighbour fluxes parked (ADR-0009)
+    assert set(reset.parked_flux) == {"c13_14", "c14_15"}  # neighbour fluxes parked (ADR-0010)
     assert reset.parked_flux["c13_14"].z == pytest.approx(0.02)
     section = model.experiments["rabi"]["q14"]
     assert section.operating_point == "reset"
