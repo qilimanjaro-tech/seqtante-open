@@ -22,7 +22,7 @@ object the calibration nodes already read and write.
 from qililab.qprogram.calibration import Calibration
 from qililab.utils.serialization import deserialize_from, serialize_to
 
-from seqtante_open.calibration.bus_alias import bus_alias
+from seqtante_open.calibration.bus_alias import Role, bus_alias
 from seqtante_open.calibration.model import CalibrationFile, ReadoutLevels
 
 #: Keys under ``Calibration.parameters`` that hold the calibration-file content.
@@ -83,6 +83,14 @@ def check_section_pulses_exist(file: CalibrationFile, calibration: Calibration) 
     for experiment, by_target in file.experiments.items():
         for target, section in by_target.items():
             for role, pulse_name in section.pulses.items():
+                if role is Role.flux:
+                    # A flux bus carries an axis (flux_z_q14); the role->bus resolution has none, so a
+                    # named flux pulse cannot be placed on a real bus. None is needed for December
+                    # (ADR-0008 open question), so fail loudly rather than check a non-existent bus.
+                    raise ValueError(
+                        f"experiment '{experiment}' target '{target}': flux pulses are not supported "
+                        f"(a flux pulse needs an axis to resolve its bus; ADR-0008 open question)"
+                    )
                 bus = bus_alias(target, role)
                 if not calibration.has_waveform(bus, pulse_name):
                     raise ValueError(
@@ -104,9 +112,13 @@ def readout_levels_for(file: CalibrationFile, experiment: str, target: str, read
         The levels, or ``None`` if the operating point stores none.
 
     Raises:
-        ValueError: if ``readout_pulse`` differs from the pulse the levels were taken with.
+        ValueError: if there is no section for ``experiment``/``target``, or if ``readout_pulse``
+            differs from the pulse the levels were taken with.
     """
-    section = file.experiments[experiment][target]
+    try:
+        section = file.experiments[experiment][target]
+    except KeyError as error:
+        raise ValueError(f"no section for experiment '{experiment}' target '{target}'") from error
     levels = file.operating_points[target][section.operating_point].readout.levels
     if levels is None:
         return None

@@ -98,4 +98,4 @@ def x_loop_readout_flux(qubit: str, qubit_loops: int, parameters: dict[str, Any]
     if qubit_loops < 2:
         return None
     flux = parameters.get(qubit, {}).get("x_loop_readout_flux", parameters.get("x_loop_readout_flux"))
-    return (bus_alias(qubit, Role.flux, "x"), flux) if flux else None
+    return (bus_alias(qubit, Role.flux, "x"), flux) if flux is not None else None

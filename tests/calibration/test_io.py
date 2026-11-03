@@ -101,3 +101,22 @@ def test_readout_levels_for_none_when_point_has_no_levels(valid_file: dict) -> N
     valid_file["experiments"]["t1"] = {"q14": {"operating_point": "sweet_spot", "pulses": {}}}
     model = CalibrationFile.model_validate(valid_file)
     assert readout_levels_for(model, "t1", "q14", "readout-sweet_spot") is None
+
+
+def test_readout_levels_for_errors_without_section(valid_file: dict) -> None:
+    # No section for this experiment/target: raise a clear ValueError, not a bare KeyError.
+    model = CalibrationFile.model_validate(valid_file)
+    with pytest.raises(ValueError, match="no section for experiment 't1' target 'q14'"):
+        readout_levels_for(model, "t1", "q14", "readout-reset")
+
+
+def test_check_section_pulses_exist_rejects_flux_pulse(valid_file: dict) -> None:
+    # A flux bus carries an axis, which role->bus resolution has none of, so a named flux pulse
+    # can't be placed on a real bus: reject it loudly (ADR-0008 open question).
+    valid_file["experiments"]["rabi"]["q14"]["pulses"]["flux"] = "flux-reset"
+    model = CalibrationFile.model_validate(valid_file)
+    calibration = Calibration()
+    _waveforms_for(calibration)
+
+    with pytest.raises(ValueError, match="flux pulses are not supported"):
+        check_section_pulses_exist(model, calibration)

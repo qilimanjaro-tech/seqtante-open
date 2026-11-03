@@ -23,7 +23,7 @@ name actually exists in ``Calibration.waveforms`` is checked in :mod:`seqtante_o
 which has the ``Calibration`` to check against.
 """
 
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -118,7 +118,7 @@ class CalibrationFile(_Base):
     Stored in qililab's ``Calibration.parameters`` (ADR-0001); pulses live in ``Calibration.waveforms``.
     """
 
-    operating_points_version: int
+    operating_points_version: Literal[1]
     operating_points: dict[str, dict[str, OperatingPoint]] = Field(default_factory=dict)
     experiments: dict[str, dict[str, ExperimentSection]] = Field(default_factory=dict)
 
@@ -138,6 +138,17 @@ class CalibrationFile(_Base):
             for target in by_target:
                 ExperimentTarget.from_str(target)
         return value
+
+    @model_validator(mode="after")
+    def _no_self_parking(self) -> Self:
+        for target, points in self.operating_points.items():
+            for name, point in points.items():
+                if target in point.parked_flux:
+                    raise ValueError(
+                        f"operating_points['{target}']['{name}']: a point cannot park its own target "
+                        f"'{target}' (its own flux belongs in `flux`, not `parked_flux`)"
+                    )
+        return self
 
     @model_validator(mode="after")
     def _sections_name_known_points(self) -> Self:

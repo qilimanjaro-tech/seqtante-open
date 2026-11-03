@@ -88,3 +88,18 @@ def test_invalid_parked_flux_target_rejected(valid_file: dict) -> None:
     valid_file["operating_points"]["q14"]["reset"]["parked_flux"]["nope"] = {"z": 0.0}
     with pytest.raises(ValidationError, match="Invalid target"):
         CalibrationFile.model_validate(valid_file)
+
+
+def test_version_other_than_one_rejected(valid_file: dict) -> None:
+    # The version is pinned to 1 so a future v2 file can't be silently parsed as v1.
+    valid_file["operating_points_version"] = 2
+    with pytest.raises(ValidationError):
+        CalibrationFile.model_validate(valid_file)
+
+
+def test_target_cannot_park_itself(valid_file: dict) -> None:
+    # A point's own flux belongs in `flux`, not `parked_flux` (ADR-0010): parking q14 under q14's
+    # own point is ambiguous and the final flux would depend on apply order.
+    valid_file["operating_points"]["q14"]["reset"]["parked_flux"]["q14"] = {"z": 0.0}
+    with pytest.raises(ValidationError, match="cannot park its own target"):
+        CalibrationFile.model_validate(valid_file)

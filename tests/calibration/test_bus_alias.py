@@ -74,6 +74,22 @@ def test_parse_bus_alias_rejects_non_alias() -> None:
 
 
 @pytest.mark.parametrize(
+    "bus",
+    [
+        "flux_",  # empty target
+        "flux_x",  # a bare axis, no target
+        "readout_q14_z",  # 'q14_z' is not a valid target
+        "drive_notaqubit",
+    ],
+)
+def test_parse_bus_alias_rejects_an_invalid_target(bus: str) -> None:
+    # parse_bus_alias validates the target through ExperimentTarget.from_str, so it is a true
+    # inverse of bus_alias and never returns a string that bus_alias would refuse.
+    with pytest.raises(ValueError, match="Invalid target"):
+        parse_bus_alias(bus)
+
+
+@pytest.mark.parametrize(
     ("target", "role", "axis"),
     [
         ("q14", Role.drive, None),

@@ -80,15 +80,16 @@ def parse_bus_alias(bus: str) -> tuple[str, Role, str | None]:
     target is the remainder (ADR-0008).
 
     Raises:
-        ValueError: if ``bus`` is not a ``<line>_...`` alias with a known line.
+        ValueError: if ``bus`` is not a ``<line>_...`` alias with a known line and a valid target.
     """
     line, separator, rest = bus.partition("_")
     if not separator:
         raise ValueError(f"not a bus alias: {bus!r}")
     role = Role(line)
     if role is Role.flux:
-        head, _, target = rest.partition("_")
-        if target and head in _AXES:
-            return target, role, head
-        return rest, role, None
-    return rest, role, None
+        head, _, remainder = rest.partition("_")
+        target, axis = (remainder, head) if remainder and head in _AXES else (rest, None)
+    else:
+        target, axis = rest, None
+    ExperimentTarget.from_str(target)  # validate the target, so this is a true inverse of bus_alias
+    return target, role, axis
