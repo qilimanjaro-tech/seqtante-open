@@ -18,6 +18,8 @@ from typing import Any
 
 from qililab.platform.platform import Platform
 
+from seqtante_open.calibration.bus_alias import Role, bus_alias
+
 
 def apply_flux_filters(
     targets: list[str], qubit_loops: int, coupler_loops: int, filters: list[str] | None = None
@@ -74,12 +76,11 @@ def _axes_for_loops(num_loops: int):
 
 
 def _ch_qubit(q: int, axis: str) -> str:
-    return f"flux_q{q}_{axis}"
+    return bus_alias(f"q{q}", Role.flux, axis)
 
 
 def _ch_coupler(a: int, b: int, axis: str) -> str:
-    a, b = sorted((a, b))
-    return f"flux_c{a}_{b}_{axis}"
+    return bus_alias(f"c{a}_{b}", Role.flux, axis)
 
 
 def coupler_readout_qubit(couplers: list[str], coupler_readout_overwrite: dict[str, str]):
@@ -96,4 +97,4 @@ def x_loop_readout_flux(qubit: str, qubit_loops: int, parameters: dict[str, Any]
     if qubit_loops < 2:
         return None
     flux = parameters.get(qubit, {}).get("x_loop_readout_flux", parameters.get("x_loop_readout_flux"))
-    return (f"flux_{qubit}_x", flux) if flux else None
+    return (bus_alias(qubit, Role.flux, "x"), flux) if flux else None
