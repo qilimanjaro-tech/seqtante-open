@@ -262,7 +262,8 @@ class CalibrationParser:
         return defaults
 
     def _targets(self, raw: Any, parent: list[Target] | None, path: str) -> list[Target]:
-        """Parses target names, expands ``all_q`` and ``all_c`` in place and checks the result is within ``parent``, when given."""
+        """Parses target names, expands ``all_q`` and ``all_c`` in place, drops repeats keeping the first, and checks
+        the result is within ``parent``, when given."""
         if not isinstance(raw, list) or not raw:
             raise TreeParseError(f"{path}: must be a non-empty list of targets.")
         targets: list[Target] = []
@@ -273,6 +274,8 @@ class CalibrationParser:
                 targets += self._all_couplers(path)
             else:
                 targets.append(_target(name, path))
+        # Drop repeats keeping the first; a dict keeps file order, a set would not.
+        targets = list(dict.fromkeys(targets))
         if parent is not None:
             outside = [target for target in targets if target not in parent]
             if outside:

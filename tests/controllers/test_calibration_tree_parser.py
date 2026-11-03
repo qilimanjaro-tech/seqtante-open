@@ -427,14 +427,34 @@ class TestTargets:
             pytest.param(["all_c"], ["c1_2"], id="all_c"),
             pytest.param(["c1_2", "all_q"], ["c1_2", "q1", "q2"], id="expansion_keeps_its_place"),
             pytest.param(["all_q", "all_c"], ["q1", "q2", "c1_2"], id="all_q_and_all_c"),
+            pytest.param(["all_q", "q1"], ["q1", "q2"], id="dedup_after_all_q"),
+            pytest.param(["q2", "all_q"], ["q2", "q1"], id="dedup_keeps_the_first"),
+            pytest.param(["c1_2", "all_c"], ["c1_2"], id="dedup_after_all_c"),
+            pytest.param(["q1", "q1"], ["q1"], id="dedup_a_repeated_name"),
         ],
     )
     def test_expansion(self, platform, targets, expected):
-        assert only_step(make_tree(targets=targets), platform).targets == expected
+        step = only_step(make_tree(targets=targets), platform)
+        assert step.targets == expected
+        assert list(step.parameters) == expected
 
-    def test_all_q_in_a_narrowing(self, platform):
-        tree = make_tree(targets=["all_q", "all_c"], pipelines={"p": {"steps": {"s": make_step(targets=["all_q"])}}})
-        assert only_step(tree, platform).targets == ["q1", "q2"]
+    @pytest.mark.parametrize(
+        ("step_targets", "expected"),
+        [
+            pytest.param(["all_q"], ["q1", "q2"], id="all_q"),
+            pytest.param(["q2", "all_q", "q2"], ["q2", "q1"], id="dedup"),
+        ],
+    )
+    def test_expansion_in_a_narrowing(self, platform, step_targets, expected):
+        tree = make_tree(targets=["all_q", "all_c"], pipelines={"p": {"steps": {"s": make_step(targets=step_targets)}}})
+        assert only_step(tree, platform).targets == expected
+
+    def test_dedup_in_overrides(self, platform):
+        step = make_step(overrides=[{"targets": ["q1", "all_q"], "averages": 100}])
+        assert only_step(single_step_tree(step), platform).parameters == {
+            "q1": {"averages": 100},
+            "q2": {"averages": 100},
+        }
 
     def test_all_c_orders_the_topology(self):
         platform = SimpleNamespace(analog_compilation_settings=SimpleNamespace(qubits=[1, 2], topology=[[2, 1]]))
