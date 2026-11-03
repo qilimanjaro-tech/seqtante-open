@@ -91,5 +91,6 @@ def parse_bus_alias(bus: str) -> tuple[str, Role, str | None]:
         target, axis = (remainder, head) if remainder and head in _AXES else (rest, None)
     else:
         target, axis = rest, None
-    ExperimentTarget.from_str(target)  # validate the target, so this is a true inverse of bus_alias
+    # validate the target, so this is a true inverse of bus_alias
+    ExperimentTarget.from_str(target)
     return target, role, axis
