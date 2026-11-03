@@ -14,11 +14,29 @@
 """The calibration-file model: operating points per target, named pulses and sections (ADR-0001, ADR-0008)."""
 
 from seqtante_open.calibration.bus_alias import AXES, Role, bus_alias, parse_bus_alias
+from seqtante_open.calibration.model import (
+    CalibrationFile,
+    DriveFreqs,
+    ExperimentSection,
+    Flux,
+    Measured,
+    OperatingPoint,
+    ReadoutFreqs,
+    ReadoutLevels,
+)
 from seqtante_open.calibration.pulses import PULSE_NAME_PATTERN, parse_pulse_name
 
 __all__ = [
     "AXES",
     "PULSE_NAME_PATTERN",
+    "CalibrationFile",
+    "DriveFreqs",
+    "ExperimentSection",
+    "Flux",
+    "Measured",
+    "OperatingPoint",
+    "ReadoutFreqs",
+    "ReadoutLevels",
     "Role",
     "bus_alias",
     "parse_bus_alias",
