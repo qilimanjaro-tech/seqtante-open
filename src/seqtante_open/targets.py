@@ -22,8 +22,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal
 
-_QUBIT_NAME = re.compile(r"q(0|[1-9][0-9]*)")
-_COUPLER_NAME = re.compile(r"c(0|[1-9][0-9]*)_(0|[1-9][0-9]*)")
+_QUBIT_NAME = re.compile(r"q(0|[1-9]\d*)", re.ASCII)
+_COUPLER_NAME = re.compile(r"c(0|[1-9]\d*)_(0|[1-9]\d*)", re.ASCII)
 
 
 @dataclass(frozen=True, eq=False)

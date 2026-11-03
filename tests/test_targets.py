@@ -14,6 +14,7 @@
 
 """Tests for experiment targets."""
 
+import operator
 from dataclasses import FrozenInstanceError, asdict
 
 import pytest
@@ -62,8 +63,12 @@ class TestKind:
 
 class TestEquality:
     def test_same_target(self):
-        assert QubitTarget(1) == QubitTarget(1)
-        assert CouplerTarget(1, 2) == CouplerTarget(1, 2)
+        qubit_a, qubit_b = QubitTarget(1), QubitTarget(1)
+        coupler_a, coupler_b = CouplerTarget(1, 2), CouplerTarget(1, 2)
+        assert qubit_a is not qubit_b
+        assert qubit_a == qubit_b
+        assert coupler_a is not coupler_b
+        assert coupler_a == coupler_b
 
     def test_different_targets(self):
         assert QubitTarget(1) != QubitTarget(2)
@@ -74,9 +79,9 @@ class TestEquality:
 
     def test_equal_to_its_name_both_ways(self):
         assert QubitTarget(14) == "q14"
-        assert "q14" == QubitTarget(14)
+        assert operator.eq("q14", QubitTarget(14))
         assert CouplerTarget(2, 3) == "c2_3"
-        assert "c2_3" == CouplerTarget(2, 3)
+        assert operator.eq("c2_3", CouplerTarget(2, 3))
 
     @pytest.mark.parametrize("other", ["q15", "q014", "c1_14", "14"])
     def test_not_equal_to_another_name(self, other):
@@ -146,6 +151,8 @@ class TestFromStr:
             "",
             "all_q",
             "all_c",
+            "q1٣",
+            "c1_2٣",
         ],
     )
     def test_invalid_name(self, name):
