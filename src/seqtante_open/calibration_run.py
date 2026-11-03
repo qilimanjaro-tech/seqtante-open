@@ -23,7 +23,7 @@ from qcodes.utils.deprecate import QCoDeSDeprecationWarning
 from qililab.data_management import build_platform
 from ruamel.yaml import YAML
 
-from seqtante_open.controllers import CalibrationGraph, CalibrationParser
+from seqtante_open.controllers import CalibrationGraph, CalibrationParser, Pipeline
 from seqtante_open.outputs import output_controller
 
 if TYPE_CHECKING:
@@ -83,14 +83,8 @@ class CalibrationRun:
         self.platform: Platform = build_platform(runcard=self.platform_path)
         self.graph = CalibrationGraph(self.platform, self.platform_path)
 
-        # --- Compile the calibration tree ---
-        compiler = CalibrationParser(
-            calibration_config=config,
-            platform=self.platform,
-            platform_path=platform_path,
-            graph=self.graph,
-        )
-        compiler.compile_nodes()
+        # --- Parse the calibration tree ---
+        self.pipelines: list[Pipeline] = CalibrationParser(calibration_config=config, platform=self.platform).parse()
 
         # --- Connect to platform ---
         self.platform.connect()

@@ -1,0 +1,563 @@
+# Copyright 2026 Qilimanjaro Quantum Tech
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Tests for the calibration-tree parser: structure, targets and per-target parameter resolution."""
+
+from io import StringIO
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+from ruamel.yaml import YAML
+
+from seqtante_open.controllers import CalibrationParser, Pipeline, Step, TreeParseError
+
+
+@pytest.fixture
+def platform() -> SimpleNamespace:
+    """A platform holding only analog settings, so any other access by the parser fails."""
+    return SimpleNamespace(analog_compilation_settings=SimpleNamespace(qubits=[1, 2], topology=[[1, 2]]))
+
+
+ADR_TREE = """
+sample: ConscienceWF02-3.7
+cooldown: CD79-Mimas
+targets: [q1, q2]
+
+defaults:
+  two_tone: {freq_sweep: [-5e6, 5e6, 101], averages: 10000}
+  rabi:     {amplitude_sweep: [0.02, 0.8, 40], averages: 10000}
+
+pipelines:
+  sweet_spot:
+    steps:
+      sweet_spot_flux:
+        experiment: two_tone_vs_flux
+        analysis: parabola_vertex
+        operating_point: sweet_spot
+        loop: z
+        flux_sweep: [-0.02, 0.02, 11]
+      two_tone_sweet_spot:
+        experiment: two_tone
+        analysis: lorentzian_peak
+        operating_point: sweet_spot
+
+  t1:
+    after: two_tone_sweet_spot
+    steps:
+      t1_sweet_spot:
+        experiment: t1
+        operating_point: sweet_spot
+        thresholds: {passed: 50 us, warning: 20 us}
+
+  t2:
+    after: two_tone_sweet_spot
+    steps:
+      rabi_sweet_spot:
+        experiment: rabi
+        analysis: pi_amplitude
+        operating_point: sweet_spot
+        pulses: {drive: pi-sweet_spot}
+      t2_sweet_spot:
+        experiment: t2
+        operating_point: sweet_spot
+
+  lz:
+    after: sweet_spot_flux
+    targets: [q2]
+    steps:
+      reset_flux:
+        experiment: reset_point_search
+        operating_point: reset
+        target_frequency: [2.79e9, 2.81e9]
+      rabi_reset:
+        experiment: rabi
+        analysis: readout_levels
+        operating_point: reset
+        overrides:
+          - targets: [q2]
+            amplitude_sweep: [0.02, 0.5, 25]
+      lz:
+        experiment: landau_zener
+        operating_point: reset
+"""
+
+
+def make_tree(**top: Any) -> dict[str, Any]:
+    """A minimal valid tree with one pipeline ``p`` and one ``two_tone`` step ``s``; ``top`` replaces top-level keys."""
+    tree: dict[str, Any] = {
+        "targets": ["q1", "q2"],
+        "pipelines": {"p": {"steps": {"s": {"experiment": "two_tone", "operating_point": "sweet_spot"}}}},
+    }
+    tree.update(top)
+    return tree
+
+
+def make_step(**keys: Any) -> dict[str, Any]:
+    """A ``two_tone`` step at ``sweet_spot``; ``keys`` add to or replace its keys."""
+    return {"experiment": "two_tone", "operating_point": "sweet_spot", **keys}
+
+
+def single_step_tree(step: dict[str, Any], **top: Any) -> dict[str, Any]:
+    return make_tree(pipelines={"p": {"steps": {"s": step}}}, **top)
+
+
+def parse(tree: Any, platform: Any) -> list[Pipeline]:
+    return CalibrationParser(calibration_config=tree, platform=platform).parse()
+
+
+def only_step(tree: Any, platform: Any) -> Step:
+    (pipeline,) = parse(tree, platform)
+    (step,) = pipeline.steps
+    return step
+
+
+def by_name(pipelines: list[Pipeline]) -> dict[str, Step]:
+    return {step.name: step for pipeline in pipelines for step in pipeline.steps}
+
+
+# ------------------------- The ADR-0003 example, loaded from YAML -------------------------
+
+
+class TestAdrExample:
+    @pytest.fixture
+    def pipelines(self, platform) -> list[Pipeline]:
+        return parse(YAML().load(StringIO(ADR_TREE)), platform)
+
+    def test_pipelines_in_file_order(self, pipelines):
+        assert [p.name for p in pipelines] == ["sweet_spot", "t1", "t2", "lz"]
+
+    def test_steps_in_file_order(self, pipelines):
+        assert [[s.name for s in p.steps] for p in pipelines] == [
+            ["sweet_spot_flux", "two_tone_sweet_spot"],
+            ["t1_sweet_spot"],
+            ["rabi_sweet_spot", "t2_sweet_spot"],
+            ["reset_flux", "rabi_reset", "lz"],
+        ]
+
+    def test_after_is_normalised_to_a_list(self, pipelines):
+        assert [p.after for p in pipelines] == [
+            [],
+            ["two_tone_sweet_spot"],
+            ["two_tone_sweet_spot"],
+            ["sweet_spot_flux"],
+        ]
+
+    def test_every_pipeline_is_enabled_by_default(self, pipelines):
+        assert all(p.enabled for p in pipelines)
+
+    def test_steps_know_their_pipeline(self, pipelines):
+        assert all(step.pipeline == p.name for p in pipelines for step in p.steps)
+
+    def test_structural_fields(self, pipelines):
+        steps = by_name(pipelines)
+        assert steps["sweet_spot_flux"].experiment == "two_tone_vs_flux"
+        assert steps["sweet_spot_flux"].analysis == "parabola_vertex"
+        assert steps["sweet_spot_flux"].operating_point == "sweet_spot"
+        assert steps["sweet_spot_flux"].loop == "z"
+        assert steps["two_tone_sweet_spot"].loop is None
+        assert steps["rabi_reset"].analysis == "readout_levels"
+        assert steps["rabi_reset"].operating_point == "reset"
+
+    def test_pipeline_targets_narrow_the_steps(self, pipelines):
+        steps = by_name(pipelines)
+        assert steps["t1_sweet_spot"].targets == ["q1", "q2"]
+        assert steps["reset_flux"].targets == ["q2"]
+        assert list(steps["reset_flux"].parameters) == ["q2"]
+
+    def test_structural_keys_are_not_parameters(self, pipelines):
+        for step in by_name(pipelines).values():
+            for parameters in step.parameters.values():
+                assert not {"experiment", "analysis", "operating_point", "loop", "targets", "overrides"} & set(
+                    parameters
+                )
+
+    def test_defaults_and_step_values(self, pipelines):
+        steps = by_name(pipelines)
+        assert steps["two_tone_sweet_spot"].parameters["q1"] == {"freq_sweep": [-5e6, 5e6, 101], "averages": 10000}
+        assert steps["sweet_spot_flux"].parameters["q1"] == {"flux_sweep": [-0.02, 0.02, 11]}
+
+    def test_overrides(self, pipelines):
+        assert by_name(pipelines)["rabi_reset"].parameters["q2"] == {
+            "amplitude_sweep": [0.02, 0.5, 25],
+            "averages": 10000,
+        }
+
+    def test_pulses_and_thresholds_are_per_target_parameters(self, pipelines):
+        steps = by_name(pipelines)
+        assert steps["rabi_sweet_spot"].parameters["q1"]["pulses"] == {"drive": "pi-sweet_spot"}
+        assert steps["t1_sweet_spot"].parameters["q2"]["thresholds"] == {"passed": "50 us", "warning": "20 us"}
+
+
+# ------------------------- Pipelines -------------------------
+
+
+class TestPipelines:
+    @pytest.mark.parametrize("pipelines", [None, {}, [], "p"])
+    def test_pipelines_must_be_a_non_empty_mapping(self, platform, pipelines):
+        tree = make_tree(pipelines=pipelines)
+        with pytest.raises(TreeParseError, match=r"^pipelines:"):
+            parse(tree, platform)
+
+    def test_pipelines_missing(self, platform):
+        tree = make_tree()
+        del tree["pipelines"]
+        with pytest.raises(TreeParseError, match=r"^pipelines:"):
+            parse(tree, platform)
+
+    def test_pipeline_must_be_a_mapping(self, platform):
+        with pytest.raises(TreeParseError, match=r"^pipelines\.p: must be a mapping"):
+            parse(make_tree(pipelines={"p": ["s"]}), platform)
+
+    @pytest.mark.parametrize("steps", [None, {}, [make_step()]])
+    def test_steps_must_be_a_non_empty_mapping(self, platform, steps):
+        with pytest.raises(TreeParseError, match=r"^pipelines\.p\.steps:"):
+            parse(make_tree(pipelines={"p": {"steps": steps}}), platform)
+
+    def test_enabled_false(self, platform):
+        (pipeline,) = parse(make_tree(pipelines={"p": {"enabled": False, "steps": {"s": make_step()}}}), platform)
+        assert pipeline.enabled is False
+
+    def test_disabled_pipelines_are_still_validated(self, platform):
+        tree = make_tree(pipelines={"p": {"enabled": False, "steps": {"s": make_step(experiment="nope")}}})
+        with pytest.raises(TreeParseError, match="unknown experiment"):
+            parse(tree, platform)
+
+    @pytest.mark.parametrize("enabled", ["false", 0, None])
+    def test_enabled_must_be_a_bool(self, platform, enabled):
+        with pytest.raises(TreeParseError, match=r"^pipelines\.p\.enabled:"):
+            parse(make_tree(pipelines={"p": {"enabled": enabled, "steps": {"s": make_step()}}}), platform)
+
+    def test_after_a_list_of_steps(self, platform):
+        tree = make_tree(
+            pipelines={
+                "a": {"steps": {"a1": make_step(), "a2": make_step()}},
+                "b": {"steps": {"b1": make_step()}},
+                "c": {"after": ["a2", "b1"], "steps": {"c1": make_step()}},
+            }
+        )
+        assert parse(tree, platform)[2].after == ["a2", "b1"]
+
+    def test_after_may_name_a_step_of_a_disabled_pipeline(self, platform):
+        tree = make_tree(
+            pipelines={
+                "a": {"enabled": False, "steps": {"a1": make_step()}},
+                "b": {"after": "a1", "steps": {"b1": make_step()}},
+            }
+        )
+        assert parse(tree, platform)[1].after == ["a1"]
+
+    def test_after_must_name_an_existing_step(self, platform):
+        tree = make_tree(pipelines={"p": {"after": "nope", "steps": {"s": make_step()}}})
+        with pytest.raises(TreeParseError, match=r"^pipelines\.p\.after: unknown step 'nope'"):
+            parse(tree, platform)
+
+    def test_after_must_name_a_step_not_a_pipeline(self, platform):
+        tree = make_tree(
+            pipelines={"a": {"steps": {"a1": make_step()}}, "b": {"after": "a", "steps": {"b1": make_step()}}}
+        )
+        with pytest.raises(TreeParseError, match="unknown step 'a'"):
+            parse(tree, platform)
+
+    @pytest.mark.parametrize("after", [1, ["s", 2], {"s": None}])
+    def test_after_must_be_names(self, platform, after):
+        tree = make_tree(pipelines={"p": {"after": after, "steps": {"s": make_step()}}})
+        with pytest.raises(TreeParseError, match=r"^pipelines\.p\.after: must be"):
+            parse(tree, platform)
+
+    def test_step_names_are_unique_across_pipelines(self, platform):
+        tree = make_tree(pipelines={"a": {"steps": {"s": make_step()}}, "b": {"steps": {"s": make_step()}}})
+        with pytest.raises(TreeParseError, match=r"^pipelines\.b\.steps\.s: step name already used in pipeline 'a'"):
+            parse(tree, platform)
+
+    def test_a_step_may_share_its_pipeline_name(self, platform):
+        (pipeline,) = parse(make_tree(pipelines={"lz": {"steps": {"lz": make_step()}}}), platform)
+        assert pipeline.steps[0].name == "lz"
+
+
+# ------------------------- Steps -------------------------
+
+
+class TestSteps:
+    def test_step_must_be_a_mapping(self, platform):
+        with pytest.raises(TreeParseError, match=r"^pipelines\.p\.steps\.s: must be a mapping"):
+            parse(single_step_tree(["two_tone"]), platform)  # type: ignore[arg-type]
+
+    def test_experiment_is_required(self, platform):
+        with pytest.raises(TreeParseError, match=r"^pipelines\.p\.steps\.s\.experiment: missing"):
+            parse(single_step_tree({"operating_point": "sweet_spot"}), platform)
+
+    def test_unknown_experiment(self, platform):
+        with pytest.raises(TreeParseError, match=r"steps\.s\.experiment: unknown experiment 'two_tones'"):
+            parse(single_step_tree(make_step(experiment="two_tones")), platform)
+
+    def test_the_same_experiment_in_several_steps(self, platform):
+        tree = make_tree(pipelines={"p": {"steps": {"a": make_step(), "b": make_step()}}})
+        assert [s.experiment for s in parse(tree, platform)[0].steps] == ["two_tone", "two_tone"]
+
+    def test_default_analysis(self, platform):
+        assert only_step(single_step_tree(make_step()), platform).analysis == "lorentzian_peak"
+
+    def test_named_analysis(self, platform):
+        step = only_step(single_step_tree(make_step(experiment="rabi", analysis="readout_levels")), platform)
+        assert step.analysis == "readout_levels"
+
+    def test_analysis_of_another_experiment(self, platform):
+        with pytest.raises(
+            TreeParseError, match=r"steps\.s\.analysis: unknown analysis 'readout_levels' for 'two_tone'"
+        ):
+            parse(single_step_tree(make_step(analysis="readout_levels")), platform)
+
+    @pytest.mark.parametrize("operating_point", [None, "", 3])
+    def test_operating_point_is_required(self, platform, operating_point):
+        with pytest.raises(TreeParseError, match=r"steps\.s\.operating_point: missing"):
+            parse(single_step_tree(make_step(operating_point=operating_point)), platform)
+
+    def test_operating_point_missing(self, platform):
+        with pytest.raises(TreeParseError, match=r"steps\.s\.operating_point: missing"):
+            parse(single_step_tree({"experiment": "two_tone"}), platform)
+
+    @pytest.mark.parametrize("loop", ["z", "x"])
+    def test_flux_sweep_loop(self, platform, loop):
+        step = only_step(single_step_tree(make_step(experiment="two_tone_vs_flux", loop=loop)), platform)
+        assert step.loop == loop
+
+    @pytest.mark.parametrize("loop", [None, "y", "Z"])
+    def test_flux_sweep_needs_a_valid_loop(self, platform, loop):
+        step = make_step(experiment="two_tone_vs_flux")
+        if loop is not None:
+            step["loop"] = loop
+        with pytest.raises(TreeParseError, match=r"steps\.s\.loop: 'two_tone_vs_flux' sweeps flux"):
+            parse(single_step_tree(step), platform)
+
+    def test_loop_on_a_fixed_flux_experiment(self, platform):
+        with pytest.raises(TreeParseError, match=r"steps\.s\.loop: 'two_tone' does not sweep flux"):
+            parse(single_step_tree(make_step(loop="z")), platform)
+
+
+# ------------------------- Targets -------------------------
+
+
+class TestTargets:
+    def test_top_level_targets_are_required(self, platform):
+        tree = make_tree()
+        del tree["targets"]
+        with pytest.raises(TreeParseError, match=r"^targets: missing"):
+            parse(tree, platform)
+
+    @pytest.mark.parametrize("targets", [[], "q1", None])
+    def test_targets_must_be_a_non_empty_list(self, platform, targets):
+        with pytest.raises(TreeParseError, match=r"^targets: must be a non-empty list"):
+            parse(make_tree(targets=targets), platform)
+
+    def test_top_level_targets_reach_every_step(self, platform):
+        step = only_step(make_tree(), platform)
+        assert step.targets == ["q1", "q2"]
+        assert list(step.parameters) == ["q1", "q2"]
+
+    def test_pipeline_narrows(self, platform):
+        (pipeline,) = parse(make_tree(pipelines={"p": {"targets": ["q2"], "steps": {"s": make_step()}}}), platform)
+        assert pipeline.targets == ["q2"]
+        assert pipeline.steps[0].targets == ["q2"]
+
+    def test_step_narrows(self, platform):
+        tree = make_tree(pipelines={"p": {"steps": {"a": make_step(targets=["q1"]), "b": make_step()}}})
+        a, b = parse(tree, platform)[0].steps
+        assert a.targets == ["q1"]
+        assert list(a.parameters) == ["q1"]
+        assert b.targets == ["q1", "q2"]
+
+    def test_step_narrows_the_pipeline_not_the_top(self, platform):
+        tree = make_tree(pipelines={"p": {"targets": ["q2"], "steps": {"s": make_step(targets=["q1"])}}})
+        with pytest.raises(TreeParseError, match=r"^pipelines\.p\.steps\.s\.targets: \['q1'\] are not in"):
+            parse(tree, platform)
+
+    def test_pipeline_cannot_widen(self, platform):
+        tree = make_tree(targets=["q1"], pipelines={"p": {"targets": ["q1", "q2"], "steps": {"s": make_step()}}})
+        with pytest.raises(TreeParseError, match=r"^pipelines\.p\.targets: \['q2'\] are not in"):
+            parse(tree, platform)
+
+    @pytest.mark.parametrize("targets", [[], "q1"])
+    def test_narrowed_targets_must_be_a_non_empty_list(self, platform, targets):
+        tree = make_tree(pipelines={"p": {"targets": targets, "steps": {"s": make_step()}}})
+        with pytest.raises(TreeParseError, match=r"^pipelines\.p\.targets: must be a non-empty list"):
+            parse(tree, platform)
+
+    def test_all_q(self, platform):
+        assert only_step(make_tree(targets=["all_q"]), platform).targets == ["q1", "q2"]
+
+    def test_all_c(self, platform):
+        assert only_step(make_tree(targets=["all_c"]), platform).targets == ["c1_2"]
+
+    def test_expansion_keeps_its_place(self, platform):
+        assert only_step(make_tree(targets=["c1_2", "all_q"]), platform).targets == ["c1_2", "q1", "q2"]
+
+    def test_all_q_in_a_narrowing(self, platform):
+        tree = make_tree(targets=["all_q", "all_c"], pipelines={"p": {"steps": {"s": make_step(targets=["all_q"])}}})
+        assert only_step(tree, platform).targets == ["q1", "q2"]
+
+    @pytest.mark.parametrize("target", ["all_q", "all_c"])
+    def test_expansion_without_analog_settings(self, target):
+        platform = SimpleNamespace(analog_compilation_settings=None)
+        with pytest.raises(TreeParseError, match=rf"^targets: {target} needs"):
+            parse(make_tree(targets=[target]), platform)
+
+    def test_all_q_without_qubits(self):
+        platform = SimpleNamespace(analog_compilation_settings=SimpleNamespace(qubits=None, topology=[[1, 2]]))
+        with pytest.raises(TreeParseError, match="all_q needs the qubits"):
+            parse(make_tree(targets=["all_q"]), platform)
+
+    def test_all_c_without_topology(self):
+        platform = SimpleNamespace(analog_compilation_settings=SimpleNamespace(qubits=[1, 2], topology=None))
+        with pytest.raises(TreeParseError, match="all_c needs the topology"):
+            parse(make_tree(targets=["all_c"]), platform)
+
+
+# ------------------------- Parameter resolution -------------------------
+
+
+class TestResolution:
+    def test_defaults_only(self, platform):
+        step = only_step(make_tree(defaults={"two_tone": {"averages": 1000}}), platform)
+        assert step.parameters == {"q1": {"averages": 1000}, "q2": {"averages": 1000}}
+
+    def test_no_parameters(self, platform):
+        assert only_step(make_tree(), platform).parameters == {"q1": {}, "q2": {}}
+
+    def test_defaults_of_another_experiment_do_not_apply(self, platform):
+        step = only_step(make_tree(defaults={"rabi": {"averages": 1000}}), platform)
+        assert step.parameters == {"q1": {}, "q2": {}}
+
+    def test_defaults_for_an_experiment_no_step_uses_are_accepted(self, platform):
+        assert only_step(make_tree(defaults={"not_yet_an_experiment": {"a": 1}}), platform).parameters["q1"] == {}
+
+    def test_step_overrides_defaults(self, platform):
+        tree = single_step_tree(make_step(averages=500), defaults={"two_tone": {"averages": 1000, "span": 5e6}})
+        assert only_step(tree, platform).parameters["q1"] == {"averages": 500, "span": 5e6}
+
+    def test_override_overrides_step(self, platform):
+        step = make_step(averages=500, overrides=[{"targets": ["q2"], "averages": 100}])
+        parameters = only_step(single_step_tree(step), platform).parameters
+        assert parameters == {"q1": {"averages": 500}, "q2": {"averages": 100}}
+
+    def test_override_overrides_defaults(self, platform):
+        step = make_step(overrides=[{"targets": ["q2"], "averages": 100}])
+        tree = single_step_tree(step, defaults={"two_tone": {"averages": 1000}})
+        assert only_step(tree, platform).parameters == {"q1": {"averages": 1000}, "q2": {"averages": 100}}
+
+    def test_overrides_apply_in_file_order(self, platform):
+        step = make_step(
+            overrides=[
+                {"targets": ["q1", "q2"], "averages": 100, "span": 1},
+                {"targets": ["q2"], "averages": 200},
+                {"targets": ["q2"], "span": 3},
+            ]
+        )
+        parameters = only_step(single_step_tree(step), platform).parameters
+        assert parameters == {"q1": {"averages": 100, "span": 1}, "q2": {"averages": 200, "span": 3}}
+
+    def test_override_with_all_q(self, platform):
+        step = make_step(overrides=[{"targets": ["all_q"], "averages": 100}])
+        assert only_step(single_step_tree(step), platform).parameters == {
+            "q1": {"averages": 100},
+            "q2": {"averages": 100},
+        }
+
+    def test_override_replaces_a_whole_value(self, platform):
+        step = make_step(
+            pulses={"drive": "pi-reset", "readout": "readout-reset"},
+            overrides=[{"targets": ["q2"], "pulses": {"drive": "pi-sweet_spot"}}],
+        )
+        parameters = only_step(single_step_tree(step), platform).parameters
+        assert parameters["q1"]["pulses"] == {"drive": "pi-reset", "readout": "readout-reset"}
+        assert parameters["q2"]["pulses"] == {"drive": "pi-sweet_spot"}
+
+    def test_override_target_outside_the_step_is_warned_and_ignored(self, platform, warnings_log):
+        step = make_step(targets=["q1"], overrides=[{"targets": ["q1", "q2"], "averages": 100}])
+        assert only_step(single_step_tree(step), platform).parameters == {"q1": {"averages": 100}}
+        assert warnings_log == [
+            "pipelines.p.steps.s.overrides[0].targets: ['q2'] are not targets of the step. (Ignored)"
+        ]
+
+    def test_override_with_only_targets(self, platform):
+        step = make_step(overrides=[{"targets": ["q1"]}])
+        assert only_step(single_step_tree(step), platform).parameters == {"q1": {}, "q2": {}}
+
+    def test_targets_do_not_share_values(self, platform):
+        tree = single_step_tree(make_step(sweep=[0, 1, 2]), defaults={"two_tone": {"nested": {"a": 1}}})
+        parameters = only_step(tree, platform).parameters
+        parameters["q1"]["sweep"].append(3)
+        parameters["q1"]["nested"]["a"] = 2
+        assert parameters["q2"] == {"sweep": [0, 1, 2], "nested": {"a": 1}}
+
+    def test_parsing_does_not_change_the_tree(self, platform):
+        tree = single_step_tree(make_step(sweep=[0, 1], overrides=[{"targets": ["q2"], "sweep": [2, 3]}]))
+        parameters = only_step(tree, platform).parameters
+        parameters["q1"]["sweep"].append(9)
+        parameters["q2"]["sweep"].append(9)
+        assert tree["pipelines"]["p"]["steps"]["s"]["sweep"] == [0, 1]
+        assert tree["pipelines"]["p"]["steps"]["s"]["overrides"] == [{"targets": ["q2"], "sweep": [2, 3]}]
+
+    @pytest.mark.parametrize("overrides", [{"targets": ["q1"]}, {"q1": {"averages": 1}}, "q1"])
+    def test_overrides_must_be_a_list(self, platform, overrides):
+        with pytest.raises(TreeParseError, match=r"steps\.s\.overrides: must be a list"):
+            parse(single_step_tree(make_step(overrides=overrides)), platform)
+
+    def test_override_must_be_a_mapping(self, platform):
+        with pytest.raises(TreeParseError, match=r"steps\.s\.overrides\[0\]: must be a mapping"):
+            parse(single_step_tree(make_step(overrides=[["q1"]])), platform)
+
+    def test_override_needs_targets(self, platform):
+        with pytest.raises(TreeParseError, match=r"steps\.s\.overrides\[1\]\.targets: missing"):
+            parse(single_step_tree(make_step(overrides=[{"targets": ["q1"]}, {"averages": 1}])), platform)
+
+    @pytest.mark.parametrize("targets", [[], "q1"])
+    def test_override_targets_must_be_a_non_empty_list(self, platform, targets):
+        with pytest.raises(TreeParseError, match=r"steps\.s\.overrides\[0\]\.targets: must be a non-empty list"):
+            parse(single_step_tree(make_step(overrides=[{"targets": targets, "averages": 1}])), platform)
+
+    @pytest.mark.parametrize("key", ["experiment", "analysis", "operating_point", "loop", "overrides"])
+    def test_structural_keys_cannot_be_overridden(self, platform, key):
+        step = make_step(overrides=[{"targets": ["q1"], key: "x"}])
+        with pytest.raises(TreeParseError, match=rf"steps\.s\.overrides\[0\]: \['{key}'\] can only be set on the step"):
+            parse(single_step_tree(step), platform)
+
+    @pytest.mark.parametrize("key", ["experiment", "analysis", "operating_point", "loop", "targets", "overrides"])
+    def test_structural_keys_cannot_be_defaults(self, platform, key):
+        with pytest.raises(TreeParseError, match=rf"^defaults\.two_tone: \['{key}'\] can only be set on the step"):
+            parse(make_tree(defaults={"two_tone": {key: "x"}}), platform)
+
+    @pytest.mark.parametrize("defaults", [["two_tone"], "two_tone"])
+    def test_defaults_must_be_a_mapping(self, platform, defaults):
+        with pytest.raises(TreeParseError, match=r"^defaults: must be a mapping"):
+            parse(make_tree(defaults=defaults), platform)
+
+    def test_defaults_of_an_experiment_must_be_a_mapping(self, platform):
+        with pytest.raises(TreeParseError, match=r"^defaults\.two_tone: must be a mapping"):
+            parse(make_tree(defaults={"two_tone": [1, 2]}), platform)
+
+
+class TestDataFolder:
+    def test_not_in_a_step(self, platform):
+        with pytest.raises(TreeParseError, match=r"^pipelines\.p\.steps\.s: \['data_folder'\] cannot be set"):
+            parse(single_step_tree(make_step(data_folder="x")), platform)
+
+    def test_not_in_defaults(self, platform):
+        with pytest.raises(TreeParseError, match=r"^defaults\.two_tone: \['data_folder'\] cannot be set"):
+            parse(make_tree(defaults={"two_tone": {"data_folder": "x"}}), platform)
+
+    def test_not_in_an_override(self, platform):
+        step = make_step(overrides=[{"targets": ["q1"], "data_folder": "x"}])
+        with pytest.raises(TreeParseError, match=r"steps\.s\.overrides\[0\]: \['data_folder'\] cannot be set"):
+            parse(single_step_tree(step), platform)

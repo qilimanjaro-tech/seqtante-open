@@ -12,11 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Shared fixtures for experiment tests.
-
-Fixtures defined here are automatically available to every test under
-``tests/experiments/`` — no ``pytest_plugins`` registration is needed (and it is
-no longer supported in a non-top-level conftest).
+"""Shared fixtures for every test under ``tests/``.
 
 - ``platform``: a *real* ``Platform`` built from a runcard file, so all
   parameters (analog settings, topology, buses, IFs) are genuine. Nothing is
@@ -28,6 +24,8 @@ no longer supported in a non-top-level conftest).
 
 - ``mock_db_manager``: replaces the ``output_controller.db_manager`` singleton
   with a MagicMock so nothing hits a database.
+- ``mock_recorder``: patches callables with stubs that record their calls.
+- ``warnings_log``: the messages loguru logs at WARNING or above during the test.
 """
 
 from collections.abc import Callable, Iterator
@@ -35,6 +33,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from loguru import logger
 from qililab.data_management import build_platform
 from qililab.platform.platform import Platform
 
@@ -168,3 +167,12 @@ def mock_recorder() -> Iterator[MockRecorder]:
     recorder = MockRecorder()
     yield recorder
     recorder.reset()
+
+
+@pytest.fixture
+def warnings_log() -> Iterator[list[str]]:
+    """Collects the messages loguru logs at WARNING or above during the test."""
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(message.record["message"]), level="WARNING")
+    yield messages
+    logger.remove(sink_id)
