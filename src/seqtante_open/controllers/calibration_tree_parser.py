@@ -138,7 +138,7 @@ class CalibrationParser:
         return pipelines
 
     def _pipeline(
-        self, name: str, raw: Any, parent_targets: list[Target], defaults: dict[str, dict[str, Any]]
+        self, name: str, raw: object, parent_targets: list[Target], defaults: dict[str, dict[str, Any]]
     ) -> Pipeline:
         """Parses one pipeline, narrowing ``parent_targets`` with its own ``targets``."""
         path = f"pipelines.{name}"
@@ -157,7 +157,7 @@ class CalibrationParser:
         return Pipeline(name=name, after=_after(raw.get("after"), path), enabled=enabled, targets=targets, steps=steps)
 
     def _step(
-        self, name: str, pipeline: str, raw: Any, parent_targets: list[Target], defaults: dict[str, dict[str, Any]]
+        self, name: str, pipeline: str, raw: object, parent_targets: list[Target], defaults: dict[str, dict[str, Any]]
     ) -> Step:
         """Parses one step and resolves its parameters per target: defaults, then the step, then overrides."""
         path = f"pipelines.{pipeline}.steps.{name}"
@@ -216,7 +216,7 @@ class CalibrationParser:
         )
 
     def _overrides(
-        self, raw: Any, step_targets: list[Target], step_path: str
+        self, raw: object, step_targets: list[Target], step_path: str
     ) -> list[tuple[list[Target], dict[str, Any]]]:
         """Parses a step's overrides into ``(targets, values)`` pairs, dropping targets the step does not run on."""
         path = f"{step_path}.overrides"
@@ -229,10 +229,9 @@ class CalibrationParser:
                 raise TreeParseError(f"{entry_path}: must be a mapping.")
             if "targets" not in entry:
                 raise TreeParseError(f"{entry_path}.targets: missing.")
-            kept: list[Target] = []
-            ignored: list[Target] = []
-            for target in self._targets(entry["targets"], parent=None, path=f"{entry_path}.targets"):
-                (kept if target in step_targets else ignored).append(target)
+            targets = self._targets(entry["targets"], parent=None, path=f"{entry_path}.targets")
+            kept = [target for target in targets if target in step_targets]
+            ignored = [target for target in targets if target not in step_targets]
             if ignored:
                 logger.warning(
                     "{path}.targets: {ignored} are not targets of the step. (Ignored)",
@@ -246,7 +245,7 @@ class CalibrationParser:
         return overrides
 
     @staticmethod
-    def _defaults(raw: Any) -> dict[str, dict[str, Any]]:
+    def _defaults(raw: object) -> dict[str, dict[str, Any]]:
         """Parses the ``defaults`` block into parameters per experiment."""
         if not isinstance(raw, Mapping):
             raise TreeParseError("defaults: must be a mapping of experiment names to parameters.")
@@ -260,13 +259,13 @@ class CalibrationParser:
             defaults[experiment] = dict(values)
         return defaults
 
-    def _narrowed_targets(self, raw: Mapping[str, Any], parent: list[Target], path: str) -> list[Target]:
+    def _narrowed_targets(self, raw: Mapping[str, object], parent: list[Target], path: str) -> list[Target]:
         """Returns the ``targets`` of a pipeline or step, or ``parent`` when it sets none."""
         if "targets" not in raw:
             return list(parent)
         return self._targets(raw["targets"], parent=parent, path=f"{path}.targets")
 
-    def _targets(self, raw: Any, parent: list[Target] | None, path: str) -> list[Target]:
+    def _targets(self, raw: object, parent: list[Target] | None, path: str) -> list[Target]:
         """Parses target names, expands ``all_q`` and ``all_c`` in place, drops repeats keeping the first, and checks
         the result is within ``parent``, when given."""
         if not isinstance(raw, list) or not raw:
@@ -308,8 +307,10 @@ class CalibrationParser:
             raise TreeParseError(f"{path}: all_c: {error}") from error
 
 
-def _target(name: Any, path: str) -> Target:
+def _target(name: object, path: str) -> Target:
     """Parses one target name written in the tree."""
+    if not isinstance(name, str):
+        raise TreeParseError(f"{path}: Invalid target {name!r}: must be a string such as 'q1' or 'c1_2'.")
     try:
         return ExperimentTarget.from_str(name)
     except ValueError as error:
@@ -321,7 +322,7 @@ def _names(targets: list[Target]) -> list[str]:
     return [str(target) for target in targets]
 
 
-def _after(raw: Any, path: str) -> list[str]:
+def _after(raw: object, path: str) -> list[str]:
     """Normalises a pipeline's ``after`` to a list of step names."""
     if raw is None:
         return []
