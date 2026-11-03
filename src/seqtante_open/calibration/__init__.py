@@ -33,6 +33,7 @@ from seqtante_open.calibration.model import (
     ReadoutLevels,
 )
 from seqtante_open.calibration.pulses import PULSE_NAME_PATTERN, parse_pulse_name
+from seqtante_open.calibration.seed import seed_calibration
 
 __all__ = [
     "AXES",
@@ -54,5 +55,6 @@ __all__ = [
     "read_calibration_file",
     "readout_levels_for",
     "save_calibration",
+    "seed_calibration",
     "write_calibration_file",
 ]

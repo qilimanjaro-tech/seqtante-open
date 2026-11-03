@@ -91,9 +91,7 @@ def check_section_pulses_exist(file: CalibrationFile, calibration: Calibration) 
                     )
 
 
-def readout_levels_for(
-    file: CalibrationFile, experiment: str, target: str, readout_pulse: str
-) -> ReadoutLevels | None:
+def readout_levels_for(file: CalibrationFile, experiment: str, target: str, readout_pulse: str) -> ReadoutLevels | None:
     """The readout levels for ``target`` at its section's operating point, for a consumer playing ``readout_pulse``.
 
     Readout levels are tagged with the readout pulse they were taken with; a consumer playing a
