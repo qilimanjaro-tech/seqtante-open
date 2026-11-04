@@ -28,6 +28,12 @@ from seqtante_open.calibration.model import CalibrationFile, ReadoutLevels
 #: Keys under ``Calibration.parameters`` that hold the calibration-file content.
 _CONTENT_KEYS = ("operating_points_version", "operating_points", "experiments")
 
+#: The flux axis a named flux pulse resolves to. A section's ``pulses`` map keys by role, not axis, so
+#: one flux bus is reachable from a section: the z-flux bus (``flux_z_<target>``) — the bus a CZ pulse
+#: plays on and the primary tuning axis (ADR-0008, ADR-0011). A non-z flux pulse would need the map to
+#: carry the axis (ADR-0008 open question).
+_FLUX_PULSE_AXIS = "z"
+
 
 def read_calibration_file(calibration: Calibration, *, check_pulses: bool = True) -> CalibrationFile:
     """Parse and validate the operating points and sections from a ``Calibration``.
@@ -75,7 +81,9 @@ def save_calibration(calibration: Calibration, path: str) -> None:
 def check_section_pulses_exist(file: CalibrationFile, calibration: Calibration) -> None:
     """Verify every pulse a section names exists on its resolved bus in ``Calibration.waveforms``.
 
-    This is the existence half of pulse validation that the pure model cannot do (ADR-0008).
+    This is the existence half of pulse validation that the pure model cannot do (ADR-0008). A named
+    flux pulse resolves to the z-flux bus (``flux_z_<target>``), the bus a CZ plays on (see
+    :data:`_FLUX_PULSE_AXIS`), and is checked like any other pulse rather than rejected.
 
     Raises:
         ValueError: naming the first section whose pulse is missing from its bus.
@@ -83,15 +91,9 @@ def check_section_pulses_exist(file: CalibrationFile, calibration: Calibration) 
     for experiment, by_target in file.experiments.items():
         for target, section in by_target.items():
             for role, pulse_name in section.pulses.items():
-                if role is Role.flux:
-                    # A flux bus carries an axis (flux_z_q14); the role->bus resolution has none, so a
-                    # named flux pulse cannot be placed on a real bus. None is needed for December
-                    # (ADR-0008 open question), so fail loudly rather than check a non-existent bus.
-                    raise ValueError(
-                        f"experiment '{experiment}' target '{target}': flux pulses are not supported "
-                        f"(a flux pulse needs an axis to resolve its bus; ADR-0008 open question)"
-                    )
-                bus = bus_alias(target, role)
+                # A flux bus is axis-first (flux_z_q14); resolve a named flux pulse onto its z-flux bus.
+                axis = _FLUX_PULSE_AXIS if role is Role.flux else None
+                bus = bus_alias(target, role, axis)
                 if not calibration.has_waveform(bus, pulse_name):
                     raise ValueError(
                         f"experiment '{experiment}' target '{target}': pulse '{pulse_name}' for role "

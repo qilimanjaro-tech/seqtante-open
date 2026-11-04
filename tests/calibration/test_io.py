@@ -110,13 +110,18 @@ def test_readout_levels_for_errors_without_section(valid_file: dict) -> None:
         readout_levels_for(model, "t1", "q14", "readout-reset")
 
 
-def test_check_section_pulses_exist_rejects_flux_pulse(valid_file: dict) -> None:
-    # A flux bus carries an axis, which role->bus resolution has none of, so a named flux pulse
-    # can't be placed on a real bus: reject it loudly (ADR-0008 open question).
-    valid_file["experiments"]["rabi"]["q14"]["pulses"]["flux"] = "flux-reset"
+def test_check_section_pulses_exist_resolves_flux_pulse_to_z_bus(valid_file: dict) -> None:
+    # A named flux pulse resolves to the z-flux bus (flux_z_q14), the bus a CZ plays on (ADR-0008),
+    # and is checked like any other pulse rather than rejected.
+    valid_file["experiments"]["rabi"]["q14"]["pulses"]["flux"] = "cz-reset"
     model = CalibrationFile.model_validate(valid_file)
     calibration = Calibration()
     _waveforms_for(calibration)
 
-    with pytest.raises(ValueError, match="flux pulses are not supported"):
+    # Absent on flux_z_q14: the check fails, pointing at the z-flux bus.
+    with pytest.raises(ValueError, match="not defined on bus 'flux_z_q14'"):
         check_section_pulses_exist(model, calibration)
+
+    # Present on flux_z_q14: the check passes.
+    calibration.add_waveform("flux_z_q14", "cz-reset", Square(amplitude=0.3, duration=80))
+    check_section_pulses_exist(model, calibration)  # no raise

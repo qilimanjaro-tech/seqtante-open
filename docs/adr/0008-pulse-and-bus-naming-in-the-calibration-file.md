@@ -47,4 +47,4 @@ experiments:
 
 ## Open questions
 
-- **Named flux pulses.** Whether the qili-experiments or qili-runtime developers need `flux` in the `pulses` map for a later tree. None is needed for December; left open until a tree plays a flux pulse by name.
+- **Named flux pulses on a non-z axis.** A section's `pulses` map keys by role, so it can name one flux pulse, and that pulse resolves to the z-flux bus (`flux_z_<target>`) — the bus a CZ plays on, which the digital stack uses today. A tree that needs a named flux pulse on a non-z axis (`flux_x_<target>`) would need the map to carry the axis; left open until one does. *(Updated 2026-11-04: named flux pulses are supported and resolve to the z-flux bus, rather than rejected, per QHC-1799 review with Ely Farrés — a CZ is a named flux pulse on `flux_z`. The December 1q tree still plays none.)*
