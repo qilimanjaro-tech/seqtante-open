@@ -44,10 +44,10 @@ _TIME_UNITS = {
     "ns": 1,
     "us": 1_000,
     # Micro sign, U+00B5.
-    "µs": 1_000,
+    "\u00b5s": 1_000,
     # Greek mu, U+03BC.
-    "μs": 1_000,
-    "ms": 1_000_000
+    "\u03bcs": 1_000,
+    "ms": 1_000_000,
 }
 _QUANTITY = re.compile(r"(?P<number>(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*(?P<unit>\S+)", re.ASCII)
 
