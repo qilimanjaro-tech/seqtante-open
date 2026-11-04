@@ -109,7 +109,7 @@ def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, para
             readout_flux = x_loop_readout_flux(qubit, qubit_loops, parameters) if loop != "x" else None
             _run_experiment(
                 target=qubit,
-                flux_bus=f"flux_{qubit}_{loop}",
+                flux_bus=f"flux_{loop}_{qubit}",
                 drive_bus=f"drive_{qubit}",
                 readout_bus=f"readout_{qubit}",
                 readout_flux=readout_flux,
@@ -119,7 +119,7 @@ def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, para
             readout_qubit = readout_x_couplers[coupler]
             _run_experiment(
                 target=coupler,
-                flux_bus=f"flux_{coupler}_{loop}",
+                flux_bus=f"flux_{loop}_{coupler}",
                 drive_bus=f"drive_{readout_qubit}",  # The coupler does not have fast lines so you can't drive directly to it so you need to drive trough the qubit.
                 readout_bus=f"readout_{readout_qubit}",
                 readout_flux=x_loop_readout_flux(readout_qubit, qubit_loops, parameters),

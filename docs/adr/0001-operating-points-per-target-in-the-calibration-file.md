@@ -24,7 +24,7 @@ experiments:
   rabi:
     q14: {operating_point: reset, pulses: {readout: readout_long, drive: drag}}
 predistortion:
-  fast_flux_q14_z: {b: [...], a: [...]}
+  fast_flux_z_q14: {b: [...], a: [...]}
 # Pulses live in qililab's existing Calibration.waveforms, keyed by bus and pulse name:
 #   readout_q14: {readout_long: Square(...)}, drive_q14: {drag: Drag(...)}
 # AC crosstalk lives in qililab's existing Calibration.crosstalk_matrix_ac
