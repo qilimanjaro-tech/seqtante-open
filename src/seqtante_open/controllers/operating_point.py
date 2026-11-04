@@ -92,6 +92,4 @@ def park_lo_outside_sweep(
     Raises:
         NotImplementedError: always, until the policy is pinned in task 5c.
     """
-    raise NotImplementedError(
-        "the LO-parking policy is pinned when this is wired into the sweep nodes (task 5c)"
-    )
+    raise NotImplementedError("the LO-parking policy is pinned when this is wired into the sweep nodes (task 5c)")
