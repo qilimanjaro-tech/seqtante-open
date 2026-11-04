@@ -254,7 +254,8 @@ class CalibrationNode(ABC, Generic[ResultT]):
 
     def _place_operating_points(self, targets: list[Target]) -> None:
         experiment = self.experiment
-        if experiment is None:  # pragma: no cover - a registered leaf always has an experiment
+        # A registered leaf always has an experiment, so this guard is defensive only.
+        if experiment is None:  # pragma: no cover
             raise RuntimeError(f"{type(self).__name__} applies an operating point but declares no experiment")
         for target in targets:
             apply_operating_point(self.calibration_file, experiment, target, self.restore)
