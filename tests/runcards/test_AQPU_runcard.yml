@@ -8,19 +8,19 @@ buses:
     instruments: [QRM-RF1]
     channels: [1]
 
-  - alias: flux_q1_x        # DC1.01 — NOTE: Shorted!
+  - alias: flux_x_q1        # DC1.01 — NOTE: Shorted!
     instruments: [qdac2_1]
     channels: [1]
-  - alias: flux_q1_z        # DC2.01
+  - alias: flux_z_q1        # DC2.01
     instruments: [qdac2_1]
     channels: [2]
-  - alias: flux_q2_x        # DC1.02
+  - alias: flux_x_q2        # DC1.02
     instruments: [qdac2_1]
     channels: [3]
-  - alias: flux_q2_z        # DC2.02
+  - alias: flux_z_q2        # DC2.02
     instruments: [qdac2_1]
     channels: [4]
-  - alias: flux_c1_2_z      # DC1.16
+  - alias: flux_z_c1_2      # DC1.16
     instruments: [qdac2_1]
     channels: [5]
 

@@ -16,7 +16,7 @@
 
 The runcard exposes qubits ``[1, 2]`` with ``qubit_loops=2`` and
 ``coupler_loops=1``, so targets ``["q1", "c1_2"]`` produce three measurements:
-``flux_q1_z``, ``flux_q1_x`` and ``flux_c1_2_z``.
+``flux_z_q1``, ``flux_x_q1`` and ``flux_z_c1_2``.
 
 The node fits each measurement and adds the fitted offset to the calibration's
 crosstalk matrix, but only for a fit that converged. The execution function, the
@@ -45,7 +45,7 @@ MEASUREMENT_ID = 777
 FITTED_OFFSET = 0.123
 DATA_FOLDER = "unused-mocked-folder"
 
-MEASURED_BUSES = ("flux_q1_x", "flux_q1_z", "flux_c1_2_z")
+MEASURED_BUSES = ("flux_x_q1", "flux_z_q1", "flux_z_c1_2")
 """The flux buses of ``["q1", "c1_2"]``, in the order the node sweeps them."""
 
 
@@ -164,10 +164,10 @@ def test_loops_over_all_loops(run_experiment):
         for c in calls
     }
     assert measured == {
-        ("q1", "flux_q1_z", "drive_q1", "readout_q1"),
-        ("q1", "flux_q1_x", "drive_q1", "readout_q1"),
+        ("q1", "flux_z_q1", "drive_q1", "readout_q1"),
+        ("q1", "flux_x_q1", "drive_q1", "readout_q1"),
         # A coupler has no drive line of its own, so it is driven and read through its lowest qubit.
-        ("c1_2", "flux_c1_2_z", "drive_q1", "readout_q1"),
+        ("c1_2", "flux_z_c1_2", "drive_q1", "readout_q1"),
     }
     assert len(calls) == 3, "each flux bus should be measured exactly once"
 
@@ -189,16 +189,16 @@ def test_x_loop_flux_is_set_if_specified(platform, mock_db_manager, mock_recorde
     x_flux_during = {}
 
     def _snapshot(**kwargs) -> int:
-        x_flux_during[kwargs["flux_bus"]] = platform.get_parameter("flux_q1_x", Parameter.FLUX)
+        x_flux_during[kwargs["flux_bus"]] = platform.get_parameter("flux_x_q1", Parameter.FLUX)
         return MEASUREMENT_ID
 
     with patch(f"{MODULE}.{FN}", autospec=True, side_effect=_snapshot):
         two_tone_frequency_vs_flux_node(platform=platform, platform_path="unused", parameters=parameters)
 
-    assert x_flux_during["flux_q1_z"] == pytest.approx(0.2)
-    assert x_flux_during["flux_c1_2_z"] == pytest.approx(0.2)
+    assert x_flux_during["flux_z_q1"] == pytest.approx(0.2)
+    assert x_flux_during["flux_z_c1_2"] == pytest.approx(0.2)
     # The x loop itself is the swept bus, so it is not pre-biased.
-    assert x_flux_during["flux_q1_x"] == pytest.approx(0.0)
+    assert x_flux_during["flux_x_q1"] == pytest.approx(0.0)
 
 
 def test_readout_qubit_can_be_overwriten(run_experiment):
@@ -212,7 +212,7 @@ def test_readout_qubit_can_be_overwriten(run_experiment):
     (coupler_call,) = [c for c in recorder.calls[FN] if c["kwargs"]["target"] == "c1_2"]
     assert coupler_call["kwargs"]["readout_bus"] == "readout_q2"
     assert coupler_call["kwargs"]["drive_bus"] == "drive_q2"
-    assert coupler_call["kwargs"]["flux_bus"] == "flux_c1_2_z"
+    assert coupler_call["kwargs"]["flux_bus"] == "flux_z_c1_2"
 
 
 def test_per_target_overwrite_reaches_execution(platform, run_experiment):

@@ -61,7 +61,7 @@ def make_two_tone_vs_flux_data(rng: np.random.Generator) -> tuple[np.ndarray, di
     results = as_iq(magnitude, rng, sigma=0.01)
 
     loops = {
-        "flux": loop(fluxes, units="phi_0", bus="flux_q1_z", parameter="Flux"),
+        "flux": loop(fluxes, units="phi_0", bus="flux_z_q1", parameter="Flux"),
         "IF_frequency": loop(frequencies, units="Hz", bus="drive_q1", parameter="IF_frequency"),
     }
     return results, loops
