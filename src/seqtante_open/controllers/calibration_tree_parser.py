@@ -15,9 +15,9 @@
 """Parses a calibration tree (ADR-0003) into pipelines of steps with parameters resolved per target (ADR-0005)."""
 
 import copy
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import Any
 
 from loguru import logger
 from qililab import Platform
@@ -25,11 +25,13 @@ from qililab import Platform
 from seqtante_open.controllers.experiment_specs import experiment_spec, known_experiments
 from seqtante_open.targets import CouplerTarget, ExperimentTarget, QubitTarget, Target
 
-Loop = Literal["z", "x"]
-
-_LOOPS: tuple[Loop, ...] = ("z", "x")
-_STEP_KEYS = frozenset({"experiment", "analysis", "operating_point", "loop", "targets", "overrides"})
+_STEP_KEYS = frozenset({"experiment", "analysis", "targets", "overrides"})
 _RESERVED_PARAMETERS = frozenset({"data_folder"})
+# Each shorthand: the analog-settings field it expands from, and how one item of that field becomes a target.
+_EXPANSIONS: dict[str, tuple[str, Callable[[Any], Target]]] = {
+    "all_q": ("qubits", QubitTarget),
+    "all_c": ("topology", lambda edge: CouplerTarget.between(edge[0], edge[1])),
+}
 
 
 class TreeParseError(ValueError):
@@ -45,8 +47,6 @@ class Step:
         pipeline (str): Name of the pipeline the step belongs to.
         experiment (str): Experiment the step runs.
         analysis (str): Analysis the step runs, the experiment's default when the tree names none.
-        operating_point (str): Operating point the step runs at and writes into.
-        loop (Loop | None): Flux loop the step sweeps, only for flux-sweep experiments.
         targets (list[Target]): Targets the step runs on.
         parameters (dict[Target, dict[str, Any]]): Resolved parameters per target.
     """
@@ -55,10 +55,21 @@ class Step:
     pipeline: str
     experiment: str
     analysis: str
-    operating_point: str
-    loop: Loop | None
     targets: list[Target]
     parameters: dict[Target, dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class _Override:
+    """One entry of a step's ``overrides``.
+
+    Args:
+        targets (list[Target]): Targets of the entry that the step runs on.
+        values (dict[str, Any]): Parameters the entry sets.
+    """
+
+    targets: list[Target]
+    values: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -179,29 +190,19 @@ class CalibrationParser:
                 f"{path}.analysis: unknown analysis '{analysis}' for '{experiment}'. Known: {', '.join(spec.analyses)}."
             )
 
-        operating_point = raw.get("operating_point")
-        if not isinstance(operating_point, str) or not operating_point:
-            raise TreeParseError(f"{path}.operating_point: missing.")
-
-        loop = raw.get("loop")
-        if spec.flux_sweep and loop not in _LOOPS:
-            raise TreeParseError(f"{path}.loop: '{experiment}' sweeps flux, so loop must be one of {_LOOPS}.")
-        if not spec.flux_sweep and loop is not None:
-            raise TreeParseError(f"{path}.loop: '{experiment}' does not sweep flux, so it takes no loop.")
-
         targets = self._narrowed_targets(raw, parent_targets, path)
 
         own = {key: value for key, value in raw.items() if key not in _STEP_KEYS}
-        _check_reserved(own, path)
+        _check_settable(own, path)
         overrides = self._overrides(raw.get("overrides", []), targets, path)
 
         base = {**defaults.get(experiment, {}), **own}
         parameters: dict[Target, dict[str, Any]] = {}
         for target in targets:
             resolved = base
-            for override_targets, values in overrides:
-                if target in override_targets:
-                    resolved = resolved | values
+            for override in overrides:
+                if target in override.targets:
+                    resolved = resolved | override.values
             parameters[target] = copy.deepcopy(resolved)
 
         return Step(
@@ -209,16 +210,12 @@ class CalibrationParser:
             pipeline=pipeline,
             experiment=experiment,
             analysis=analysis,
-            operating_point=operating_point,
-            loop=cast("Loop | None", loop),
             targets=targets,
             parameters=parameters,
         )
 
-    def _overrides(
-        self, raw: object, step_targets: list[Target], step_path: str
-    ) -> list[tuple[list[Target], dict[str, Any]]]:
-        """Parses a step's overrides into ``(targets, values)`` pairs, dropping targets the step does not run on."""
+    def _overrides(self, raw: object, step_targets: list[Target], step_path: str) -> list[_Override]:
+        """Parses a step's overrides, dropping targets the step does not run on."""
         path = f"{step_path}.overrides"
         if not isinstance(raw, list):
             raise TreeParseError(f"{path}: must be a list of entries, each with its own targets.")
@@ -239,9 +236,8 @@ class CalibrationParser:
                     ignored=_names(ignored),
                 )
             values = {key: value for key, value in entry.items() if key != "targets"}
-            _check_structural(values, entry_path)
-            _check_reserved(values, entry_path)
-            overrides.append((kept, values))
+            _check_settable(values, entry_path)
+            overrides.append(_Override(targets=kept, values=values))
         return overrides
 
     @staticmethod
@@ -254,8 +250,7 @@ class CalibrationParser:
             path = f"defaults.{experiment}"
             if not isinstance(values, Mapping):
                 raise TreeParseError(f"{path}: must be a mapping of parameters.")
-            _check_structural(values, path)
-            _check_reserved(values, path)
+            _check_settable(values, path)
             defaults[experiment] = dict(values)
         return defaults
 
@@ -272,10 +267,8 @@ class CalibrationParser:
             raise TreeParseError(f"{path}: must be a non-empty list of targets.")
         targets: list[Target] = []
         for name in raw:
-            if name == "all_q":
-                targets += self._all_qubits(path)
-            elif name == "all_c":
-                targets += self._all_couplers(path)
+            if isinstance(name, str) and name in _EXPANSIONS:
+                targets += self._expand(name, path)
             else:
                 targets.append(_target(name, path))
         # Drop repeats keeping the first; a dict keeps file order, a set would not.
@@ -286,25 +279,17 @@ class CalibrationParser:
                 raise TreeParseError(f"{path}: {_names(outside)} are not in the enclosing targets {_names(parent)}.")
         return targets
 
-    def _all_qubits(self, path: str) -> list[Target]:
-        """Returns every qubit in the runcard's analog settings."""
-        settings = self.platform.analog_compilation_settings
-        if settings is None or not settings.qubits:
-            raise TreeParseError(f"{path}: all_q needs the qubits in the runcard's analog settings.")
+    def _expand(self, name: str, path: str) -> list[Target]:
+        """Expands ``all_q`` to every qubit in the runcard's analog settings, or ``all_c`` to every coupler in its
+        topology."""
+        field, to_target = _EXPANSIONS[name]
+        items = getattr(self.platform.analog_compilation_settings, field, None)
+        if not items:
+            raise TreeParseError(f"{path}: {name} needs the {field} in the runcard's analog settings.")
         try:
-            return [QubitTarget(qubit) for qubit in settings.qubits]
+            return [to_target(item) for item in items]
         except ValueError as error:
-            raise TreeParseError(f"{path}: all_q: {error}") from error
-
-    def _all_couplers(self, path: str) -> list[Target]:
-        """Returns every coupler in the runcard's analog topology, with its qubits in either order."""
-        settings = self.platform.analog_compilation_settings
-        if settings is None or not settings.topology:
-            raise TreeParseError(f"{path}: all_c needs the topology in the runcard's analog settings.")
-        try:
-            return [CouplerTarget.between(edge[0], edge[1]) for edge in settings.topology]
-        except ValueError as error:
-            raise TreeParseError(f"{path}: all_c: {error}") from error
+            raise TreeParseError(f"{path}: {name}: {error}") from error
 
 
 def _target(name: object, path: str) -> Target:
@@ -332,15 +317,12 @@ def _after(raw: object, path: str) -> list[str]:
     return list(names)
 
 
-def _check_structural(values: Mapping[str, Any], path: str) -> None:
-    """Rejects keys that can only be set on the step itself."""
-    structural = sorted(_STEP_KEYS.intersection(values))
-    if structural:
-        raise TreeParseError(f"{path}: {structural} can only be set on the step itself.")
-
-
-def _check_reserved(values: Mapping[str, Any], path: str) -> None:
-    """Rejects parameters the tree cannot set."""
-    reserved = sorted(_RESERVED_PARAMETERS.intersection(values))
-    if reserved:
-        raise TreeParseError(f"{path}: {reserved} cannot be set from the calibration tree.")
+def _check_settable(values: Mapping[str, Any], path: str) -> None:
+    """Rejects keys that only the step itself can set, then parameters the tree cannot set at all."""
+    for keys, reason in (
+        (_STEP_KEYS, "can only be set on the step itself"),
+        (_RESERVED_PARAMETERS, "cannot be set from the calibration tree"),
+    ):
+        found = sorted(keys.intersection(values))
+        if found:
+            raise TreeParseError(f"{path}: {found} {reason}.")

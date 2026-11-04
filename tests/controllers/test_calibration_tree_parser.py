@@ -99,15 +99,15 @@ def make_tree(**top: Any) -> dict[str, Any]:
     """A minimal valid tree with one pipeline ``p`` and one ``two_tone`` step ``s``; ``top`` replaces top-level keys."""
     tree: dict[str, Any] = {
         "targets": ["q1", "q2"],
-        "pipelines": {"p": {"steps": {"s": {"experiment": "two_tone", "operating_point": "sweet_spot"}}}},
+        "pipelines": {"p": {"steps": {"s": {"experiment": "two_tone"}}}},
     }
     tree.update(top)
     return tree
 
 
 def make_step(**keys: Any) -> dict[str, Any]:
-    """A ``two_tone`` step at ``sweet_spot``; ``keys`` add to or replace its keys."""
-    return {"experiment": "two_tone", "operating_point": "sweet_spot", **keys}
+    """A ``two_tone`` step; ``keys`` add to or replace its keys."""
+    return {"experiment": "two_tone", **keys}
 
 
 def single_step_tree(step: dict[str, Any], **top: Any) -> dict[str, Any]:
@@ -165,11 +165,7 @@ class TestAdrExample:
         steps = by_name(pipelines)
         assert steps["sweet_spot_flux"].experiment == "two_tone_vs_flux"
         assert steps["sweet_spot_flux"].analysis == "parabola_vertex"
-        assert steps["sweet_spot_flux"].operating_point == "sweet_spot"
-        assert steps["sweet_spot_flux"].loop == "z"
-        assert steps["two_tone_sweet_spot"].loop is None
         assert steps["rabi_reset"].analysis == "readout_levels"
-        assert steps["rabi_reset"].operating_point == "reset"
 
     def test_pipeline_targets_narrow_the_steps(self, pipelines):
         steps = by_name(pipelines)
@@ -180,19 +176,26 @@ class TestAdrExample:
     def test_structural_keys_are_not_parameters(self, pipelines):
         for step in by_name(pipelines).values():
             for parameters in step.parameters.values():
-                assert not {"experiment", "analysis", "operating_point", "loop", "targets", "overrides"} & set(
-                    parameters
-                )
+                assert not {"experiment", "analysis", "targets", "overrides"} & set(parameters)
 
     def test_defaults_and_step_values(self, pipelines):
         steps = by_name(pipelines)
-        assert steps["two_tone_sweet_spot"].parameters["q1"] == {"freq_sweep": [-5e6, 5e6, 101], "averages": 10000}
-        assert steps["sweet_spot_flux"].parameters["q1"] == {"flux_sweep": [-0.02, 0.02, 11]}
+        assert steps["two_tone_sweet_spot"].parameters["q1"] == {
+            "freq_sweep": [-5e6, 5e6, 101],
+            "averages": 10000,
+            "operating_point": "sweet_spot",
+        }
+        assert steps["sweet_spot_flux"].parameters["q1"] == {
+            "operating_point": "sweet_spot",
+            "loop": "z",
+            "flux_sweep": [-0.02, 0.02, 11],
+        }
 
     def test_overrides(self, pipelines):
         assert by_name(pipelines)["rabi_reset"].parameters["q2"] == {
             "amplitude_sweep": [0.02, 0.5, 25],
             "averages": 10000,
+            "operating_point": "reset",
         }
 
     def test_pulses_and_thresholds_are_per_target_parameters(self, pipelines):
@@ -351,35 +354,24 @@ class TestSteps:
     @pytest.mark.parametrize(
         "step",
         [
-            pytest.param({"experiment": "two_tone"}, id="absent"),
-            pytest.param(make_step(operating_point=None), id="None"),
-            pytest.param(make_step(operating_point=""), id="empty"),
-            pytest.param(make_step(operating_point=3), id="not_a_string"),
+            pytest.param(make_step(experiment="two_tone_vs_flux"), id="flux_sweep_without_operating_point_or_loop"),
+            pytest.param(make_step(operating_point="", loop="y"), id="values_the_node_will_reject"),
         ],
     )
-    def test_operating_point_is_required(self, platform, step):
-        tree = single_step_tree(step)
-        with pytest.raises(TreeParseError, match=r"steps\.s\.operating_point: missing"):
-            parse(tree, platform)
+    def test_operating_point_and_loop_are_not_checked_here(self, platform, step):
+        expected = {key: value for key, value in step.items() if key != "experiment"}
+        assert only_step(single_step_tree(step), platform).parameters == {"q1": expected, "q2": expected}
 
-    @pytest.mark.parametrize("loop", ["z", "x"])
-    def test_flux_sweep_loop(self, platform, loop):
-        step = only_step(single_step_tree(make_step(experiment="two_tone_vs_flux", loop=loop)), platform)
-        assert step.loop == loop
-
-    @pytest.mark.parametrize("loop", [None, "y", "Z"])
-    def test_flux_sweep_needs_a_valid_loop(self, platform, loop):
-        step = make_step(experiment="two_tone_vs_flux")
-        if loop is not None:
-            step["loop"] = loop
-        tree = single_step_tree(step)
-        with pytest.raises(TreeParseError, match=r"steps\.s\.loop: 'two_tone_vs_flux' sweeps flux"):
-            parse(tree, platform)
-
-    def test_loop_on_a_fixed_flux_experiment(self, platform):
-        tree = single_step_tree(make_step(loop="z"))
-        with pytest.raises(TreeParseError, match=r"steps\.s\.loop: 'two_tone' does not sweep flux"):
-            parse(tree, platform)
+    def test_operating_point_and_loop_resolve_per_target(self, platform):
+        step = make_step(
+            operating_point="sweet_spot",
+            overrides=[{"targets": ["q2"], "operating_point": "reset", "loop": "x"}],
+        )
+        tree = single_step_tree(step, defaults={"two_tone": {"loop": "z"}})
+        assert only_step(tree, platform).parameters == {
+            "q1": {"loop": "z", "operating_point": "sweet_spot"},
+            "q2": {"loop": "x", "operating_point": "reset"},
+        }
 
 
 # ------------------------- Targets -------------------------
@@ -686,14 +678,14 @@ class TestResolution:
         with pytest.raises(TreeParseError, match=r"steps\.s\.overrides\[0\]\.targets: must be a non-empty list"):
             parse(tree, platform)
 
-    @pytest.mark.parametrize("key", ["experiment", "analysis", "operating_point", "loop", "overrides"])
+    @pytest.mark.parametrize("key", ["experiment", "analysis", "overrides"])
     def test_structural_keys_cannot_be_overridden(self, platform, key):
         step = make_step(overrides=[{"targets": ["q1"], key: "x"}])
         tree = single_step_tree(step)
         with pytest.raises(TreeParseError, match=rf"steps\.s\.overrides\[0\]: \['{key}'\] can only be set on the step"):
             parse(tree, platform)
 
-    @pytest.mark.parametrize("key", ["experiment", "analysis", "operating_point", "loop", "targets", "overrides"])
+    @pytest.mark.parametrize("key", ["experiment", "analysis", "targets", "overrides"])
     def test_structural_keys_cannot_be_defaults(self, platform, key):
         tree = make_tree(defaults={"two_tone": {key: "x"}})
         with pytest.raises(TreeParseError, match=rf"^defaults\.two_tone: \['{key}'\] can only be set on the step"):

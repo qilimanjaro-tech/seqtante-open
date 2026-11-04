@@ -26,11 +26,9 @@ class ExperimentSpec:
 
     Args:
         analyses (tuple[str, ...]): Analyses the experiment supports. The first one is the default.
-        flux_sweep (bool): Whether the experiment sweeps a flux loop, so its steps must name one.
     """
 
     analyses: tuple[str, ...]
-    flux_sweep: bool = False
 
     @property
     def default_analysis(self) -> str:
@@ -38,10 +36,10 @@ class ExperimentSpec:
 
 
 _EXPERIMENT_SPECS: dict[str, ExperimentSpec] = {
-    "offset_calibration": ExperimentSpec(analyses=("flux_offset",), flux_sweep=True),
+    "offset_calibration": ExperimentSpec(analyses=("flux_offset",)),
     "single_tone": ExperimentSpec(analyses=("lorentzian_peak",)),
     "two_tone": ExperimentSpec(analyses=("lorentzian_peak",)),
-    "two_tone_vs_flux": ExperimentSpec(analyses=("parabola_vertex",), flux_sweep=True),
+    "two_tone_vs_flux": ExperimentSpec(analyses=("parabola_vertex",)),
     "reset_point_search": ExperimentSpec(analyses=("lorentzian_peak",)),
     "rabi": ExperimentSpec(analyses=("pi_amplitude", "readout_levels")),
     "t1": ExperimentSpec(analyses=("exponential_decay",)),
