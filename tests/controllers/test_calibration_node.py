@@ -75,5 +75,6 @@ def test_place_operating_points_requires_an_experiment():
             pass
 
     node = Spine(name="spine", idx=0, targets=[], parameters={}, context=_context())
+    target = ExperimentTarget.from_str("q1")
     with pytest.raises(RuntimeError, match="declares no experiment"):
-        node._place_operating_points([ExperimentTarget.from_str("q1")])
+        node._place_operating_points([target])
