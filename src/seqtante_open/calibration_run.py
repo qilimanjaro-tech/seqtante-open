@@ -23,7 +23,7 @@ from qcodes.utils.deprecate import QCoDeSDeprecationWarning
 from qililab.data_management import build_platform
 from ruamel.yaml import YAML
 
-from seqtante_open.controllers import CalibrationGraph, CalibrationParser
+from seqtante_open.controllers import CalibrationGraph, CalibrationParser, Pipeline
 from seqtante_open.outputs import output_controller
 
 if TYPE_CHECKING:
@@ -65,6 +65,10 @@ class CalibrationRun:
         # Load YAML
         config: dict = load_config(self.config_path)
 
+        # --- Parse the calibration tree, before anything is written to the database ---
+        self.platform: Platform = build_platform(runcard=self.platform_path)
+        self.pipelines: list[Pipeline] = CalibrationParser(calibration_config=config, platform=self.platform).parse()
+
         # --- Build base path for data from YAML ---
         storage_conf = config.get("storage", {})
 
@@ -80,17 +84,7 @@ class CalibrationRun:
         output_controller.setup_logger()
         logger.opt(colors=True).info("Welcome to Seqtante-Open")
 
-        self.platform: Platform = build_platform(runcard=self.platform_path)
         self.graph = CalibrationGraph(self.platform, self.platform_path)
-
-        # --- Compile the calibration tree ---
-        compiler = CalibrationParser(
-            calibration_config=config,
-            platform=self.platform,
-            platform_path=platform_path,
-            graph=self.graph,
-        )
-        compiler.compile_nodes()
 
         # --- Connect to platform ---
         self.platform.connect()
