@@ -1,0 +1,6 @@
+Added the run helpers the node lifecycle builds on (ADR-0001, ADR-0006): the operating-point helper, the parameter-restore context manager, and the one crosstalk swap point. The second slice of the node base (task 5); the three-phase lifecycle that drives these follows in the next PR.
+
+- **`restoring_parameters`** is the context manager a node sets platform parameters through: it records each parameter's value before the first set and puts it back in its `finally`, even when the body raises. QProgram resets only what it sets itself, so this undoes a node's own `set_parameter` calls for every node, rather than a hand-written `finally` per experiment.
+- **`apply_operating_point`** places a target and the neighbours its point parks at their stored fluxes (ADR-0011), through the restore handle so the run undoes them. `operating_point_for` resolves a target's section to its operating point (ADR-0001).
+- **`crosstalk_session`** is the single place a run touches qililab's crosstalk API — install the matrix, zero flux at the start, zero bias at the end, and write a measured flux offset — so the crosstalk refactor (QHC-1735) changes one file, not every node.
+- **`park_lo_outside_sweep`** is scaffolded with its contract; the exact LO shift is pinned when it is wired into the sweep nodes (task 5c).
