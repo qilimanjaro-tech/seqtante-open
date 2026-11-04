@@ -49,7 +49,7 @@ _TIME_UNITS = {
     "\u03bcs": 1_000,
     "ms": 1_000_000,
 }
-_QUANTITY = re.compile(r"(?P<number>(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*(?P<unit>\S+)", re.ASCII)
+_QUANTITY = re.compile(r"(?P<number>(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*(?P<unit>\S+)", re.ASCII)
 
 
 class TreeParseError(ValueError):
