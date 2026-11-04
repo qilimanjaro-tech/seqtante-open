@@ -12,30 +12,46 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The abstract base every experiment subclasses, and the context a run hands each node (ADR-0004).
+"""The abstract base every experiment subclasses, and the three-phase lifecycle it runs (ADR-0004, ADR-0006).
 
-A :class:`CalibrationNode` is one step of the calibration tree made runnable: the parser builds one
-per step (ADR-0003). Each subclass declares its ``experiment`` name and the analyses it supports, and
-registers itself in :data:`~seqtante_open.controllers.node_registry.NODE_REGISTRY` through
-``__init_subclass__``. The three-phase lifecycle (``execute_node`` / ``analyze`` / ``apply``, ADR-0006)
-lands on this base in a later PR; here the base carries the declarations, the run context and the graph
-contract (``idx``, ``name``, ``run``) that :class:`~seqtante_open.controllers.calibration_graph.CalibrationGraph`
-drives.
+A :class:`CalibrationNode` is one step of the calibration tree made runnable (ADR-0003). Each subclass
+declares its ``experiment`` name and the analyses it supports, registers itself in
+:data:`~seqtante_open.controllers.node_registry.NODE_REGISTRY` through ``__init_subclass__``, and
+implements three phases that :meth:`CalibrationNode.run` calls in order (ADR-0006):
 
-During the port the graph also runs the experiments that are still legacy functions, through a
-legacy-function adapter that satisfies the same :class:`GraphNode` contract without subclassing this
-base; that adapter and the graph build live with the graph task (QHC-1800, ADR-0007).
+- ``execute_node`` -- hardware only; returns the measurement ids per target.
+- ``analyze`` -- read-only; fits the measurement and returns an :class:`AnalysisResult`, raising
+  :class:`~seqtante_open.controllers.verdicts.AnalysisError` when it cannot (the target fails the step).
+- ``apply`` -- the only writer; writes the operating point, a pulse, a section or the crosstalk offset.
+  It runs only for targets whose ``analyze`` succeeded, and a benchmark's ``apply`` writes nothing.
+
+``run`` wraps the phases in the crosstalk session and the restore context manager, places the targets
+at their operating point when ``applies_operating_point``, collects benchmark results for the report,
+and returns the targets that failed so the graph can skip their later steps (ADR-0004).
+
+The two mid-level spines :class:`FixedFluxNode` and :class:`FluxSweepNode` set no ``experiment`` and
+are not registered; they hold the code the two experiment shapes share as the nodes are ported.
 """
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, ClassVar, Protocol, runtime_checkable
+from typing import Any, ClassVar, Generic, Protocol, TypeVar, runtime_checkable
 
 from qililab import Platform
 from qililab.qprogram.calibration import Calibration
 
+from seqtante_open.calibration.io import read_calibration_file, save_calibration, write_calibration_file
+from seqtante_open.calibration.model import CalibrationFile
+from seqtante_open.controllers.crosstalk_session import CrosstalkSession, crosstalk_session
 from seqtante_open.controllers.node_registry import Parallel, register_node
+from seqtante_open.controllers.operating_point import apply_operating_point
+from seqtante_open.controllers.parameter_restore import ParameterRestore, restoring_parameters
+from seqtante_open.controllers.verdicts import AnalysisError, BenchmarkDirection, BenchmarkResult
 from seqtante_open.targets import Target
+
+#: The node-specific fitted payload an ``analyze`` hands its ``apply`` (a frequency, a pi amplitude,
+#: readout levels...). The base passes it through untouched; each node fixes its own concrete type.
+ResultT = TypeVar("ResultT")
 
 
 @dataclass(frozen=True)
@@ -59,6 +75,24 @@ class RunContext:
     calibration_path: str
 
 
+@dataclass(frozen=True)
+class AnalysisResult(Generic[ResultT]):
+    """What a node's ``analyze`` produces for one target (ADR-0006). Read-only; ``apply`` does the writing.
+
+    Args:
+        fitted (ResultT | None): The values ``apply`` writes into the calibration file -- a fitted
+            frequency, a pi amplitude, a reset flux, readout levels. Its shape is the node's own; the
+            base passes it from ``analyze`` to ``apply`` untouched. A pure benchmark leaves it ``None``.
+        benchmark (BenchmarkResult | None): The scored result a benchmark reports to the run and the
+            report (ADR-0002); ``None`` for a recalibration.
+        plots (tuple[str, ...]): Paths to the fit plots the report shows per target (ADR-0002).
+    """
+
+    fitted: ResultT | None = None
+    benchmark: BenchmarkResult | None = None
+    plots: tuple[str, ...] = ()
+
+
 @runtime_checkable
 class GraphNode(Protocol):
     """What :class:`CalibrationGraph` needs of a node, whatever implements it (ADR-0007).
@@ -75,12 +109,12 @@ class GraphNode(Protocol):
         ...
 
 
-class CalibrationNode(ABC):
-    """The abstract base every experiment subclasses (ADR-0004).
+class CalibrationNode(ABC, Generic[ResultT]):
+    """The abstract base every experiment subclasses (ADR-0004, ADR-0006).
 
-    A subclass declares its ``experiment`` name and ``analyses`` as class variables, and registers
-    itself in :data:`~seqtante_open.controllers.node_registry.NODE_REGISTRY` automatically. The
-    mid-level spines (``FixedFluxNode``, ``FluxSweepNode``) set no ``experiment`` and are not
+    A subclass declares its ``experiment`` name and ``analyses`` as class variables, registers itself
+    in :data:`~seqtante_open.controllers.node_registry.NODE_REGISTRY` automatically, and implements
+    ``execute_node``, ``analyze`` and ``apply``. The mid-level spines set no ``experiment`` and are not
     registered; only leaf experiments are.
 
     Class variables:
@@ -93,8 +127,9 @@ class CalibrationNode(ABC):
         parallel (Parallel): Whether the experiment may run on several targets at once. Default
             :attr:`~seqtante_open.controllers.node_registry.Parallel.forbidden`.
         benchmark_unit (str | None): The unit of a benchmark's value, or ``None`` for a recalibration.
-        benchmark_direction (str | None): Whether a higher or lower benchmark value is better, or
-            ``None`` for a recalibration. Consumed by the verdict logic in a later PR.
+        benchmark_direction (BenchmarkDirection | None): Which way is better for a benchmark's value,
+            or ``None`` for a recalibration. A node with a direction is a benchmark: it writes nothing
+            and reports a verdict (ADR-0002).
     """
 
     experiment: ClassVar[str | None] = None
@@ -102,7 +137,7 @@ class CalibrationNode(ABC):
     applies_operating_point: ClassVar[bool] = True
     parallel: ClassVar[Parallel] = Parallel.forbidden
     benchmark_unit: ClassVar[str | None] = None
-    benchmark_direction: ClassVar[str | None] = None
+    benchmark_direction: ClassVar[BenchmarkDirection | None] = None
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -137,16 +172,142 @@ class CalibrationNode(ABC):
         self.targets = targets
         self.parameters = parameters
         self.context = context
+        self.benchmark_results: tuple[BenchmarkResult, ...] = ()
+        self._file: CalibrationFile | None = None
+        self._restore: ParameterRestore | None = None
+        self._crosstalk: CrosstalkSession | None = None
 
-    @abstractmethod
+    @property
+    def is_benchmark(self) -> bool:
+        """Whether this node is a benchmark: it writes nothing and reports a verdict (ADR-0002)."""
+        return self.benchmark_direction is not None
+
+    @property
+    def calibration_file(self) -> CalibrationFile:
+        """The run's calibration-file content, parsed from the shared ``Calibration`` once and cached."""
+        if self._file is None:
+            self._file = read_calibration_file(self.context.calibration)
+        return self._file
+
+    @property
+    def restore(self) -> ParameterRestore:
+        """The restore handle a phase sets platform parameters through; valid only during ``run``."""
+        if self._restore is None:
+            raise RuntimeError("the restore handle is only available while the node is running")
+        return self._restore
+
+    @property
+    def crosstalk(self) -> CrosstalkSession:
+        """The run's crosstalk session a recalibration's ``apply`` writes offsets through; only during ``run``."""
+        if self._crosstalk is None:
+            raise RuntimeError("the crosstalk session is only available while the node is running")
+        return self._crosstalk
+
     def run(self, dead_targets: dict[str, str]) -> list[str]:
-        """Run the three phases for every live target (ADR-0006); lands in a later PR.
+        """Run the three phases for every live target and return the ones that failed (ADR-0006).
+
+        Targets already stopped by an earlier node are skipped. The crosstalk session and the restore
+        context manager wrap the whole node, so flux and bias are zeroed and every ``set_parameter`` is
+        undone even when a phase raises. Benchmark results are collected on :attr:`benchmark_results`.
 
         Args:
             dead_targets (dict[str, str]): Targets already stopped by an earlier node, mapped to the
                 node that stopped them.
 
         Returns:
-            list[str]: The targets whose calibration failed or was skipped in this node.
+            list[str]: The targets whose ``analyze`` raised an analysis error in this node.
         """
-        raise NotImplementedError("the three-phase run lands with the lifecycle PR (task 5c)")
+        live = [target for target in self.targets if str(target) not in dead_targets]
+        if not live:
+            return []
+
+        failed: list[str] = []
+        benchmarks: list[BenchmarkResult] = []
+        platform = self.context.platform
+        with crosstalk_session(platform, self.context.calibration) as crosstalk, restoring_parameters(platform) as restore:
+            self._restore, self._crosstalk = restore, crosstalk
+            try:
+                if self.applies_operating_point:
+                    self._place_operating_points(live)
+                measurements = self.execute_node(live)
+                applied = False
+                for target in live:
+                    try:
+                        result = self.analyze(target, measurements[target])
+                    except AnalysisError:
+                        failed.append(str(target))
+                        continue
+                    self.apply(target, result)
+                    applied = True
+                    if result.benchmark is not None:
+                        benchmarks.append(result.benchmark)
+                if applied and not self.is_benchmark:
+                    self._save_calibration()
+            finally:
+                self._restore, self._crosstalk, self._file = None, None, None
+
+        self.benchmark_results = tuple(benchmarks)
+        return failed
+
+    def _place_operating_points(self, targets: list[Target]) -> None:
+        experiment = self.experiment
+        if experiment is None:  # pragma: no cover - a registered leaf always has an experiment
+            raise RuntimeError(f"{type(self).__name__} applies an operating point but declares no experiment")
+        for target in targets:
+            apply_operating_point(self.calibration_file, experiment, target, self.restore)
+
+    def _save_calibration(self) -> None:
+        write_calibration_file(self.context.calibration, self.calibration_file)
+        save_calibration(self.context.calibration, self.context.calibration_path)
+
+    @abstractmethod
+    def execute_node(self, targets: list[Target]) -> dict[Target, list[int]]:
+        """Measure every target and return its measurement ids; hardware only, writes nothing (ADR-0006).
+
+        Runs at the operating point ``run`` has placed (unless the node opts out and places it here).
+        A node that re-measures in a loop, like the reset-point search, returns the id of every
+        measurement so the report shows each one. Temporary platform settings go through
+        :attr:`restore`, so ``run`` undoes them.
+        """
+
+    @abstractmethod
+    def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[ResultT]:
+        """Fit ``target``'s measurement and return its result; read-only (ADR-0006).
+
+        Raises:
+            AnalysisError: when the fit does not converge or its quality is below the tree's threshold.
+                The target then fails the step; a ``Failed`` benchmark verdict does not (ADR-0002, D17).
+        """
+
+    @abstractmethod
+    def apply(self, target: Target, result: AnalysisResult[ResultT]) -> None:
+        """Write ``target``'s result into the calibration file or the crosstalk offset (ADR-0006).
+
+        The only writer. Runs only for a target whose ``analyze`` succeeded. Writes into
+        :attr:`calibration_file` (``run`` persists it) or through :attr:`crosstalk`; a benchmark's
+        ``apply`` writes nothing.
+        """
+
+
+class FixedFluxNode(CalibrationNode[ResultT]):
+    """A node that sweeps at the step's operating point (ADR-0004).
+
+    The home for the code the fixed-flux experiments share (``two_tone`` at the sweet spot, ``rabi``,
+    ``t1``, ``t2``, ``landau_zener`` and the ``reset_point_search`` loop). It lands as those nodes are
+    ported (tasks 6, 8-12); for now the spine fixes :attr:`applies_operating_point` and leaves the
+    three phases to the experiment.
+    """
+
+    applies_operating_point: ClassVar[bool] = True
+
+
+class FluxSweepNode(CalibrationNode[ResultT]):
+    """A node that sweeps a flux loop across the operating point (ADR-0004).
+
+    The home for the code the per-loop flux-sweep experiments share (``two_tone_vs_flux``, and
+    ``offset_calibration`` after December), including the coupler-to-readout-qubit mapping. It lands
+    with task 7; the node moves flux itself rather than being pinned to one operating point, so the
+    spine opts out of the automatic placement.
+    """
+
+    applies_operating_point: ClassVar[bool] = False

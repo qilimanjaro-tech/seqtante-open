@@ -13,20 +13,42 @@
 # limitations under the License.
 
 from .calibration_graph import CalibrationGraph
-from .calibration_node import CalibrationNode, GraphNode, RunContext
+from .calibration_node import (
+    AnalysisResult,
+    CalibrationNode,
+    FixedFluxNode,
+    FluxSweepNode,
+    GraphNode,
+    RunContext,
+)
 from .calibration_tree_parser import CalibrationParser, Pipeline, Step, TreeParseError
 from .crosstalk_session import CrosstalkSession, crosstalk_session
 from .node_registry import NODE_REGISTRY, ExperimentSpec, Parallel, experiment_spec, known_experiments, register_node
 from .operating_point import apply_operating_point, operating_point_for, park_lo_outside_sweep
 from .parameter_restore import ParameterRestore, restoring_parameters
+from .verdicts import (
+    AnalysisError,
+    BenchmarkDirection,
+    BenchmarkResult,
+    BenchmarkThresholds,
+    Verdict,
+    verdict_for,
+)
 
 __all__ = [
     "NODE_REGISTRY",
+    "AnalysisError",
+    "AnalysisResult",
+    "BenchmarkDirection",
+    "BenchmarkResult",
+    "BenchmarkThresholds",
     "CalibrationGraph",
     "CalibrationNode",
     "CalibrationParser",
     "CrosstalkSession",
     "ExperimentSpec",
+    "FixedFluxNode",
+    "FluxSweepNode",
     "GraphNode",
     "Parallel",
     "ParameterRestore",
@@ -34,6 +56,7 @@ __all__ = [
     "RunContext",
     "Step",
     "TreeParseError",
+    "Verdict",
     "apply_operating_point",
     "crosstalk_session",
     "experiment_spec",
@@ -42,4 +65,5 @@ __all__ = [
     "park_lo_outside_sweep",
     "register_node",
     "restoring_parameters",
+    "verdict_for",
 ]

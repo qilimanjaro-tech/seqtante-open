@@ -3,7 +3,7 @@
 import pytest
 from qililab.qprogram.calibration import Calibration
 
-from seqtante_open.controllers.calibration_node import CalibrationNode, RunContext
+from seqtante_open.controllers.calibration_node import AnalysisResult, CalibrationNode, RunContext
 from seqtante_open.targets import ExperimentTarget
 
 
@@ -40,8 +40,14 @@ def test_concrete_node_stores_its_inputs():
         experiment = "example"
         analyses = ("a",)
 
-        def run(self, dead_targets):
-            return []
+        def execute_node(self, targets):
+            return {target: [0] for target in targets}
+
+        def analyze(self, target, measurements):
+            return AnalysisResult()
+
+        def apply(self, target, result):
+            pass
 
     q1 = ExperimentTarget.from_str("q1")
     parameters = {q1: {"amplitude": 0.5}}
@@ -53,4 +59,4 @@ def test_concrete_node_stores_its_inputs():
     assert node.targets == [q1]
     assert node.parameters is parameters
     assert node.context is context
-    assert node.run({}) == []
+    assert node.benchmark_results == ()
