@@ -63,3 +63,19 @@ def test_concrete_node_stores_its_inputs():
     assert node.parameters is parameters
     assert node.context is context
     assert node.benchmark_results == ()
+
+
+def test_place_operating_points_requires_an_experiment():
+    class Spine(CalibrationNode):
+        def execute_node(self, targets):
+            return {target: [0] for target in targets}
+
+        def analyze(self, target, measurements):
+            return AnalysisResult()
+
+        def apply(self, target, result):
+            pass
+
+    node = Spine(name="spine", idx=0, targets=[], parameters={}, context=_context())
+    with pytest.raises(RuntimeError, match="declares no experiment"):
+        node._place_operating_points([ExperimentTarget.from_str("q1")])
