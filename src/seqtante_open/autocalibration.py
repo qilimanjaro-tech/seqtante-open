@@ -30,5 +30,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Automatic calibration runner")
     parser.add_argument("--platform_path", required=True, help="Path to the runcard or platform configuration")
     parser.add_argument("--config_path", required=True, help="Path to the YAML configuration file")
+    parser.add_argument(
+        "--calibration_path",
+        required=False,
+        default=None,
+        help="Path to the calibration file the run reads and writes. The tree may set it instead.",
+    )
     args = parser.parse_args()
+    # TODO(QHC-1800): thread args.calibration_path into CalibrationRun to build the run context and
+    # populate the graph. Task 5 (QHC-1802) only adds the CLI surface and the RunContext type.
     CalibrationRun(args.platform_path, args.config_path)

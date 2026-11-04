@@ -12,47 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""What the calibration-tree parser needs to know about each experiment.
+"""Backwards-compatible re-exports of the experiment declarations.
 
-Stand-in until node classes declare it themselves through ``NODE_REGISTRY`` (ADR-0004).
+The declarations moved into :mod:`seqtante_open.controllers.node_registry` (ADR-0004), where node
+classes register themselves. This module keeps the names the parser imported before the move.
 """
 
-from dataclasses import dataclass
+from seqtante_open.controllers.node_registry import (
+    ExperimentSpec,
+    experiment_spec,
+    known_experiments,
+)
 
-
-@dataclass(frozen=True)
-class ExperimentSpec:
-    """Declarations of one experiment.
-
-    Args:
-        analyses (tuple[str, ...]): Analyses the experiment supports. The first one is the default.
-    """
-
-    analyses: tuple[str, ...]
-
-    @property
-    def default_analysis(self) -> str:
-        return self.analyses[0]
-
-
-_EXPERIMENT_SPECS: dict[str, ExperimentSpec] = {
-    "offset_calibration": ExperimentSpec(analyses=("flux_offset",)),
-    "single_tone": ExperimentSpec(analyses=("lorentzian_peak",)),
-    "two_tone": ExperimentSpec(analyses=("lorentzian_peak",)),
-    "two_tone_vs_flux": ExperimentSpec(analyses=("parabola_vertex",)),
-    "reset_point_search": ExperimentSpec(analyses=("lorentzian_peak",)),
-    "rabi": ExperimentSpec(analyses=("pi_amplitude", "readout_levels")),
-    "t1": ExperimentSpec(analyses=("exponential_decay",)),
-    "t2": ExperimentSpec(analyses=("decaying_oscillation",)),
-    "landau_zener": ExperimentSpec(analyses=("theory_agreement",)),
-}
-
-
-def experiment_spec(experiment: str) -> ExperimentSpec | None:
-    """Returns the declarations of ``experiment``, or ``None`` if it does not exist."""
-    return _EXPERIMENT_SPECS.get(experiment)
-
-
-def known_experiments() -> set[str]:
-    """Returns the names of every experiment."""
-    return set(_EXPERIMENT_SPECS)
+__all__ = ["ExperimentSpec", "experiment_spec", "known_experiments"]
