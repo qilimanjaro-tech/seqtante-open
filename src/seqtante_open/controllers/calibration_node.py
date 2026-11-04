@@ -223,7 +223,10 @@ class CalibrationNode(ABC, Generic[ResultT]):
         failed: list[str] = []
         benchmarks: list[BenchmarkResult] = []
         platform = self.context.platform
-        with crosstalk_session(platform, self.context.calibration) as crosstalk, restoring_parameters(platform) as restore:
+        with (
+            crosstalk_session(platform, self.context.calibration) as crosstalk,
+            restoring_parameters(platform) as restore,
+        ):
             self._restore, self._crosstalk = restore, crosstalk
             try:
                 if self.applies_operating_point:
