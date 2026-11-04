@@ -24,12 +24,13 @@ happens for every node instead of a hand-written ``finally`` per experiment.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from qililab import Platform
+    from qililab.typings import ParameterValue
     from qililab.typings.enums import Parameter
 
 
@@ -44,9 +45,9 @@ class ParameterRestore:
 
     def __init__(self, platform: Platform) -> None:
         self._platform = platform
-        self._prior: dict[tuple[str, Parameter], Any] = {}
+        self._prior: dict[tuple[str, Parameter], ParameterValue] = {}
 
-    def set(self, alias: str, parameter: Parameter, value: Any) -> None:
+    def set(self, alias: str, parameter: Parameter, value: ParameterValue) -> None:
         """Set ``parameter`` on bus ``alias`` to ``value``, recording its prior value on first touch."""
         key = (alias, parameter)
         if key not in self._prior:
