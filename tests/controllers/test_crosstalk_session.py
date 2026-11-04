@@ -53,16 +53,22 @@ def test_installs_the_calibrations_matrix():
 
 def test_zeros_bias_even_when_body_raises():
     platform = FakePlatform()
-    with pytest.raises(RuntimeError):
-        with crosstalk_session(platform, _calibration()):
+    calibration = _calibration()
+
+    def run_and_raise():
+        with crosstalk_session(platform, calibration):
             raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError):
+        run_and_raise()
     assert ("set_bias_to_zero", None) in platform.calls
 
 
 def test_requires_a_crosstalk_matrix():
     platform = FakePlatform()
+    empty = Calibration()
     with pytest.raises(ValueError, match="CrosstalkMatrix"):
-        with crosstalk_session(platform, Calibration()):
+        with crosstalk_session(platform, empty):
             pass
     assert platform.calls == []
 

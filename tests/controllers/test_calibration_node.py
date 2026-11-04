@@ -31,8 +31,9 @@ def test_run_context_holds_its_fields():
 
 
 def test_base_is_abstract():
+    context = _context()
     with pytest.raises(TypeError):
-        CalibrationNode(name="x", idx=0, targets=[], parameters={}, context=_context())  # type: ignore[abstract]
+        CalibrationNode(name="x", idx=0, targets=[], parameters={}, context=context)  # type: ignore[abstract]
 
 
 def test_concrete_node_stores_its_inputs():

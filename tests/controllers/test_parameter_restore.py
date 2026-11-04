@@ -31,10 +31,14 @@ def test_restores_prior_value_on_exit():
 
 def test_restores_even_when_body_raises():
     platform = FakePlatform({("flux_z_q1", Parameter.FLUX): 0.1})
-    with pytest.raises(RuntimeError):
+
+    def run_and_raise():
         with restoring_parameters(platform) as restore:
             restore.set("flux_z_q1", Parameter.FLUX, 0.5)
             raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError):
+        run_and_raise()
     assert platform.values["flux_z_q1", Parameter.FLUX] == pytest.approx(0.1)
 
 
