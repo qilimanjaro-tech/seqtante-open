@@ -17,7 +17,7 @@
 import copy
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 from loguru import logger
 from qililab import Platform
@@ -59,8 +59,7 @@ class Step:
     parameters: dict[Target, dict[str, Any]]
 
 
-@dataclass(frozen=True)
-class _Override:
+class _Override(NamedTuple):
     """One entry of a step's ``overrides``.
 
     Args:
