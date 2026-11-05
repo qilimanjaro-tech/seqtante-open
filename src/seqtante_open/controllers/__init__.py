@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .calibration_graph import CalibrationGraph
+from .calibration_graph import CalibrationGraph, GraphBuildError
 from .calibration_node import CalibrationNode
 from .calibration_tree_parser import CalibrationParser, Pipeline, Step, Thresholds, TreeParseError
 
@@ -20,6 +20,7 @@ __all__ = [
     "CalibrationGraph",
     "CalibrationNode",
     "CalibrationParser",
+    "GraphBuildError",
     "Pipeline",
     "Step",
     "Thresholds",

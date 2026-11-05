@@ -15,6 +15,7 @@
 """Automatic-calibration Node module."""
 
 import os
+from collections.abc import Sequence
 from copy import copy
 from typing import Any
 
@@ -22,6 +23,10 @@ from loguru import logger
 from qililab import Platform
 
 from seqtante_open.experiments.experiment_functions import ExperimentFunction, experiment_functions_dict
+from seqtante_open.targets import ExperimentTarget
+
+#: A target as its name ("q1", "c1_2"), either a plain ``str`` or an ``ExperimentTarget`` (ADR-0001).
+TargetLike = str | ExperimentTarget
 
 
 class CalibrationNode:
@@ -48,8 +53,8 @@ class CalibrationNode:
         experiment: str,
         name: str,
         idx: int,
-        targets: list[str],
-        simultaneous: bool | list[list[str]] = False,
+        targets: Sequence[TargetLike],
+        simultaneous: bool | list[list[TargetLike]] = False,
     ) -> None:
         self.platform = platform
         self.platform_path = platform_path
@@ -57,11 +62,11 @@ class CalibrationNode:
         self.idx = idx
         self.targets = list(targets)
         self.experiment = experiment
-        self.parameters: dict[str, Any] = copy(parameters)
+        self.parameters: dict[Any, Any] = copy(parameters)
 
         if isinstance(simultaneous, list):
             if all(isinstance(sim, list) for sim in simultaneous):
-                self.simultaneous: list[list[str]] = [list(sim) for sim in simultaneous]
+                self.simultaneous: list[list[TargetLike]] = [list(sim) for sim in simultaneous]
                 unexpected_sim_targets = {st for sim in self.simultaneous for st in sim if st not in self.targets}
                 if unexpected_sim_targets:
                     logger.opt(colors=True).warning(
@@ -81,7 +86,7 @@ class CalibrationNode:
         else:
             self.simultaneous = []
 
-        self._valid_node: dict[str, bool] = dict.fromkeys(self.targets, True)
+        self._valid_node: dict[TargetLike, bool] = dict.fromkeys(self.targets, True)
         self._validate_node()
 
         self.result: dict = {}
@@ -110,22 +115,19 @@ class CalibrationNode:
             )
             self._valid_node = dict.fromkeys(self.targets, False)
 
-        # Every experiment takes str targets ("q1", "c1_2").
-        target_clss = str
-
+        # A target is its name ("q1", "c1_2"), as a str or an ExperimentTarget (ADR-0001).
         for target in self.targets:
-            if not isinstance(target, target_clss):
+            if not isinstance(target, (str, ExperimentTarget)):
                 logger.opt(colors=True).warning(
                     "Invalid target type for target <r>{target}</r> detected for experiment <i><fg #8838ff>{experiment}</></i>. "
-                    "All targets should be <blue>{clss}</>. (Target Skipped)",
+                    "A target must be a qubit or coupler name, as a str or ExperimentTarget. (Target Skipped)",
                     target=target,
                     experiment=self.experiment,
-                    clss=target_clss.__name__,
                 )
                 self._valid_node[target] = False
 
     # ----------------------------- Execution -----------------------------
-    def run(self, dead_targets: dict[str, str]) -> list[str]:
+    def run(self, dead_targets: dict[str, str]) -> list[TargetLike]:
         """Using the context (targets that have stopped execution, invalid targets and the simultaneous parameter),
         determines what targets are executed, in wat order an how parallelized and passes the information to run targets for execution.
 
@@ -157,7 +159,7 @@ class CalibrationNode:
 
         return target_error
 
-    def run_targets(self, targets: list[str]) -> list[str]:
+    def run_targets(self, targets: list[TargetLike]) -> list[TargetLike]:
         """Executes the experiment function on the targets and stops the calibration of the targets if an exception is triggered.
 
         Args:
@@ -198,6 +200,6 @@ class CalibrationNode:
         return target_error
 
     @staticmethod
-    def _is_calibration_dead(target: str, dead_targets: dict[str, str]) -> bool:
+    def _is_calibration_dead(target: TargetLike, dead_targets: dict[str, str]) -> bool:
         """Looks if the calibration of the target has been interrupted"""
         return target in dead_targets
