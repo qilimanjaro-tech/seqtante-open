@@ -1,0 +1,102 @@
+sample: ConscienceWF02-3.7
+cooldown: CD79-Mimas
+storage:
+  root_dir: data
+  db_manager:
+    path: ~/database.ini
+    database_name: calibration
+    database_schema: autocal
+targets: [q1, q14]
+
+defaults:
+  two_tone_vs_flux:
+    freq_sweep: [-50e6, 50e6, 101]
+    drive_amplitude: 0.1
+    drive_duration: 2000
+    readout_amplitude: 0.2
+    readout_duration: 2000
+    relax_duration: 20000
+    averages: 1000
+  two_tone:
+    freq_sweep: [-5e6, 5e6, 101]
+    drive_amplitude: 0.05
+    drive_duration: 2000
+    readout_amplitude: 0.2
+    readout_duration: 2000
+    relax_duration: 20000
+    averages: 10000
+  rabi:
+    amplitude_sweep: [0.02, 0.8, 40]
+  t1:
+    wait_sweep: [0, 200000, 51]
+    drive_amplitude: 0.1
+    drive_duration: 2000
+    readout_amplitude: 0.2
+    readout_duration: 2000
+    relax_duration: 500000
+    averages: 2000
+
+pipelines:
+  sweet_spot:
+    steps:
+      sweet_spot_flux:
+        experiment: two_tone_vs_flux
+        analysis: parabola_vertex
+        operating_point: sweet_spot
+        loop: z
+        flux_sweep: [-0.02, 0.02, 11]
+      two_tone_sweet_spot:
+        experiment: two_tone
+        analysis: lorentzian_peak
+        operating_point: sweet_spot
+        overrides:
+          - targets: [q14]
+            freq_sweep: [-10e6, 10e6, 201]
+
+  t1:
+    after: two_tone_sweet_spot
+    steps:
+      t1_sweet_spot:
+        experiment: t1
+        operating_point: sweet_spot
+        thresholds: {passed: 50 us, warning: 20 us}
+        overrides:
+          - targets: [q14]
+            thresholds: {passed: 30 us, warning: 10 us}
+
+  t2:
+    after: [two_tone_sweet_spot]
+    enabled: false
+    steps:
+      rabi_sweet_spot:
+        experiment: rabi
+        analysis: pi_amplitude
+        operating_point: sweet_spot
+        pulses: {drive: pi-sweet_spot}
+      t2_sweet_spot:
+        experiment: t2
+        operating_point: sweet_spot
+        pulses: {drive: pi-sweet_spot}
+        thresholds: {passed: 30 us, warning: 10 us}
+
+  lz:
+    after: sweet_spot_flux
+    targets: [q14]
+    steps:
+      reset_flux:
+        experiment: reset_point_search
+        operating_point: reset
+        target_frequency: [2.79e9, 2.81e9]
+      rabi_reset:
+        experiment: rabi
+        analysis: readout_levels
+        operating_point: reset
+        pulses: {drive: pi-reset, readout: readout-reset}
+        overrides:
+          - targets: [q14]
+            amplitude_sweep: [0.02, 0.5, 25]
+      lz:
+        experiment: landau_zener
+        operating_point: reset
+        pulses: {readout: readout-reset}
+        thresholds: {passed: 1.5, warning: 3}
