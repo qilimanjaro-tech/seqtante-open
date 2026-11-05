@@ -35,6 +35,8 @@ from seqtante_open.targets import CouplerTarget, ExperimentTarget, QubitTarget, 
 
 _STEP_KEYS = frozenset({"experiment", "analysis", "targets", "overrides"})
 _RESERVED_PARAMETERS = frozenset({"data_folder"})
+_PIPELINE_KEYS = frozenset({"targets", "enabled", "steps", "after"})
+_PIPELINE_ONLY = frozenset({"enabled", "after", "steps"})
 # Each shorthand: the analog-settings field it expands from, and how one item of that field becomes a target.
 _EXPANSIONS: dict[str, tuple[str, Callable[[Any], Target]]] = {
     "all_q": ("qubits", QubitTarget),
@@ -191,6 +193,11 @@ class CalibrationParser:
         path = f"pipelines.{name}"
         if not isinstance(raw, Mapping):
             raise TreeParseError(f"{path}: must be a mapping.")
+        unknown = sorted(set(raw) - _PIPELINE_KEYS)
+        if unknown:
+            raise TreeParseError(
+                f"{path}: unknown pipeline key/s {unknown}. A pipeline takes {sorted(_PIPELINE_KEYS)}."
+            )
         targets = self._narrowed_targets(raw, parent_targets, path)
 
         enabled = raw.get("enabled", True)
@@ -360,6 +367,7 @@ def _after(raw: object, path: str) -> list[str]:
 def _check_settable(values: Mapping[str, Any], path: str) -> None:
     """Rejects keys that only the step itself can set, then parameters the tree cannot set at all."""
     for keys, reason in (
+        (_PIPELINE_ONLY, "can only be set on the pipeline, not on a step"),
         (_STEP_KEYS, "can only be set on the step itself"),
         (_RESERVED_PARAMETERS, "cannot be set from the calibration tree"),
     ):

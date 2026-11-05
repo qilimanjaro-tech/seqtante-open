@@ -127,6 +127,22 @@ class CalibrationData:
             elif self._file_type in ["yaml", "yml"]:
                 yaml.safe_dump(self._data, f, sort_keys=False)
 
+    def load_file(self):
+        """Load an existing calibration file into memory, so prior values can satisfy dependencies."""
+        if not self._path or not self._file_type or not self._path.exists():
+            return
+        with self._path.open("r", encoding="utf-8") as f:
+            loaded = json.load(f) if self._file_type == "json" else yaml.safe_load(f)
+        if isinstance(loaded, dict):
+            self._data = loaded
+
+    def calibrated_targets(self) -> set[str]:
+        """Names of the targets that already have a value in the calibration file."""
+        return set(self._data)
+
+    def __contains__(self, key) -> bool:
+        return key in self._data
+
     def _store_parameter(self, parameter: CalibrationParameter, target: list[int] | int, value: float):
         target_str = str(target)
         if target_str not in self._data:
@@ -223,9 +239,13 @@ class Outputs:
 
     def _create_calibration_data(self) -> CalibrationData:
         data_conf = self.storage_conf.get("calibration_data")
-        if not data_conf:
-            return CalibrationData(base_path=self.storage_path)
-        return CalibrationData(base_path=self.storage_path, **data_conf)
+        if data_conf:
+            data = CalibrationData(base_path=self.storage_path, **data_conf)
+        else:
+            data = CalibrationData(base_path=self.storage_path)
+        # Load any existing calibration file so prior values can satisfy unselected dependencies.
+        data.load_file()
+        return data
 
     def store_parameter(self, parameter: CalibrationParameter, target: list[int] | int, value: float):
         """Stores a parameter for later serialization if configured"""
