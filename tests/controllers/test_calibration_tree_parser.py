@@ -780,6 +780,10 @@ class TestThresholds:
             passed=float(passed), warning=3.0, unit=None, direction="lower"
         )
 
+    def test_zero_is_accepted(self, platform):
+        step = only_step(single_step_tree(t1_step(thresholds=t1_thresholds(warning="0 us"))), platform)
+        assert step.parameters["q1"]["thresholds"] == Thresholds(50_000.0, 0.0, "ns", "higher")
+
     def test_a_benchmark_without_thresholds_has_none(self, platform):
         assert only_step(single_step_tree(t1_step()), platform).parameters == {"q1": {}, "q2": {}}
 
@@ -904,6 +908,36 @@ class TestThresholds:
                 single_step_tree(lz_step(thresholds={"passed": "1 us", "warning": 3})),
                 r"^pipelines\.p\.steps\.s\.thresholds\.passed: '1 us': the benchmark is dimensionless",
                 id="dimensionless_with_unit",
+            ),
+            pytest.param(
+                single_step_tree(lz_step(thresholds={"passed": -1, "warning": 3})),
+                r"^pipelines\.p\.steps\.s\.thresholds\.passed: -1 is negative",
+                id="dimensionless_negative",
+            ),
+            pytest.param(
+                single_step_tree(lz_step(thresholds={"passed": float("nan"), "warning": 3})),
+                r"^pipelines\.p\.steps\.s\.thresholds\.passed: nan is not a finite number",
+                id="nan",
+            ),
+            pytest.param(
+                single_step_tree(lz_step(thresholds={"passed": 1.5, "warning": float("inf")})),
+                r"^pipelines\.p\.steps\.s\.thresholds\.warning: inf is not a finite number",
+                id="inf",
+            ),
+            pytest.param(
+                single_step_tree(lz_step(thresholds={"passed": float("-inf"), "warning": 3})),
+                r"^pipelines\.p\.steps\.s\.thresholds\.passed: -inf is not a finite number",
+                id="minus_inf",
+            ),
+            pytest.param(
+                single_step_tree(lz_step(thresholds={"passed": 1.5, "warning": 10**400})),
+                r"^pipelines\.p\.steps\.s\.thresholds\.warning: 1\d+ is not a finite number",
+                id="int_too_large_for_a_float",
+            ),
+            pytest.param(
+                single_step_tree(t1_step(thresholds=t1_thresholds(passed="1e999 us"))),
+                r"^pipelines\.p\.steps\.s\.thresholds\.passed: '1e999 us' is not a finite number",
+                id="time_overflow",
             ),
             pytest.param(
                 single_step_tree(t1_step(thresholds=t1_thresholds("50 us", "50000 ns"))),

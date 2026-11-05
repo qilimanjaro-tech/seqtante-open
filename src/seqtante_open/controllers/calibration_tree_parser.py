@@ -15,6 +15,7 @@
 """Parses a calibration tree (ADR-0003) into pipelines of steps with parameters resolved per target (ADR-0005)."""
 
 import copy
+import math
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -49,6 +50,7 @@ _TIME_UNITS = {
     "\u03bcs": 1_000,
     "ms": 1_000_000,
 }
+# re.ASCII keeps \s and \d ASCII-only, so U+00B5 and U+03BC can start the unit.
 _QUANTITY = re.compile(r"(?P<number>(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*(?P<unit>[^\s\d.+-]\S*)", re.ASCII)
 
 
@@ -401,13 +403,22 @@ def _threshold_value(raw: object, benchmark: BenchmarkSpec, path: str) -> float:
     if benchmark.unit is None:
         if not isinstance(raw, int | float):
             raise TreeParseError(f"{path}: {raw!r}: the benchmark is dimensionless, so it takes a plain number.")
-        return float(raw)
-    if isinstance(raw, int | float):
+        try:
+            value = float(raw)
+        except OverflowError:
+            value = math.inf
+    elif isinstance(raw, int | float):
         raise TreeParseError(f"{path}: {raw!r} needs a unit, such as '50 us'.")
-    match = _QUANTITY.fullmatch(raw.strip()) if isinstance(raw, str) else None
-    if match is None:
-        raise TreeParseError(f"{path}: {raw!r} must be a number with a unit, such as '50 us'.")
-    unit = match["unit"]
-    if unit not in _TIME_UNITS:
-        raise TreeParseError(f"{path}: unknown unit '{unit}'. Time thresholds take ns, us or ms.")
-    return float(match["number"]) * _TIME_UNITS[unit] / _TIME_UNITS[benchmark.unit]
+    else:
+        match = _QUANTITY.fullmatch(raw.strip()) if isinstance(raw, str) else None
+        if match is None:
+            raise TreeParseError(f"{path}: {raw!r} must be a number with a unit, such as '50 us'.")
+        unit = match["unit"]
+        if unit not in _TIME_UNITS:
+            raise TreeParseError(f"{path}: unknown unit '{unit}'. Time thresholds take ns, us or ms.")
+        value = float(match["number"]) * _TIME_UNITS[unit] / _TIME_UNITS[benchmark.unit]
+    if not math.isfinite(value):
+        raise TreeParseError(f"{path}: {raw!r} is not a finite number.")
+    if value < 0:
+        raise TreeParseError(f"{path}: {raw!r} is negative.")
+    return value
