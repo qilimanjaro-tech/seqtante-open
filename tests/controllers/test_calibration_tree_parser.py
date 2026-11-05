@@ -961,3 +961,28 @@ class TestThresholds:
     def test_invalid(self, platform, tree, match):
         with pytest.raises(TreeParseError, match=match):
             parse(tree, platform)
+
+
+# --- Pipeline- and step-level key validation (QHC-1800) ---
+
+
+def test_unknown_pipeline_key_is_rejected(platform):
+    tree = make_tree(pipelines={"p": {"enable": False, "steps": {"s": make_step()}}})
+    with pytest.raises(TreeParseError, match="unknown pipeline key"):
+        parse(tree, platform)
+
+
+def test_pipeline_level_defaults_are_rejected(platform):
+    tree = make_tree(pipelines={"p": {"defaults": {}, "steps": {"s": make_step()}}})
+    with pytest.raises(TreeParseError, match="unknown pipeline key"):
+        parse(tree, platform)
+
+
+def test_enabled_on_a_step_is_rejected(platform):
+    with pytest.raises(TreeParseError, match="can only be set on the pipeline"):
+        parse(single_step_tree(make_step(enabled=False)), platform)
+
+
+def test_after_on_a_step_is_rejected(platform):
+    with pytest.raises(TreeParseError, match="can only be set on the pipeline"):
+        parse(single_step_tree(make_step(after="x")), platform)

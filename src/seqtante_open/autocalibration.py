@@ -30,5 +30,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Automatic calibration runner")
     parser.add_argument("--platform_path", required=True, help="Path to the runcard or platform configuration")
     parser.add_argument("--config_path", required=True, help="Path to the YAML configuration file")
+    parser.add_argument(
+        "--pipelines",
+        nargs="*",
+        default=None,
+        help="Names of the pipelines to run. Omit to run every enabled pipeline.",
+    )
     args = parser.parse_args()
-    CalibrationRun(args.platform_path, args.config_path)
+    CalibrationRun(args.platform_path, args.config_path, pipelines=args.pipelines)

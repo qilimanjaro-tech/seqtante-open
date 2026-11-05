@@ -54,9 +54,10 @@ class CalibrationRun:
     Args:
         platform_path (str): Path to the runcard the platform is built from.
         config_path (str): Path to the YAML calibration tree.
+        pipelines (list[str] | None): Names of the pipelines to run; None runs every enabled one.
     """
 
-    def __init__(self, platform_path: str, config_path: str):
+    def __init__(self, platform_path: str, config_path: str, pipelines: list[str] | None = None):
         self.platform_path: str = platform_path
         self.config_path: str = config_path
 
@@ -84,7 +85,11 @@ class CalibrationRun:
         output_controller.setup_logger()
         logger.opt(colors=True).info("Welcome to Seqtante-Open")
 
+        # --- Build the graph from the selected pipelines, before touching the hardware ---
+        # Unknown/disabled selections and `after` cycles are raised here, before the platform connects.
         self.graph = CalibrationGraph(self.platform, self.platform_path)
+        self.graph.build(self.pipelines, selected_names=pipelines, data_root=output_controller.storage_path)
+        calibrated_targets = output_controller.calibration_data.calibrated_targets()
 
         # --- Connect to platform ---
         self.platform.connect()
@@ -94,7 +99,7 @@ class CalibrationRun:
             "Executing Calibration. Outputs in folder {path}", path=output_controller.storage_path
         )
 
-        self.graph.run_calibration()
+        self.graph.run_calibration(calibrated_targets)
         self._end_calibration()
 
     def _display_time(self):
