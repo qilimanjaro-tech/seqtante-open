@@ -18,6 +18,22 @@ Stand-in until node classes declare it themselves through ``NODE_REGISTRY`` (ADR
 """
 
 from dataclasses import dataclass
+from typing import Literal
+
+Direction = Literal["higher", "lower"]
+
+
+@dataclass(frozen=True)
+class BenchmarkSpec:
+    """How a benchmark reports its value.
+
+    Args:
+        unit (str | None): Unit of the value, ``None`` when it is dimensionless.
+        direction (Direction): Whether a higher or a lower value is better.
+    """
+
+    unit: str | None
+    direction: Direction
 
 
 @dataclass(frozen=True)
@@ -26,9 +42,11 @@ class ExperimentSpec:
 
     Args:
         analyses (tuple[str, ...]): Analyses the experiment supports. The first one is the default.
+        benchmark (BenchmarkSpec | None): How the experiment reports its value, when it is a benchmark.
     """
 
     analyses: tuple[str, ...]
+    benchmark: BenchmarkSpec | None = None
 
     @property
     def default_analysis(self) -> str:
@@ -42,9 +60,11 @@ _EXPERIMENT_SPECS: dict[str, ExperimentSpec] = {
     "two_tone_vs_flux": ExperimentSpec(analyses=("parabola_vertex",)),
     "reset_point_search": ExperimentSpec(analyses=("lorentzian_peak",)),
     "rabi": ExperimentSpec(analyses=("pi_amplitude", "readout_levels")),
-    "t1": ExperimentSpec(analyses=("exponential_decay",)),
-    "t2": ExperimentSpec(analyses=("decaying_oscillation",)),
-    "landau_zener": ExperimentSpec(analyses=("theory_agreement",)),
+    "t1": ExperimentSpec(analyses=("exponential_decay",), benchmark=BenchmarkSpec(unit="ns", direction="higher")),
+    "t2": ExperimentSpec(analyses=("decaying_oscillation",), benchmark=BenchmarkSpec(unit="ns", direction="higher")),
+    "landau_zener": ExperimentSpec(
+        analyses=("theory_agreement",), benchmark=BenchmarkSpec(unit=None, direction="lower")
+    ),
 }
 
 

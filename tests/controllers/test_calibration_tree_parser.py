@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 from ruamel.yaml import YAML
 
-from seqtante_open.controllers import CalibrationParser, Pipeline, Step, TreeParseError
+from seqtante_open.controllers import CalibrationParser, Pipeline, Step, Thresholds, TreeParseError
 from seqtante_open.targets import CouplerTarget, QubitTarget
 
 
@@ -201,7 +201,12 @@ class TestAdrExample:
     def test_pulses_and_thresholds_are_per_target_parameters(self, pipelines):
         steps = by_name(pipelines)
         assert steps["rabi_sweet_spot"].parameters["q1"]["pulses"] == {"drive": "pi-sweet_spot"}
-        assert steps["t1_sweet_spot"].parameters["q2"]["thresholds"] == {"passed": "50 us", "warning": "20 us"}
+        assert steps["t1_sweet_spot"].parameters["q2"]["thresholds"] == Thresholds(
+            passed=50_000.0, warning=20_000.0, unit="ns", direction="higher"
+        )
+
+    def test_a_benchmark_without_thresholds_has_none(self, pipelines):
+        assert "thresholds" not in by_name(pipelines)["t2_sweet_spot"].parameters["q1"]
 
 
 # ------------------------- Pipelines -------------------------
@@ -725,5 +730,234 @@ class TestDataFolder:
         ],
     )
     def test_cannot_be_set(self, platform, tree, match):
+        with pytest.raises(TreeParseError, match=match):
+            parse(tree, platform)
+
+
+# ------------------------- Benchmark thresholds -------------------------
+
+
+def t1_step(**keys: Any) -> dict[str, Any]:
+    """A ``t1`` step; ``keys`` add to or replace its keys."""
+    return make_step(experiment="t1", **keys)
+
+
+def lz_step(**keys: Any) -> dict[str, Any]:
+    """A ``landau_zener`` step, a dimensionless benchmark where lower is better; ``keys`` add to or replace its keys."""
+    return make_step(experiment="landau_zener", operating_point="reset", **keys)
+
+
+def t1_thresholds(passed: object = "50 us", warning: object = "20 us") -> dict[str, object]:
+    return {"passed": passed, "warning": warning}
+
+
+class TestThresholds:
+    @pytest.mark.parametrize(
+        "passed",
+        [
+            pytest.param("50 us", id="us"),
+            pytest.param("50us", id="no_space"),
+            pytest.param("  50 us ", id="surrounding_spaces"),
+            pytest.param("50 \u00b5s", id="micro_sign"),
+            pytest.param("50 \u03bcs", id="greek_mu"),
+            pytest.param("5e1 us", id="exponent"),
+            pytest.param("50.0 us", id="decimal"),
+            pytest.param("50000 ns", id="ns"),
+            pytest.param("0.05 ms", id="ms"),
+            pytest.param(".05 ms", id="leading_dot"),
+        ],
+    )
+    def test_time_is_converted_to_the_benchmark_unit(self, platform, passed):
+        step = only_step(single_step_tree(t1_step(thresholds=t1_thresholds(passed=passed))), platform)
+        assert step.parameters["q1"]["thresholds"] == Thresholds(
+            passed=50_000.0, warning=20_000.0, unit="ns", direction="higher"
+        )
+
+    @pytest.mark.parametrize("passed", [1, 1.5])
+    def test_dimensionless_takes_a_plain_number(self, platform, passed):
+        step = only_step(single_step_tree(lz_step(thresholds={"passed": passed, "warning": 3})), platform)
+        assert step.parameters["q1"]["thresholds"] == Thresholds(
+            passed=float(passed), warning=3.0, unit=None, direction="lower"
+        )
+
+    def test_zero_is_accepted(self, platform):
+        step = only_step(single_step_tree(t1_step(thresholds=t1_thresholds(warning="0 us"))), platform)
+        assert step.parameters["q1"]["thresholds"] == Thresholds(50_000.0, 0.0, "ns", "higher")
+
+    def test_a_benchmark_without_thresholds_has_none(self, platform):
+        assert only_step(single_step_tree(t1_step()), platform).parameters == {"q1": {}, "q2": {}}
+
+    def test_resolve_per_target(self, platform):
+        step = t1_step(
+            thresholds=t1_thresholds("40 us", "10 us"),
+            overrides=[{"targets": ["q2"], "thresholds": t1_thresholds("60 us", "30 us")}],
+        )
+        tree = single_step_tree(step, defaults={"t1": {"thresholds": t1_thresholds()}})
+        parameters = only_step(tree, platform).parameters
+        assert parameters["q1"]["thresholds"] == Thresholds(40_000.0, 10_000.0, "ns", "higher")
+        assert parameters["q2"]["thresholds"] == Thresholds(60_000.0, 30_000.0, "ns", "higher")
+
+    def test_from_defaults(self, platform):
+        tree = single_step_tree(t1_step(), defaults={"t1": {"thresholds": t1_thresholds()}})
+        assert only_step(tree, platform).parameters["q2"]["thresholds"] == Thresholds(
+            50_000.0, 20_000.0, "ns", "higher"
+        )
+
+    def test_defaults_of_an_unknown_experiment_are_not_checked(self, platform):
+        tree = make_tree(defaults={"not_yet_an_experiment": {"thresholds": "anything"}})
+        assert only_step(tree, platform).parameters == {"q1": {}, "q2": {}}
+
+    def test_parsing_does_not_change_the_tree(self, platform):
+        tree = single_step_tree(t1_step(thresholds=t1_thresholds()))
+        only_step(tree, platform)
+        assert tree["pipelines"]["p"]["steps"]["s"]["thresholds"] == t1_thresholds()
+
+    def test_yaml_with_micro_sign(self, platform):
+        tree = YAML().load(
+            StringIO(
+                "targets: [q1]\n"
+                "pipelines:\n"
+                "  p:\n"
+                "    steps:\n"
+                "      s: {experiment: t1, operating_point: sweet_spot, thresholds: {passed: 50 \u00b5s, warning: 20 us}}\n"
+            )
+        )
+        assert only_step(tree, platform).parameters["q1"]["thresholds"] == Thresholds(
+            50_000.0, 20_000.0, "ns", "higher"
+        )
+
+    @pytest.mark.parametrize(
+        ("tree", "match"),
+        [
+            pytest.param(
+                single_step_tree(make_step(thresholds=t1_thresholds())),
+                r"^pipelines\.p\.steps\.s\.thresholds: 'two_tone' is not a benchmark",
+                id="not_a_benchmark",
+            ),
+            pytest.param(
+                make_tree(defaults={"two_tone": {"thresholds": t1_thresholds()}}),
+                r"^defaults\.two_tone\.thresholds: 'two_tone' is not a benchmark",
+                id="not_a_benchmark_in_defaults",
+            ),
+            pytest.param(
+                single_step_tree(make_step(overrides=[{"targets": ["q1"], "thresholds": t1_thresholds()}])),
+                r"^pipelines\.p\.steps\.s\.overrides\[0\]\.thresholds: 'two_tone' is not a benchmark",
+                id="not_a_benchmark_in_override",
+            ),
+            pytest.param(
+                single_step_tree(t1_step(thresholds="50 us")),
+                r"^pipelines\.p\.steps\.s\.thresholds: must be a mapping with exactly 'passed' and 'warning'",
+                id="not_a_mapping",
+            ),
+            pytest.param(
+                single_step_tree(t1_step(thresholds={"passed": "50 us"})),
+                r"^pipelines\.p\.steps\.s\.thresholds: must be a mapping with exactly 'passed' and 'warning'",
+                id="missing_warning",
+            ),
+            pytest.param(
+                single_step_tree(t1_step(thresholds={**t1_thresholds(), "failed": "1 us"})),
+                r"^pipelines\.p\.steps\.s\.thresholds: must be a mapping with exactly 'passed' and 'warning'",
+                id="extra_key",
+            ),
+            pytest.param(
+                single_step_tree(
+                    t1_step(
+                        thresholds=t1_thresholds(),
+                        overrides=[{"targets": ["q2"], "thresholds": {"passed": "60 us"}}],
+                    )
+                ),
+                r"^pipelines\.p\.steps\.s\.overrides\[0\]\.thresholds: must be a mapping with exactly",
+                id="override_replaces_the_whole_thresholds",
+            ),
+            pytest.param(
+                single_step_tree(t1_step(thresholds=t1_thresholds(passed=50))),
+                r"^pipelines\.p\.steps\.s\.thresholds\.passed: 50 needs a unit",
+                id="time_without_unit",
+            ),
+            pytest.param(
+                single_step_tree(t1_step(thresholds=t1_thresholds(warning=True))),
+                r"^pipelines\.p\.steps\.s\.thresholds\.warning: True is not a number",
+                id="bool",
+            ),
+            pytest.param(
+                single_step_tree(t1_step(thresholds=t1_thresholds(passed="fast"))),
+                r"^pipelines\.p\.steps\.s\.thresholds\.passed: 'fast' must be a number with a unit",
+                id="not_a_quantity",
+            ),
+            pytest.param(
+                single_step_tree(t1_step(thresholds=t1_thresholds(passed="-50 us"))),
+                r"^pipelines\.p\.steps\.s\.thresholds\.passed: '-50 us' must be a number with a unit",
+                id="negative",
+            ),
+            pytest.param(
+                single_step_tree(t1_step(thresholds=t1_thresholds(passed=["50", "us"]))),
+                r"^pipelines\.p\.steps\.s\.thresholds\.passed: \['50', 'us'\] must be a number with a unit",
+                id="list",
+            ),
+            pytest.param(
+                single_step_tree(t1_step(thresholds=t1_thresholds(passed="50 GHz"))),
+                r"^pipelines\.p\.steps\.s\.thresholds\.passed: unknown unit 'GHz'",
+                id="wrong_kind_of_unit",
+            ),
+            pytest.param(
+                single_step_tree(t1_step(thresholds=t1_thresholds(passed="1 s"))),
+                r"^pipelines\.p\.steps\.s\.thresholds\.passed: unknown unit 's'",
+                id="seconds_not_accepted",
+            ),
+            pytest.param(
+                single_step_tree(lz_step(thresholds={"passed": "1 us", "warning": 3})),
+                r"^pipelines\.p\.steps\.s\.thresholds\.passed: '1 us': the benchmark is dimensionless",
+                id="dimensionless_with_unit",
+            ),
+            pytest.param(
+                single_step_tree(lz_step(thresholds={"passed": -1, "warning": 3})),
+                r"^pipelines\.p\.steps\.s\.thresholds\.passed: -1 is negative",
+                id="dimensionless_negative",
+            ),
+            pytest.param(
+                single_step_tree(lz_step(thresholds={"passed": float("nan"), "warning": 3})),
+                r"^pipelines\.p\.steps\.s\.thresholds\.passed: nan is not a finite number",
+                id="nan",
+            ),
+            pytest.param(
+                single_step_tree(lz_step(thresholds={"passed": 1.5, "warning": float("inf")})),
+                r"^pipelines\.p\.steps\.s\.thresholds\.warning: inf is not a finite number",
+                id="inf",
+            ),
+            pytest.param(
+                single_step_tree(lz_step(thresholds={"passed": float("-inf"), "warning": 3})),
+                r"^pipelines\.p\.steps\.s\.thresholds\.passed: -inf is not a finite number",
+                id="minus_inf",
+            ),
+            pytest.param(
+                single_step_tree(lz_step(thresholds={"passed": 1.5, "warning": 10**400})),
+                r"^pipelines\.p\.steps\.s\.thresholds\.warning: 1\d+ is not a finite number",
+                id="int_too_large_for_a_float",
+            ),
+            pytest.param(
+                single_step_tree(t1_step(thresholds=t1_thresholds(passed="1e999 us"))),
+                r"^pipelines\.p\.steps\.s\.thresholds\.passed: '1e999 us' is not a finite number",
+                id="time_overflow",
+            ),
+            pytest.param(
+                single_step_tree(t1_step(thresholds=t1_thresholds("50 us", "50000 ns"))),
+                r"^pipelines\.p\.steps\.s\.thresholds: passed and warning are equal",
+                id="empty_band_after_conversion",
+            ),
+            pytest.param(
+                single_step_tree(t1_step(thresholds=t1_thresholds("20 us", "50 us"))),
+                r"^pipelines\.p\.steps\.s\.thresholds: passed \(20 us\) must be above warning \(50 us\), "
+                r"since higher is better for 't1'",
+                id="higher_is_better_reversed",
+            ),
+            pytest.param(
+                single_step_tree(lz_step(thresholds={"passed": 3, "warning": 1})),
+                r"^pipelines\.p\.steps\.s\.thresholds: passed \(3\) must be below warning \(1\), "
+                r"since lower is better for 'landau_zener'",
+                id="lower_is_better_reversed",
+            ),
+        ],
+    )
+    def test_invalid(self, platform, tree, match):
         with pytest.raises(TreeParseError, match=match):
             parse(tree, platform)

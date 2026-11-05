@@ -14,6 +14,14 @@
 
 from .calibration_graph import CalibrationGraph
 from .calibration_node import CalibrationNode
-from .calibration_tree_parser import CalibrationParser, Pipeline, Step, TreeParseError
+from .calibration_tree_parser import CalibrationParser, Pipeline, Step, Thresholds, TreeParseError
 
-__all__ = ["CalibrationGraph", "CalibrationNode", "CalibrationParser", "Pipeline", "Step", "TreeParseError"]
+__all__ = [
+    "CalibrationGraph",
+    "CalibrationNode",
+    "CalibrationParser",
+    "Pipeline",
+    "Step",
+    "Thresholds",
+    "TreeParseError",
+]

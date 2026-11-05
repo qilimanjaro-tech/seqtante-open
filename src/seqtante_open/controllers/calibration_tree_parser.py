@@ -15,6 +15,8 @@
 """Parses a calibration tree (ADR-0003) into pipelines of steps with parameters resolved per target (ADR-0005)."""
 
 import copy
+import math
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, NamedTuple
@@ -22,7 +24,13 @@ from typing import Any, NamedTuple
 from loguru import logger
 from qililab import Platform
 
-from seqtante_open.controllers.experiment_specs import experiment_spec, known_experiments
+from seqtante_open.controllers.experiment_specs import (
+    BenchmarkSpec,
+    Direction,
+    ExperimentSpec,
+    experiment_spec,
+    known_experiments,
+)
 from seqtante_open.targets import CouplerTarget, ExperimentTarget, QubitTarget, Target
 
 _STEP_KEYS = frozenset({"experiment", "analysis", "targets", "overrides"})
@@ -32,10 +40,39 @@ _EXPANSIONS: dict[str, tuple[str, Callable[[Any], Target]]] = {
     "all_q": ("qubits", QubitTarget),
     "all_c": ("topology", lambda edge: CouplerTarget.between(edge[0], edge[1])),
 }
+_THRESHOLD_KEYS = frozenset({"passed", "warning"})
+_TIME_UNITS = {
+    "ns": 1,
+    "us": 1_000,
+    # Micro sign, U+00B5.
+    "\u00b5s": 1_000,
+    # Greek mu, U+03BC.
+    "\u03bcs": 1_000,
+    "ms": 1_000_000,
+}
+# re.ASCII keeps \s and \d ASCII-only, so U+00B5 and U+03BC can start the unit.
+_QUANTITY = re.compile(r"(?P<number>(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*(?P<unit>[^\s\d.+-]\S*)", re.ASCII)
 
 
 class TreeParseError(ValueError):
     """The calibration tree is malformed or names something that does not exist."""
+
+
+@dataclass(frozen=True)
+class Thresholds:
+    """Benchmark thresholds, converted to the unit the benchmark reports.
+
+    Args:
+        passed (float): A value at least this good is Passed.
+        warning (float): A value at least this good, but not Passed, is Warning. Anything worse is Failed.
+        unit (str | None): Unit of ``passed`` and ``warning``, ``None`` when dimensionless.
+        direction (Direction): Whether a higher or a lower value is better.
+    """
+
+    passed: float
+    warning: float
+    unit: str | None
+    direction: Direction
 
 
 @dataclass(frozen=True)
@@ -193,7 +230,8 @@ class CalibrationParser:
 
         own = {key: value for key, value in raw.items() if key not in _STEP_KEYS}
         _check_settable(own, path)
-        overrides = self._overrides(raw.get("overrides", []), targets, path)
+        own = _with_thresholds(own, experiment, spec, path)
+        overrides = self._overrides(raw.get("overrides", []), targets, experiment, spec, path)
 
         base = {**defaults.get(experiment, {}), **own}
         parameters: dict[Target, dict[str, Any]] = {}
@@ -213,7 +251,9 @@ class CalibrationParser:
             parameters=parameters,
         )
 
-    def _overrides(self, raw: object, step_targets: list[Target], step_path: str) -> list[_Override]:
+    def _overrides(
+        self, raw: object, step_targets: list[Target], experiment: str, spec: ExperimentSpec, step_path: str
+    ) -> list[_Override]:
         """Parses a step's overrides, dropping targets the step does not run on."""
         path = f"{step_path}.overrides"
         if not isinstance(raw, list):
@@ -236,7 +276,7 @@ class CalibrationParser:
                 )
             values = {key: value for key, value in entry.items() if key != "targets"}
             _check_settable(values, entry_path)
-            overrides.append(_Override(targets=kept, values=values))
+            overrides.append(_Override(targets=kept, values=_with_thresholds(values, experiment, spec, entry_path)))
         return overrides
 
     @staticmethod
@@ -250,7 +290,8 @@ class CalibrationParser:
             if not isinstance(values, Mapping):
                 raise TreeParseError(f"{path}: must be a mapping of parameters.")
             _check_settable(values, path)
-            defaults[experiment] = dict(values)
+            spec = experiment_spec(experiment)
+            defaults[experiment] = dict(values) if spec is None else _with_thresholds(values, experiment, spec, path)
         return defaults
 
     def _narrowed_targets(self, raw: Mapping[str, object], parent: list[Target], path: str) -> list[Target]:
@@ -325,3 +366,59 @@ def _check_settable(values: Mapping[str, Any], path: str) -> None:
         found = sorted(keys.intersection(values))
         if found:
             raise TreeParseError(f"{path}: {found} {reason}.")
+
+
+def _with_thresholds(values: Mapping[str, Any], experiment: str, spec: ExperimentSpec, path: str) -> dict[str, Any]:
+    """Returns a copy of ``values`` with its ``thresholds``, if any, parsed for ``experiment``."""
+    parsed = dict(values)
+    if "thresholds" in parsed:
+        parsed["thresholds"] = _thresholds(parsed["thresholds"], experiment, spec.benchmark, f"{path}.thresholds")
+    return parsed
+
+
+def _thresholds(raw: object, experiment: str, benchmark: BenchmarkSpec | None, path: str) -> Thresholds:
+    """Parses ``passed`` and ``warning`` into the benchmark's unit and checks they leave a Warning band."""
+    if benchmark is None:
+        raise TreeParseError(f"{path}: '{experiment}' is not a benchmark, so it takes no thresholds.")
+    if not isinstance(raw, Mapping) or set(raw) != _THRESHOLD_KEYS:
+        raise TreeParseError(f"{path}: must be a mapping with exactly 'passed' and 'warning'.")
+    passed = _threshold_value(raw["passed"], benchmark, f"{path}.passed")
+    warning = _threshold_value(raw["warning"], benchmark, f"{path}.warning")
+    if passed == warning:
+        raise TreeParseError(f"{path}: passed and warning are equal, so no value can be Warning.")
+    higher = benchmark.direction == "higher"
+    if (passed > warning) != higher:
+        raise TreeParseError(
+            f"{path}: passed ({raw['passed']}) must be {'above' if higher else 'below'} warning ({raw['warning']}), "
+            f"since {benchmark.direction} is better for '{experiment}'."
+        )
+    return Thresholds(passed=passed, warning=warning, unit=benchmark.unit, direction=benchmark.direction)
+
+
+def _threshold_value(raw: object, benchmark: BenchmarkSpec, path: str) -> float:
+    """Parses one threshold, a plain number when dimensionless or a number with a time unit, into the benchmark's
+    unit."""
+    if isinstance(raw, bool):
+        raise TreeParseError(f"{path}: {raw!r} is not a number.")
+    if benchmark.unit is None:
+        if not isinstance(raw, int | float):
+            raise TreeParseError(f"{path}: {raw!r}: the benchmark is dimensionless, so it takes a plain number.")
+        try:
+            value = float(raw)
+        except OverflowError:
+            value = math.inf
+    elif isinstance(raw, int | float):
+        raise TreeParseError(f"{path}: {raw!r} needs a unit, such as '50 us'.")
+    else:
+        match = _QUANTITY.fullmatch(raw.strip()) if isinstance(raw, str) else None
+        if match is None:
+            raise TreeParseError(f"{path}: {raw!r} must be a number with a unit, such as '50 us'.")
+        unit = match["unit"]
+        if unit not in _TIME_UNITS:
+            raise TreeParseError(f"{path}: unknown unit '{unit}'. Time thresholds take ns, us or ms.")
+        value = float(match["number"]) * _TIME_UNITS[unit] / _TIME_UNITS[benchmark.unit]
+    if not math.isfinite(value):
+        raise TreeParseError(f"{path}: {raw!r} is not a finite number.")
+    if value < 0:
+        raise TreeParseError(f"{path}: {raw!r} is negative.")
+    return value
