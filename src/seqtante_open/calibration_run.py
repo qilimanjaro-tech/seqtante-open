@@ -117,4 +117,3 @@ class CalibrationRun:
         self._display_time()
         output_controller.end_run()
         self.platform.disconnect()
-        output_controller.calibration_data.save_file()

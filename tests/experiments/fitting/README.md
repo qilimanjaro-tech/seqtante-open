@@ -86,6 +86,8 @@ so your case is picked up the moment the module is imported. Nothing to register
 | `test_init` | constructor blows up on the data; an output already populated before `fit()`, which would make `EXPECTED` meaningless |
 | `test_fit` | every `EXPECTED` path, after `fit()`. Skipped if the class does not override `fit` |
 | `test_plot_saves_image_to_path` | `plot()` writing nothing, writing an empty file, or leaking an open matplotlib figure |
+| `test_fit_writes_to_database_at_most_once` | `fit()` calling `add_fitting` more than once, e.g. a duplicated `save_fitting_to_database()` |
+| `test_plot_writes_to_database_at_most_once` | `plot()` storing more than one plot path, i.e. `save_to_db=True` on several `save_plot()` calls |
 | `test_plot_shows_when_no_path` | `plot()` silently doing nothing when `path` is `None`. Counts both matplotlib and plotly |
 | `test_added_methods_are_covered` | a public method beyond `fit`/`plot` with no test of its own |
 | `test_init_signature_matches_declared_kwargs` | `INIT` drifting from a renamed constructor argument |
@@ -127,10 +129,10 @@ Optional:
 mocks `db_manager` and hands back a stand-in measurement carrying your data,
 along with `platform`, `data_shape` and `calibration`.
 
-`store_parameter` is replaced by a no-op. It is on its way out, and left alone it
-raises `AttributeError`, because `Outputs.storage_conf` is only ever set by
-`reset()`. Seven fit classes could not run at all otherwise. Nothing asserts on
-what a fit stores.
+The mocked `db_manager` declares the `autocal` schema and absorbs the
+`add_fitting` calls the fits make. `save_to_database` is turned on so those
+calls happen: left unset, `save_fitting_to_database` only warns. The harness
+checks how many times `fit()` and `plot()` write, not what they write.
 
 `fit()` runs once per test class and each test gets a deep copy, so a test may
 mutate its object freely without affecting the others.

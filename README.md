@@ -127,6 +127,19 @@ storage:
 
   If it is not set here, the `database_schema` key of the `.ini` section is used. Set it in one of the two, since `qililab` falls back to `measurements`.
 
+### Fitting results
+
+Fits save their results on the measurement's database entry: the fitted parameters in `fitting_parameters` and the path of their representative plot in `fitting_path`. Two optional `storage` keys control it:
+
+```yaml
+storage:
+  save_to_database: true                    # default: true
+  specify_parameters: ["t1", "readout_if"]  # default: all
+```
+
+* `save_to_database` turns every fitting write on or off.
+* `specify_parameters` lists the fitted parameters to save, out of the `FittedParameter` values in `seqtante_open.outputs`. When omitted, all of them are saved. Values are rounded to 6 decimals.
+
 In the `extra` section of the log config, `RUN_ID` is replaced by the id of the current calibration or sequence run in the database.
 
 ## License
