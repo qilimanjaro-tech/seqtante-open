@@ -25,6 +25,7 @@ type.
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -58,11 +59,12 @@ def get_db_manager(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 
 @pytest.fixture
 def make_outputs(tmp_path: Path, get_db_manager: MagicMock) -> Callable[..., Outputs]:
-    """Build an ``Outputs`` reset with ``root_dir`` in ``tmp_path`` and the given ``db_manager`` config."""
+    """Build an ``Outputs`` reset with ``root_dir`` in ``tmp_path``, the given ``db_manager`` config and any other
+    ``storage`` keys."""
 
-    def _make(db_conf: dict | None = None) -> Outputs:
+    def _make(db_conf: dict | None = None, **storage: Any) -> Outputs:
         outputs = Outputs()
-        storage_conf: dict = {"root_dir": str(tmp_path)}
+        storage_conf: dict = {"root_dir": str(tmp_path), **storage}
         if db_conf is not None:
             storage_conf["db_manager"] = db_conf
         outputs.reset(storage_conf)
@@ -74,7 +76,7 @@ def make_outputs(tmp_path: Path, get_db_manager: MagicMock) -> Callable[..., Out
 # ------------------------------- Initialization -------------------------------
 
 
-@pytest.mark.parametrize("prop", ["storage_path", "db_manager", "calibration_data"])
+@pytest.mark.parametrize("prop", ["storage_path", "db_manager"])
 def test_properties_require_reset(prop):
     out = Outputs()
     with pytest.raises(AttributeError, match="has not been initialized"):
@@ -98,6 +100,42 @@ def test_reset_clears_the_previous_run(make_outputs):
 
     assert outputs.run is None
     assert outputs.run_id == -1
+
+
+# ------------------------------- Fitting persistence -------------------------------
+
+
+def test_fitting_config_is_unset_before_reset():
+    outputs = Outputs()
+
+    assert outputs.storage_conf == {}
+    assert outputs.save_to_database is None
+    assert outputs.specify_parameters is None
+
+
+def test_reset_enables_saving_to_database_by_default(make_outputs):
+    outputs = make_outputs()
+
+    assert outputs.save_to_database is True
+    assert outputs.specify_parameters is None
+
+
+def test_reset_without_storage_conf_enables_saving_to_database(get_db_manager, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    outputs = Outputs()
+
+    outputs.reset(None)
+
+    assert outputs.save_to_database is True
+    assert outputs.specify_parameters is None
+
+
+def test_reset_can_disable_saving_to_database(make_outputs):
+    assert make_outputs(save_to_database=False).save_to_database is False
+
+
+def test_specify_parameters_is_stored_as_a_set(make_outputs):
+    assert make_outputs(specify_parameters=["t1", "t2", "t1"]).specify_parameters == {"t1", "t2"}
 
 
 # ------------------------------- Database manager -------------------------------

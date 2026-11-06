@@ -12,6 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .outputs import CalibrationParameter, output_controller
+from .outputs import FittedParameter, output_controller
 
-__all__ = ["CalibrationParameter", "output_controller"]
+__all__ = ["FittedParameter", "output_controller"]
