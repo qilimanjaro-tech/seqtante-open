@@ -97,8 +97,10 @@ def verdict_for(value: float, thresholds: BenchmarkThresholds) -> Verdict:
         if value >= thresholds.warning:
             return Verdict.warning
         return Verdict.failed
-    if value <= thresholds.passed:
-        return Verdict.passed
-    if value <= thresholds.warning:
-        return Verdict.warning
-    return Verdict.failed
+    if thresholds.direction is BenchmarkDirection.lower_is_better:
+        if value <= thresholds.passed:
+            return Verdict.passed
+        if value <= thresholds.warning:
+            return Verdict.warning
+        return Verdict.failed
+    raise ValueError(f"unknown benchmark direction: {thresholds.direction!r}")
