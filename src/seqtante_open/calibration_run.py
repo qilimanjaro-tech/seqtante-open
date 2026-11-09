@@ -55,9 +55,17 @@ class CalibrationRun:
         platform_path (str): Path to the runcard the platform is built from.
         config_path (str): Path to the YAML calibration tree.
         pipelines (list[str] | None): Names of the pipelines to run; None runs every enabled one.
+        calibration (str | None): Path to the calibration file the run reads prior values from;
+            overrides ``storage.calibration_data.file_path`` in the tree. None uses the tree's setting.
     """
 
-    def __init__(self, platform_path: str, config_path: str, pipelines: list[str] | None = None):
+    def __init__(
+        self,
+        platform_path: str,
+        config_path: str,
+        pipelines: list[str] | None = None,
+        calibration: str | None = None,
+    ):
         self.platform_path: str = platform_path
         self.config_path: str = config_path
 
@@ -72,16 +80,13 @@ class CalibrationRun:
 
         # --- Build base path for data from YAML ---
         storage_conf = config.get("storage", {})
+        # A --calibration path overrides the calibration file the run reads prior values from.
+        if calibration is not None:
+            storage_conf.setdefault("calibration_data", {})["file_path"] = calibration
 
-        # Setup the output_controller
+        # Set up the output controller and the logger. The run_id is only known once the run starts
+        # (after the platform connects), so the logger is set up again then to carry it.
         output_controller.reset(storage_conf=storage_conf)
-        output_controller.start_run(
-            run_tree=config,
-            sample_name=config["sample"],
-            cooldown=config.get("cooldown"),
-            sequence_name=config.get("sequence_name"),
-        )
-
         output_controller.setup_logger()
         logger.opt(colors=True).info("Welcome to Seqtante-Open")
 
@@ -95,6 +100,16 @@ class CalibrationRun:
         self.platform.connect()
         self.platform.initial_setup()
         self.platform.turn_on_instruments()
+
+        # Start the run entry once connected, then re-setup the logger so its records carry the run_id.
+        output_controller.start_run(
+            run_tree=config,
+            sample_name=config["sample"],
+            cooldown=config.get("cooldown"),
+            sequence_name=config.get("sequence_name"),
+        )
+        output_controller.setup_logger()
+
         logger.opt(colors=True).info(
             "Executing Calibration. Outputs in folder {path}", path=output_controller.storage_path
         )
