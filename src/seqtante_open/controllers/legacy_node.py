@@ -65,6 +65,7 @@ class LegacyNode:
         name: str,
         idx: int,
         targets: Sequence[TargetLike],
+        analysis: str = "",
         simultaneous: bool | list[list[TargetLike]] = False,
     ) -> None:
         self.platform = platform
@@ -73,6 +74,7 @@ class LegacyNode:
         self.idx = idx
         self.targets = list(targets)
         self.experiment = experiment
+        self.analysis = analysis
         self.parameters: dict[Any, Any] = copy(parameters)
 
         if isinstance(simultaneous, list):
@@ -181,6 +183,7 @@ class LegacyNode:
         """
         parameters = self.parameters
         parameters["targets"] = targets
+        parameters["analysis"] = self.analysis
         target_error: list = []
         if not targets:
             return target_error
@@ -194,9 +197,9 @@ class LegacyNode:
             logger.opt(colors=True).info(
                 "Running experiment '<i><fg #8838ff>{name}</></i>' on <r>{target}</>", name=self.name, target=targets
             )
-        for target in targets:
-            os.makedirs(self.parameters[target]["data_folder"])
         try:
+            for target in targets:
+                os.makedirs(self.parameters[target]["data_folder"], exist_ok=True)
             result = self.experiment_func(
                 platform=self.platform,
                 platform_path=self.platform_path,
