@@ -295,7 +295,9 @@ class CalibrationNode(ABC, Generic[ResultT]):
                     try:
                         measurements = self.execute_node(group)
                     except Exception:  # ruff: ignore[blind-except] -- a group-wide measurement failure fails the group
-                        logger.opt(exception=True).warning("Node <i>{node}</i>: group measurement failed", node=self.name)
+                        logger.opt(exception=True).warning(
+                            "Node <i>{node}</i>: group measurement failed", node=self.name
+                        )
                         failed.extend(str(target) for target in group)
                 if measurements is not None:
                     for target in group:
@@ -303,7 +305,9 @@ class CalibrationNode(ABC, Generic[ResultT]):
                             target_measurements = measurements[target]
                         except KeyError:
                             logger.opt(exception=True).warning(
-                                "Node <i>{node}</i>: no measurement for <r>{target}</r>", node=self.name, target=str(target)
+                                "Node <i>{node}</i>: no measurement for <r>{target}</r>",
+                                node=self.name,
+                                target=str(target),
                             )
                             failed.append(str(target))
                             continue
@@ -329,7 +333,9 @@ class CalibrationNode(ABC, Generic[ResultT]):
                 placed.append(target)
             except Exception:  # ruff: ignore[blind-except] -- a target with no placeable point drops from the group
                 logger.opt(exception=True).warning(
-                    "Node <i>{node}</i>: placing <r>{target}</r>'s operating point failed", node=self.name, target=str(target)
+                    "Node <i>{node}</i>: placing <r>{target}</r>'s operating point failed",
+                    node=self.name,
+                    target=str(target),
                 )
                 failed.append(str(target))
         return placed
