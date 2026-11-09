@@ -13,15 +13,33 @@
 # limitations under the License.
 
 from .calibration_graph import CalibrationGraph
-from .calibration_node import CalibrationNode
+from .calibration_node import CalibrationNode, GraphNode, RunContext
 from .calibration_tree_parser import CalibrationParser, Pipeline, Step, Thresholds, TreeParseError
+from .node_registry import (
+    NODE_REGISTRY,
+    BenchmarkSpec,
+    ExperimentSpec,
+    Parallel,
+    experiment_spec,
+    known_experiments,
+    register_node,
+)
 
 __all__ = [
+    "NODE_REGISTRY",
+    "BenchmarkSpec",
     "CalibrationGraph",
     "CalibrationNode",
     "CalibrationParser",
+    "ExperimentSpec",
+    "GraphNode",
+    "Parallel",
     "Pipeline",
+    "RunContext",
     "Step",
     "Thresholds",
     "TreeParseError",
+    "experiment_spec",
+    "known_experiments",
+    "register_node",
 ]

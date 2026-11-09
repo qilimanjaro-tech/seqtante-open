@@ -12,192 +12,144 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Automatic-calibration Node module."""
+"""The abstract base every experiment subclasses, and the context a run hands each node (ADR-0004).
 
-import os
-from copy import copy
-from typing import Any
+A :class:`CalibrationNode` is one step of the calibration tree made runnable: the parser builds one
+per step (ADR-0003). Each subclass declares its ``experiment`` name and the analyses it supports, and
+registers itself in :data:`~seqtante_open.controllers.node_registry.NODE_REGISTRY` through
+``__init_subclass__``. The three-phase lifecycle (``execute_node`` / ``analyze`` / ``apply``, ADR-0006)
+lands on this base in a later PR; here the base carries the declarations, the run context and the graph
+contract (``idx``, ``name``, ``run``) that :class:`~seqtante_open.controllers.calibration_graph.CalibrationGraph`
+drives.
 
-from loguru import logger
+During the port the graph also runs the experiments that are still legacy functions, through a
+legacy-function adapter that satisfies the same :class:`GraphNode` contract without subclassing this
+base; that adapter and the graph build live with the graph task (QHC-1800, ADR-0007).
+"""
+
+from abc import ABC
+from dataclasses import dataclass
+from typing import Any, ClassVar, Protocol, runtime_checkable
+
 from qililab import Platform
+from qililab.qprogram.calibration import Calibration
 
-from seqtante_open.experiments.experiment_functions import ExperimentFunction, experiment_functions_dict
+from seqtante_open.controllers.node_registry import BenchmarkSpec, Parallel, register_node
+from seqtante_open.targets import Target
 
 
-class CalibrationNode:
-    """This class stores all the information needed for the execution of experiments though the CalibrationGraph.
-    It also checks the validity of certain parameters. If they aren't, blocks the execution of that qubit.
+@dataclass(frozen=True)
+class RunContext:
+    """What a run hands to every node: the platform and the one calibration file the run reads (ADR-0004).
+
+    The run deserialises the ``Calibration`` once from ``calibration_path`` and passes this context to
+    every node, so a node reads and writes the same in-memory calibration rather than loading its own.
 
     Args:
-        platform (qililab.Platform): Platform used for the node execution.
-        platform_path (str): Path were the runcard is stored, to update the parameters calibrated in the node.
-        idx (int): Identifier of the node for the graph.
-        experiment (str): Name of the type of experiment being run.
-        name (str): Name the experiment has in the pipeline, for representation.
-        targets (list[str]): Targets (qubits or couplings) were this experiment will run, e.g. ``"q1"``, ``"c1_2"``.
-        simultaneous (bool | list | list[list], optional): Parameter that specifies if parallel calibration of qubits is done and in what way. Defaults to False.
+        platform (Platform): The platform the run drives.
+        platform_path (str): Path to the runcard the platform was built from. The runcard is never
+            saved from a run (ADR-0001).
+        calibration (Calibration): The calibration file for the run, deserialised once.
+        calibration_path (str): Path the calibration file is read from and saved back to.
     """
 
-    experiment_func: ExperimentFunction
+    platform: Platform
+    platform_path: str
+    calibration: Calibration
+    calibration_path: str
+
+
+@runtime_checkable
+class GraphNode(Protocol):
+    """What :class:`CalibrationGraph` needs of a node, whatever implements it (ADR-0007).
+
+    Both :class:`CalibrationNode` subclasses and the legacy-function adapter (QHC-1800) satisfy this,
+    so the graph drives them the same way.
+    """
+
+    idx: int
+    name: str
+
+    def run(self, dead_targets: dict[str, str]) -> list[str]:
+        """Run the node, returning the targets whose calibration failed or was skipped."""
+        ...
+
+
+class CalibrationNode(ABC):
+    """The abstract base every experiment subclasses (ADR-0004).
+
+    A subclass declares its ``experiment`` name and ``analyses`` as class variables, and registers
+    itself in :data:`~seqtante_open.controllers.node_registry.NODE_REGISTRY` automatically. The
+    mid-level spines (``FixedFluxNode``, ``FluxSweepNode``) set no ``experiment`` and are not
+    registered; only leaf experiments are.
+
+    Class variables:
+        experiment (str): The experiment name the step's ``experiment`` field matches. A subclass that
+            sets none is treated as an abstract spine and is not registered.
+        analyses (tuple[str, ...]): The analyses the experiment supports (ADR-0003). The first is the
+            default when a step names none.
+        applies_operating_point (bool): Whether ``run`` places the targets at the step's operating
+            point before ``execute_node`` (ADR-0004). Default ``True``.
+        parallel (Parallel): Whether the experiment may run on several targets at once. Default
+            :attr:`~seqtante_open.controllers.node_registry.Parallel.forbidden`.
+        benchmark (BenchmarkSpec | None): How a benchmark reports its value (unit and direction,
+            ADR-0002), or ``None`` for a recalibration. Registered into the experiment's
+            :class:`~seqtante_open.controllers.node_registry.ExperimentSpec` and consumed by the
+            threshold parsing and the verdict logic.
+    """
+
+    experiment: ClassVar[str | None] = None
+    analyses: ClassVar[tuple[str, ...]] = ()
+    applies_operating_point: ClassVar[bool] = True
+    parallel: ClassVar[Parallel] = Parallel.forbidden
+    benchmark: ClassVar[BenchmarkSpec | None] = None
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        # A spine (FixedFluxNode/FluxSweepNode) sets no experiment and is not a registrable experiment;
+        # only a leaf experiment registers. A leaf must declare at least one analysis.
+        if cls.__dict__.get("experiment") is None:
+            return
+        if not cls.analyses:
+            raise ValueError(f"{cls.__name__} sets experiment '{cls.experiment}' but declares no analyses")
+        register_node(cls)
 
     def __init__(
         self,
-        parameters: dict,
-        platform: Platform,
-        platform_path: str,
-        experiment: str,
+        *,
         name: str,
         idx: int,
-        targets: list[str],
-        simultaneous: bool | list[list[str]] = False,
+        targets: list[Target],
+        parameters: dict[Target, dict[str, Any]],
+        context: RunContext,
     ) -> None:
-        self.platform = platform
-        self.platform_path = platform_path
+        """Build one runnable step.
+
+        Args:
+            name (str): The step's name, unique across the tree (ADR-0003).
+            idx (int): The node's position key in the graph.
+            targets (list[Target]): The targets the step runs on.
+            parameters (dict[Target, dict[str, Any]]): Resolved parameters per target (ADR-0005).
+            context (RunContext): The run's platform and calibration file.
+        """
         self.name = name
         self.idx = idx
-        self.targets = list(targets)
-        self.experiment = experiment
-        self.parameters: dict[str, Any] = copy(parameters)
+        self.targets = targets
+        self.parameters = parameters
+        self.context = context
 
-        if isinstance(simultaneous, list):
-            if all(isinstance(sim, list) for sim in simultaneous):
-                self.simultaneous: list[list[str]] = [list(sim) for sim in simultaneous]
-                unexpected_sim_targets = {st for sim in self.simultaneous for st in sim if st not in self.targets}
-                if unexpected_sim_targets:
-                    logger.opt(colors=True).warning(
-                        "Found the target/s <r>{target}</r> in simultaneous that weren't included in targets for node <i><fg #8838ff>{node}</></i>. (Targets unused)",
-                        target=unexpected_sim_targets,
-                        node=self.name,
-                    )
-            else:
-                logger.opt(colors=True).warning(
-                    "Invalid type for simultaneous on node <r>{node}</r>. Simultaneous has to be a list of lists of targets. "
-                    "(Running node without parallelization)",
-                    node=self.name,
-                )
-                self.simultaneous = []
-        elif simultaneous:
-            self.simultaneous = [self.targets]
-        else:
-            self.simultaneous = []
-
-        self._valid_node: dict[str, bool] = dict.fromkeys(self.targets, True)
-        self._validate_node()
-
-        self.result: dict = {}
-
-    # ------------------------- dict behavior -------------------------
-
-    def __setitem__(self, key, value):
-        self.parameters[key] = value
-
-    def __getitem__(self, key):
-        return self.parameters[key]
-
-    def __delitem__(self, key):
-        if key in self.parameters:
-            del self.parameters[key]
-
-    # ------------------------- Normalization helpers -------------------------
-
-    def _validate_node(self):
-        if self.experiment in experiment_functions_dict:
-            self.experiment_func = experiment_functions_dict[self.experiment]
-        else:
-            logger.opt(colors=True).warning(
-                "Experiment <i><fg #8838ff>{experiment}</></i> not implemented. (Node Skipped)",
-                experiment=self.experiment,
-            )
-            self._valid_node = dict.fromkeys(self.targets, False)
-
-        # Every experiment takes str targets ("q1", "c1_2").
-        target_clss = str
-
-        for target in self.targets:
-            if not isinstance(target, target_clss):
-                logger.opt(colors=True).warning(
-                    "Invalid target type for target <r>{target}</r> detected for experiment <i><fg #8838ff>{experiment}</></i>. "
-                    "All targets should be <blue>{clss}</>. (Target Skipped)",
-                    target=target,
-                    experiment=self.experiment,
-                    clss=target_clss.__name__,
-                )
-                self._valid_node[target] = False
-
-    # ----------------------------- Execution -----------------------------
     def run(self, dead_targets: dict[str, str]) -> list[str]:
-        """Using the context (targets that have stopped execution, invalid targets and the simultaneous parameter),
-        determines what targets are executed, in wat order an how parallelized and passes the information to run targets for execution.
+        """Run the three phases for every live target (ADR-0006).
+
+        The three-phase body lands on this base with the lifecycle PR (task 5c); until then the base
+        raises. It is a concrete method, not an abstract one: 5c fills this body rather than every
+        subclass implementing its own, so a leaf subclass is not forced to override it (ADR-0006).
 
         Args:
-            dead_targets (dict[str, str]): Targets that have been interrupted mid calibration, mapped to the node that interrupted them. This interruption, caused by some error in the execution.
+            dead_targets (dict[str, str]): Targets already stopped by an earlier node, mapped to the
+                node that stopped them.
 
         Returns:
-            list[str]: Invalid targets and targets that have triggered a exception
+            list[str]: The targets whose calibration failed or was skipped in this node.
         """
-        targets = {target for target in self.targets if not CalibrationNode._is_calibration_dead(target, dead_targets)}
-        target_error: list = [
-            target for target in targets if not self._valid_node[target] or not self.parameters[target]
-        ]
-        targets.difference_update(target_error)
-
-        if not targets:
-            logger.opt(colors=True).info("No valid targets for node: <i><fg #8838ff>{name}</></i>", name=self.name)
-            return target_error
-
-        logger.opt(colors=True).info("Running node: <i><fg #8838ff>{name}</></i>", name=self.name)
-        if self.simultaneous:
-            for sim_targets in self.simultaneous:
-                sim_targets = [target for target in sim_targets if target in targets]
-                targets.difference_update(sim_targets)
-                if sim_targets:
-                    target_error += self.run_targets(sim_targets)
-        for target in targets:
-            target_error += self.run_targets([target])
-
-        return target_error
-
-    def run_targets(self, targets: list[str]) -> list[str]:
-        """Executes the experiment function on the targets and stops the calibration of the targets if an exception is triggered.
-
-        Args:
-            targets (list[str]): list of the targets to execute at the same time.
-
-        Returns:
-            list[str]: Returns the targets if an error has been triggered during execution.
-        """
-        parameters = self.parameters
-        parameters["targets"] = targets
-        target_error: list = []
-        if not targets:
-            return target_error
-        if len(targets) > 1:
-            logger.opt(colors=True).info(
-                "Running experiment '<i><fg #8838ff>{name}</></i>' simultaneously on <r>{target}</>",
-                name=self.name,
-                target=targets,
-            )
-        else:
-            logger.opt(colors=True).info(
-                "Running experiment '<i><fg #8838ff>{name}</></i>' on <r>{target}</>", name=self.name, target=targets
-            )
-        for target in targets:
-            os.makedirs(self.parameters[target]["data_folder"])
-        try:
-            result = self.experiment_func(
-                platform=self.platform,
-                platform_path=self.platform_path,
-                parameters=parameters,
-            )
-            if isinstance(result, dict):
-                self.result.update(result)
-        except Exception as e:  # ruff: ignore[blind-except]
-            logger.opt(exception=True).warning(str(e.__class__.__name__) + " " + str(e))
-            logger.opt(colors=True).warning("Skipping calibration of target/s <r>{target}</>", target=targets)
-            target_error = targets
-        return target_error
-
-    @staticmethod
-    def _is_calibration_dead(target: str, dead_targets: dict[str, str]) -> bool:
-        """Looks if the calibration of the target has been interrupted"""
-        return target in dead_targets
+        raise NotImplementedError("the three-phase run lands with the lifecycle PR (task 5c)")

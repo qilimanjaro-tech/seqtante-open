@@ -24,7 +24,7 @@ from typing import Any, NamedTuple
 from loguru import logger
 from qililab import Platform
 
-from seqtante_open.controllers.experiment_specs import (
+from seqtante_open.controllers.node_registry import (
     BenchmarkSpec,
     Direction,
     ExperimentSpec,
