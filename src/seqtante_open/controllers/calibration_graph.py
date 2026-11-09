@@ -76,6 +76,11 @@ class CalibrationGraph:
             for pipeline in pipelines
             if pipeline.enabled and (selected_names is None or pipeline.name in selected_names)
         ]
+        if not running:
+            raise GraphBuildError(
+                "No pipelines to run: the selection is empty or every pipeline is disabled. "
+                "Pass --pipelines with at least one enabled pipeline, or enable one in the tree."
+            )
 
         step_idx, first_idx = self._build_nodes(running, data_root)
         self._build_after_edges(running, step_idx, first_idx)
@@ -111,6 +116,7 @@ class CalibrationGraph:
                     platform=self.platform,
                     platform_path=self.platform_path,
                     experiment=step.experiment,
+                    analysis=step.analysis,
                     name=step.name,
                     idx=idx,
                     targets=step.targets,
@@ -161,17 +167,24 @@ class CalibrationGraph:
         """
         calibrated_targets = calibrated_targets or set()
         failed_at: dict[int, set[str]] = {}
-        skipped_at: dict[int, set[str]] = {}
+        # Every target dead from anywhere upstream of a node, carried forward along edges in full --
+        # not intersected with a node's own targets -- so a failure survives an intermediate node that
+        # did not run that target and still blocks it at a later node that does.
+        dead_upstream: dict[int, set[str]] = {}
 
         for node_idx in nx.topological_sort(self.graph):
             node = self.graph.nodes[node_idx]["data"]
             node_targets = {str(target) for target in node.targets}
 
-            # Targets blocked by a failed or skipped predecessor step.
-            blocked: set[str] = set()
+            # Everything dead upstream: each predecessor's own failures plus whatever was already dead
+            # upstream of it. Propagated in full; only the run/report decisions below restrict to this
+            # node's targets.
+            upstream: set[str] = set()
             for predecessor in self.graph.predecessors(node_idx):
-                blocked |= failed_at.get(predecessor, set()) | skipped_at.get(predecessor, set())
-            blocked &= node_targets
+                upstream |= failed_at.get(predecessor, set()) | dead_upstream.get(predecessor, set())
+            dead_upstream[node_idx] = upstream
+
+            blocked = upstream & node_targets
 
             # Targets whose unselected dependency is not satisfied by the calibration file.
             misses = {
@@ -187,7 +200,6 @@ class CalibrationGraph:
             failed = {str(target) for target in node.run(dead_targets)}
 
             failed_at[node_idx] = failed
-            skipped_at[node_idx] = blocked
             for target in failed:
                 self.report.append((target, node.name, "failed"))
             for target in blocked - misses:

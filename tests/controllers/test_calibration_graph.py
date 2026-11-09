@@ -173,3 +173,45 @@ def test_validate_node_accepts_target_objects():
     )
     # A QubitTarget is no longer skipped as an invalid target type.
     assert node._valid_node[QubitTarget(1)] is True
+
+
+# --------------------------- empty selection ---------------------------
+
+
+def test_empty_pipeline_selection_errors():
+    a = _pipeline("A", [_step("a1", "A", _targets(1))])
+    with pytest.raises(GraphBuildError, match="No pipelines to run"):
+        _build([a], selected_names=[])
+
+
+def test_all_pipelines_disabled_errors():
+    a = _pipeline("A", [_step("a1", "A", _targets(1))], enabled=False)
+    with pytest.raises(GraphBuildError, match="No pipelines to run"):
+        _build([a])
+
+
+# --------------------------- analysis threading ---------------------------
+
+
+def test_each_step_analysis_reaches_its_node():
+    pipeline = _pipeline("p", [_step("a", "p", _targets(1))])  # analysis="lorentzian_peak"
+    graph = _build([pipeline])
+    assert graph.graph.nodes[0]["data"].analysis == "lorentzian_peak"
+
+
+# --------------------------- transitive skip ---------------------------
+
+
+def test_failure_propagates_through_a_node_that_does_not_run_the_target(monkeypatch):
+    calls = _record_runs(monkeypatch, failing={"a1": {"q1"}})
+    a = _pipeline("A", [_step("a1", "A", _targets(1, 2))])
+    b = _pipeline("B", [_step("b1", "B", _targets(2))], after=["a1"])  # B runs only q2
+    c = _pipeline("C", [_step("c1", "C", _targets(1, 2))], after=["b1"])  # C runs q1 and q2
+    graph = _build([a, b, c])
+
+    graph.run_calibration()
+
+    # q1 failed at a1; b1 never runs q1, but q1 must still be blocked at c1 downstream.
+    assert calls["b1"]["ran"] == {"q2"}
+    assert calls["c1"]["ran"] == {"q2"}
+    assert "q1" not in calls["c1"]["ran"]
