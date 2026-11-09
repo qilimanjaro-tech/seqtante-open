@@ -979,10 +979,12 @@ def test_pipeline_level_defaults_are_rejected(platform):
 
 
 def test_enabled_on_a_step_is_rejected(platform):
+    tree = single_step_tree(make_step(enabled=False))
     with pytest.raises(TreeParseError, match="can only be set on the pipeline"):
-        parse(single_step_tree(make_step(enabled=False)), platform)
+        parse(tree, platform)
 
 
 def test_after_on_a_step_is_rejected(platform):
+    tree = single_step_tree(make_step(after="x"))
     with pytest.raises(TreeParseError, match="can only be set on the pipeline"):
-        parse(single_step_tree(make_step(after="x")), platform)
+        parse(tree, platform)

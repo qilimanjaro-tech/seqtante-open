@@ -70,23 +70,40 @@ class CalibrationGraph:
             GraphBuildError: If a selected pipeline is unknown or disabled, or the pipelines form a cycle.
         """
         by_name = {pipeline.name: pipeline for pipeline in pipelines}
-        if selected_names is not None:
-            for name in selected_names:
-                if name not in by_name:
-                    raise GraphBuildError(f"--pipelines: unknown pipeline '{name}'. Known: {sorted(by_name)}.")
-                if not by_name[name].enabled:
-                    raise GraphBuildError(f"--pipelines: pipeline '{name}' is disabled (enabled: false).")
+        self._validate_selection(by_name, selected_names)
+        running = [
+            pipeline
+            for pipeline in pipelines
+            if pipeline.enabled and (selected_names is None or pipeline.name in selected_names)
+        ]
 
-        def runs(pipeline: "Pipeline") -> bool:
-            return pipeline.enabled and (selected_names is None or pipeline.name in selected_names)
+        step_idx, first_idx = self._build_nodes(running, data_root)
+        self._build_after_edges(running, step_idx, first_idx)
+        self._raise_if_cyclic()
+        return self
 
-        # Nodes and intra-pipeline edges (steps run in order).
-        step_idx: dict[str, int] = {}  # step name -> node idx, for steps that run this time
-        first_idx: dict[str, int] = {}  # pipeline name -> its first step's node idx
+    @staticmethod
+    def _validate_selection(by_name: "dict[str, Pipeline]", selected_names: list[str] | None):
+        """Rejects a ``--pipelines`` selection that names an unknown or disabled pipeline."""
+        if selected_names is None:
+            return
+        for name in selected_names:
+            if name not in by_name:
+                raise GraphBuildError(f"--pipelines: unknown pipeline '{name}'. Known: {sorted(by_name)}.")
+            if not by_name[name].enabled:
+                raise GraphBuildError(f"--pipelines: pipeline '{name}' is disabled (enabled: false).")
+
+    def _build_nodes(self, running: "list[Pipeline]", data_root: str | None) -> tuple[dict[str, int], dict[str, int]]:
+        """Adds one node per step and the intra-pipeline edges (steps run in order).
+
+        Returns:
+            step_idx: step name -> node idx, for steps that run this time.
+            first_idx: pipeline name -> its first step's node idx.
+        """
+        step_idx: dict[str, int] = {}
+        first_idx: dict[str, int] = {}
         idx = 0
-        for pipeline in pipelines:
-            if not runs(pipeline):
-                continue
+        for pipeline in running:
             previous: int | None = None
             for step in pipeline.steps:
                 node = LegacyNode(
@@ -109,10 +126,12 @@ class CalibrationGraph:
                     self.add_dependency(previous, idx)
                 previous = idx
                 idx += 1
+        return step_idx, first_idx
 
-        # Inter-pipeline edges from `after`.
-        for pipeline in pipelines:
-            if not runs(pipeline) or not pipeline.steps:
+    def _build_after_edges(self, running: "list[Pipeline]", step_idx: dict[str, int], first_idx: dict[str, int]):
+        """Adds inter-pipeline edges from each pipeline's ``after``."""
+        for pipeline in running:
+            if not pipeline.steps:
                 continue
             head = first_idx[pipeline.name]
             head_targets = {str(target) for target in pipeline.steps[0].targets}
@@ -123,11 +142,12 @@ class CalibrationGraph:
                     # The dependency step is not run this time: satisfy it from the calibration file.
                     self.unselected_deps[head] |= head_targets
 
+    def _raise_if_cyclic(self):
+        """Raises if the graph has an ``after`` cycle, naming the pipelines in it."""
         if not nx.is_directed_acyclic_graph(self.graph):
             cycle = nx.find_cycle(self.graph)
             names = [self.graph.nodes[origin]["data"].name for origin, _ in cycle]
             raise GraphBuildError(f"Pipelines form a cycle through `after`: {' -> '.join([*names, names[0]])}.")
-        return self
 
     def run_calibration(self, calibrated_targets: set[str] | None = None):
         """Runs every node in topological order, skipping targets blocked within their pipeline.
