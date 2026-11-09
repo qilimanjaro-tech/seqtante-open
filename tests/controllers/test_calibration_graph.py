@@ -18,8 +18,8 @@ import networkx as nx
 import pytest
 
 from seqtante_open.controllers.calibration_graph import CalibrationGraph, GraphBuildError
-from seqtante_open.controllers.legacy_node import LegacyNode
 from seqtante_open.controllers.calibration_tree_parser import Pipeline, Step
+from seqtante_open.controllers.legacy_node import LegacyNode
 from seqtante_open.targets import QubitTarget
 
 
