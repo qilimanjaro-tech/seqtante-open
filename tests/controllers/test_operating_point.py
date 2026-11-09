@@ -79,7 +79,7 @@ def test_fluxes_are_set_through_restore_and_can_be_undone():
     assert platform.values["flux_z_q1", Parameter.FLUX] == pytest.approx(0.9)
 
 
-def test_park_lo_outside_sweep_is_scaffolded_until_5c():
+def test_park_lo_outside_sweep_is_scaffolded_until_the_sweep_nodes():
     restore = ParameterRestore(FakePlatform())
-    with pytest.raises(NotImplementedError, match="task 5c"):
+    with pytest.raises(NotImplementedError, match="sweep nodes"):
         park_lo_outside_sweep(restore, bus="readout_q1", lo=7e9, if_band=(-1.5e6, 1.5e6))
