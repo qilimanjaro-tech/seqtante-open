@@ -46,7 +46,7 @@ from seqtante_open.controllers.crosstalk_session import CrosstalkSession, crosst
 from seqtante_open.controllers.node_registry import BenchmarkSpec, Parallel, register_node
 from seqtante_open.controllers.operating_point import apply_operating_point
 from seqtante_open.controllers.parameter_restore import ParameterRestore, restoring_parameters
-from seqtante_open.controllers.verdicts import AnalysisError, BenchmarkResult
+from seqtante_open.controllers.verdicts import BenchmarkResult
 from seqtante_open.targets import Target
 
 #: The node-specific fitted payload an ``analyze`` hands its ``apply`` (a frequency, a pi amplitude,
@@ -205,16 +205,20 @@ class CalibrationNode(ABC, Generic[ResultT]):
     def run(self, dead_targets: dict[str, str]) -> list[str]:
         """Run the three phases for every live target and return the ones that failed (ADR-0006).
 
-        Targets already stopped by an earlier node are skipped. The crosstalk session and the restore
-        context manager wrap the whole node, so flux and bias are zeroed and every ``set_parameter`` is
-        undone even when a phase raises. Benchmark results are collected on :attr:`benchmark_results`.
+        Targets already stopped by an earlier node are skipped. The crosstalk session zeroes flux at
+        the start and bias at the end around the whole node; each target is then run on its own, with
+        its operating point placed right before it runs and undone right after, so a point that parks
+        a neighbour is never held while that neighbour is measured, and two targets' fluxes never sit
+        on the fridge at once. A target whose phase raises -- a failed fit (``AnalysisError``) or any
+        other error -- fails that target alone and the node moves on (D17); benchmark results are
+        collected on :attr:`benchmark_results`.
 
         Args:
             dead_targets (dict[str, str]): Targets already stopped by an earlier node, mapped to the
                 node that stopped them.
 
         Returns:
-            list[str]: The targets whose ``analyze`` raised an analysis error in this node.
+            list[str]: The targets that failed in this node (a fit error or any other error).
         """
         live = [target for target in self.targets if str(target) not in dead_targets]
         if not live:
@@ -222,42 +226,41 @@ class CalibrationNode(ABC, Generic[ResultT]):
 
         failed: list[str] = []
         benchmarks: list[BenchmarkResult] = []
+        applied = False
         platform = self.context.platform
-        with (
-            crosstalk_session(platform, self.context.calibration) as crosstalk,
-            restoring_parameters(platform) as restore,
-        ):
-            self._restore, self._crosstalk = restore, crosstalk
+        with crosstalk_session(platform, self.context.calibration) as crosstalk:
+            self._crosstalk = crosstalk
             try:
-                if self.applies_operating_point:
-                    self._place_operating_points(live)
-                measurements = self.execute_node(live)
-                applied = False
                 for target in live:
                     try:
-                        result = self.analyze(target, measurements[target])
-                    except AnalysisError:
+                        with restoring_parameters(platform) as restore:
+                            self._restore = restore
+                            if self.applies_operating_point:
+                                self._place_operating_point(target)
+                            measurements = self.execute_node([target])
+                            result = self.analyze(target, measurements[target])
+                            self.apply(target, result)
+                        applied = True
+                        if result.benchmark is not None:
+                            benchmarks.append(result.benchmark)
+                    except Exception:  # ruff: ignore[blind-except] -- one target's failure must not abort the node
                         failed.append(str(target))
-                        continue
-                    self.apply(target, result)
-                    applied = True
-                    if result.benchmark is not None:
-                        benchmarks.append(result.benchmark)
+                    finally:
+                        self._restore = None
                 if applied and not self.is_benchmark:
                     self._save_calibration()
             finally:
-                self._restore, self._crosstalk, self._file = None, None, None
+                self._crosstalk, self._file = None, None
 
         self.benchmark_results = tuple(benchmarks)
         return failed
 
-    def _place_operating_points(self, targets: list[Target]) -> None:
+    def _place_operating_point(self, target: Target) -> None:
         experiment = self.experiment
-        # Spines set no experiment; placing operating points on one is a programming error.
+        # Spines set no experiment; placing an operating point on one is a programming error.
         if experiment is None:
             raise RuntimeError(f"{type(self).__name__} applies an operating point but declares no experiment")
-        for target in targets:
-            apply_operating_point(self.calibration_file, experiment, target, self.restore)
+        apply_operating_point(self.calibration_file, experiment, target, self.restore)
 
     def _save_calibration(self) -> None:
         write_calibration_file(self.context.calibration, self.calibration_file)

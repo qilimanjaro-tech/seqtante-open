@@ -107,7 +107,7 @@ class ScriptedNode(CalibrationNode):
         self.seen_flux: dict[str, float] = {}
 
     def execute_node(self, targets):
-        self.executed = list(targets)
+        self.executed.extend(targets)  # the base runs one target at a time, so this accumulates
         if self.raise_in_execute:
             raise RuntimeError("hardware boom")
         return {target: [100 + index] for index, target in enumerate(targets)}
@@ -202,9 +202,38 @@ def test_crosstalk_wraps_the_run():
 def test_bias_is_zeroed_even_when_execute_raises():
     platform = FakePlatform()
     node = _make(ScriptedNode, targets=[Q1], context=_context(platform=platform), raise_in_execute=True)
-    with pytest.raises(RuntimeError, match="hardware boom"):
-        node.run({})
+    failed = node.run({})
+    # A hardware error fails the target rather than aborting the node, and bias is still zeroed.
+    assert failed == ["q1"]
     assert "set_bias_to_zero" in platform.calls
+
+
+def test_a_non_analysis_error_fails_that_target_only():
+    node = _make(ScriptedNode, targets=[Q1, Q2])
+    base_analyze = node.analyze
+
+    def analyze(target, measurements):
+        if str(target) == "q1":
+            raise RuntimeError("unexpected boom")  # not an AnalysisError
+        return base_analyze(target, measurements)
+
+    node.analyze = analyze
+    failed = node.run({})
+    assert failed == ["q1"]  # the whole run is not aborted
+    assert node.applied == [Q2]
+
+
+def test_a_missing_measurement_fails_that_target_only():
+    node = _make(ScriptedNode, targets=[Q1, Q2])
+
+    def execute_node(targets):
+        node.executed.extend(targets)
+        return {} if any(str(t) == "q1" for t in targets) else {t: [1] for t in targets}
+
+    node.execute_node = execute_node
+    failed = node.run({})
+    assert failed == ["q1"]  # measurements[q1] KeyError fails q1, not the run
+    assert node.applied == [Q2]
 
 
 def test_restore_handle_is_unavailable_outside_a_run():
