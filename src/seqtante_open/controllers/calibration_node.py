@@ -46,7 +46,7 @@ from seqtante_open.calibration.io import read_calibration_file, save_calibration
 from seqtante_open.calibration.model import CalibrationFile
 from seqtante_open.controllers.crosstalk_session import CrosstalkSession, crosstalk_session
 from seqtante_open.controllers.node_registry import BenchmarkSpec, Parallel, experiment_spec, register_node
-from seqtante_open.controllers.operating_point import apply_operating_point
+from seqtante_open.controllers.operating_point import apply_operating_point, operating_point_flux_writes
 from seqtante_open.controllers.parameter_restore import ParameterRestore, restoring_parameters
 from seqtante_open.controllers.verdicts import BenchmarkResult
 from seqtante_open.targets import Target
@@ -109,21 +109,6 @@ class GraphNode(Protocol):
     def run(self, dead_targets: dict[str, str]) -> list[str]:
         """Run the node, returning the targets whose calibration failed or was skipped."""
         ...
-
-
-class _FluxRecorder:
-    """Records the flux writes an operating-point placement would make, without touching hardware.
-
-    A stand-in for a :class:`~seqtante_open.controllers.parameter_restore.ParameterRestore` whose
-    :meth:`set` only records, so a parallel group can be checked for a flux conflict between two
-    targets' points before anything is set on the platform.
-    """
-
-    def __init__(self) -> None:
-        self.writes: dict[tuple[str, Any], Any] = {}
-
-    def set(self, alias: str, parameter: Any, value: Any) -> None:
-        self.writes[alias, parameter] = value
 
 
 class CalibrationNode(ABC, Generic[ResultT]):
@@ -247,7 +232,8 @@ class CalibrationNode(ABC, Generic[ResultT]):
         Returns:
             list[str]: The targets that failed in this node (a fit error or any other error).
         """
-        self.benchmark_results = ()  # reset before the early return, so a re-run keeps no stale verdicts
+        # Reset before the early return below, so a re-run of this node keeps no stale verdicts.
+        self.benchmark_results = ()
         live = [target for target in self.targets if str(target) not in dead_targets]
         if not live:
             return []
@@ -350,21 +336,20 @@ class CalibrationNode(ABC, Generic[ResultT]):
 
     def _reject_flux_conflicts(self, live: list[Target], experiment: str) -> None:
         """Raise if two targets' operating points write the same flux bus to different values."""
-        planned: dict[tuple[str, Any], tuple[str, Any]] = {}
+        planned: dict[str, tuple[str, float]] = {}
         for target in live:
-            recorder = _FluxRecorder()
             try:
-                apply_operating_point(self.calibration_file, experiment, target, recorder)  # ty: ignore[invalid-argument-type]
+                writes = operating_point_flux_writes(self.calibration_file, experiment, target)
             except Exception:  # ruff: ignore[blind-except] -- an uncomputable point drops here; placing for real handles it
-                recorder.writes.clear()  # a partial placement does not take part in conflict detection
-            for key, value in recorder.writes.items():
-                prior = planned.get(key)
+                writes = {}
+            for bus, value in writes.items():
+                prior = planned.get(bus)
                 if prior is not None and prior[1] != value:
                     raise RuntimeError(
-                        f"parallel placement conflict on bus '{key[0]}' between {prior[0]} and {target}: "
+                        f"parallel placement conflict on bus '{bus}' between {prior[0]} and {target}: "
                         f"{prior[1]} vs {value}. Parallel operating-point placement has no policy yet."
                     )
-                planned[key] = (str(target), value)
+                planned[bus] = (str(target), value)
 
     def _collect(
         self, target: Target, measurements: list[int], failed: list[str], benchmarks: list[BenchmarkResult]

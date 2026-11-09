@@ -61,16 +61,28 @@ def apply_operating_point(
     records the prior values, so the run returns every bus to where it was. The ``x`` bias is set
     only where the point stores one (z-only loops omit it).
     """
+    for alias, bias in operating_point_flux_writes(file, experiment, target).items():
+        restore.set(alias, Parameter.FLUX, bias)
+
+
+def operating_point_flux_writes(file: CalibrationFile, experiment: str, target: Target | str) -> dict[str, float]:
+    """The flux-bus writes placing ``target``'s operating point would make: ``{bus alias: bias}``.
+
+    Its own flux and the flux of every neighbour its point parks (ADR-0001). Lets a caller inspect a
+    placement -- e.g. to detect a conflict between two targets in a parallel group -- without setting it.
+    """
     point = operating_point_for(file, experiment, target)
-    _apply_flux(restore, target, point.flux)
+    writes: dict[str, float] = {}
+    _record_flux(writes, target, point.flux)
     for neighbour, flux in point.parked_flux.items():
-        _apply_flux(restore, neighbour, flux)
+        _record_flux(writes, neighbour, flux)
+    return writes
 
 
-def _apply_flux(restore: ParameterRestore, target: Target | str, flux: Flux) -> None:
-    restore.set(bus_alias(target, Role.flux, "z"), Parameter.FLUX, flux.z)
+def _record_flux(writes: dict[str, float], target: Target | str, flux: Flux) -> None:
+    writes[bus_alias(target, Role.flux, "z")] = flux.z
     if flux.x is not None:
-        restore.set(bus_alias(target, Role.flux, "x"), Parameter.FLUX, flux.x)
+        writes[bus_alias(target, Role.flux, "x")] = flux.x
 
 
 def park_lo_outside_sweep(
