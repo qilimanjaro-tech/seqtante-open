@@ -33,17 +33,19 @@ The two mid-level spines :class:`FixedFluxNode` and :class:`FluxSweepNode` set n
 are not registered; they hold the code the two experiment shapes share as the nodes are ported.
 """
 
+import copy
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, ClassVar, Generic, Protocol, TypeVar, runtime_checkable
 
+from loguru import logger
 from qililab import Platform
 from qililab.qprogram.calibration import Calibration
 
 from seqtante_open.calibration.io import read_calibration_file, save_calibration, write_calibration_file
 from seqtante_open.calibration.model import CalibrationFile
 from seqtante_open.controllers.crosstalk_session import CrosstalkSession, crosstalk_session
-from seqtante_open.controllers.node_registry import BenchmarkSpec, Parallel, register_node
+from seqtante_open.controllers.node_registry import BenchmarkSpec, Parallel, experiment_spec, register_node
 from seqtante_open.controllers.operating_point import apply_operating_point
 from seqtante_open.controllers.parameter_restore import ParameterRestore, restoring_parameters
 from seqtante_open.controllers.verdicts import BenchmarkResult
@@ -107,6 +109,21 @@ class GraphNode(Protocol):
     def run(self, dead_targets: dict[str, str]) -> list[str]:
         """Run the node, returning the targets whose calibration failed or was skipped."""
         ...
+
+
+class _FluxRecorder:
+    """Records the flux writes an operating-point placement would make, without touching hardware.
+
+    A stand-in for a :class:`~seqtante_open.controllers.parameter_restore.ParameterRestore` whose
+    :meth:`set` only records, so a parallel group can be checked for a flux conflict between two
+    targets' points before anything is set on the platform.
+    """
+
+    def __init__(self) -> None:
+        self.writes: dict[tuple[str, Any], Any] = {}
+
+    def set(self, alias: str, parameter: Any, value: Any) -> None:
+        self.writes[alias, parameter] = value
 
 
 class CalibrationNode(ABC, Generic[ResultT]):
@@ -178,8 +195,16 @@ class CalibrationNode(ABC, Generic[ResultT]):
 
     @property
     def is_benchmark(self) -> bool:
-        """Whether this node is a benchmark: it writes nothing and reports a verdict (ADR-0002)."""
-        return self.benchmark is not None
+        """Whether this node is a benchmark: it writes nothing and reports a verdict (ADR-0002).
+
+        Reads the registry spec, not the class's own ``benchmark``: ``register_node`` keeps a seeded
+        ``BenchmarkSpec`` when a node class does not redeclare one, so a node that leaves ``benchmark``
+        unset but whose experiment is seeded as a benchmark is still a benchmark (and must not save).
+        """
+        if self.experiment is None:
+            return False
+        spec = experiment_spec(self.experiment)
+        return spec is not None and spec.benchmark is not None
 
     @property
     def calibration_file(self) -> CalibrationFile:
@@ -222,6 +247,7 @@ class CalibrationNode(ABC, Generic[ResultT]):
         Returns:
             list[str]: The targets that failed in this node (a fit error or any other error).
         """
+        self.benchmark_results = ()  # reset before the early return, so a re-run keeps no stale verdicts
         live = [target for target in self.targets if str(target) not in dead_targets]
         if not live:
             return []
@@ -255,8 +281,12 @@ class CalibrationNode(ABC, Generic[ResultT]):
                     if self.applies_operating_point:
                         self._place_operating_point(target)
                     measurements = self.execute_node([target])[target]
-                applied = self._collect(target, measurements, failed, benchmarks) or applied
-            except Exception:  # ruff: ignore[blind-except] -- a placement/measurement failure fails this target
+                    # analyze/apply run inside the restore scope, so anything a phase sets is undone.
+                    applied = self._collect(target, measurements, failed, benchmarks) or applied
+            except Exception:  # ruff: ignore[blind-except] -- a placement/measurement/restore failure fails this target
+                logger.opt(exception=True).warning(
+                    "Node <i>{node}</i>: target <r>{target}</r> failed", node=self.name, target=str(target)
+                )
                 failed.append(str(target))
             finally:
                 self._restore = None
@@ -266,38 +296,107 @@ class CalibrationNode(ABC, Generic[ResultT]):
         """Place every target's point and measure the whole group in one call (``allowed``/``required``)."""
         platform = self.context.platform
         applied = False
+        # Reject a flux conflict between targets' points up front -- this is meant to fail loudly (no
+        # parallel-placement policy yet), so it sits outside the restore-failure guard below.
+        if self.applies_operating_point and self.experiment is not None:
+            self._reject_flux_conflicts(live, self.experiment)
         try:
             with restoring_parameters(platform) as restore:
                 self._restore = restore
-                try:
-                    if self.applies_operating_point:
-                        for target in live:
-                            self._place_operating_point(target)
-                    measurements = self.execute_node(live)
-                except Exception:  # ruff: ignore[blind-except] -- a group-wide failure fails every target in it
-                    failed.extend(str(target) for target in live)
-                    return False
-                for target in live:
+                group = self._place_group(live, failed) if self.applies_operating_point else list(live)
+                measurements = None
+                if group:
                     try:
-                        target_measurements = measurements[target]
-                    except KeyError:
-                        failed.append(str(target))
-                        continue
-                    applied = self._collect(target, target_measurements, failed, benchmarks) or applied
+                        measurements = self.execute_node(group)
+                    except Exception:  # ruff: ignore[blind-except] -- a group-wide measurement failure fails the group
+                        logger.opt(exception=True).warning("Node <i>{node}</i>: group measurement failed", node=self.name)
+                        failed.extend(str(target) for target in group)
+                if measurements is not None:
+                    for target in group:
+                        try:
+                            target_measurements = measurements[target]
+                        except KeyError:
+                            logger.opt(exception=True).warning(
+                                "Node <i>{node}</i>: no measurement for <r>{target}</r>", node=self.name, target=str(target)
+                            )
+                            failed.append(str(target))
+                            continue
+                        applied = self._collect(target, target_measurements, failed, benchmarks) or applied
+        except Exception:  # ruff: ignore[blind-except] -- a restore-on-exit failure must not abort the graph (parity with forbidden mode)
+            logger.opt(exception=True).warning(
+                "Node <i>{node}</i>: restoring parameters failed after the group ran", node=self.name
+            )
         finally:
             self._restore = None
         return applied
 
+    def _place_group(self, live: list[Target], failed: list[str]) -> list[Target]:
+        """Place every target's operating point for a parallel group, before measuring (ADR-0006).
+
+        Places each target, dropping one whose placement raises so a single bad section does not fail
+        the whole group. The conflict check that must fail loudly runs in :meth:`_run_as_group` first.
+        """
+        placed: list[Target] = []
+        for target in live:
+            try:
+                self._place_operating_point(target)
+                placed.append(target)
+            except Exception:  # ruff: ignore[blind-except] -- a target with no placeable point drops from the group
+                logger.opt(exception=True).warning(
+                    "Node <i>{node}</i>: placing <r>{target}</r>'s operating point failed", node=self.name, target=str(target)
+                )
+                failed.append(str(target))
+        return placed
+
+    def _reject_flux_conflicts(self, live: list[Target], experiment: str) -> None:
+        """Raise if two targets' operating points write the same flux bus to different values."""
+        planned: dict[tuple[str, Any], tuple[str, Any]] = {}
+        for target in live:
+            recorder = _FluxRecorder()
+            try:
+                apply_operating_point(self.calibration_file, experiment, target, recorder)  # ty: ignore[invalid-argument-type]
+            except Exception:  # ruff: ignore[blind-except] -- an uncomputable point drops here; placing for real handles it
+                recorder.writes.clear()  # a partial placement does not take part in conflict detection
+            for key, value in recorder.writes.items():
+                prior = planned.get(key)
+                if prior is not None and prior[1] != value:
+                    raise RuntimeError(
+                        f"parallel placement conflict on bus '{key[0]}' between {prior[0]} and {target}: "
+                        f"{prior[1]} vs {value}. Parallel operating-point placement has no policy yet."
+                    )
+                planned[key] = (str(target), value)
+
     def _collect(
         self, target: Target, measurements: list[int], failed: list[str], benchmarks: list[BenchmarkResult]
     ) -> bool:
-        """Analyze and apply one target, isolating its failure; return whether ``apply`` ran (D17)."""
+        """Analyze and apply one target, isolating its failure; return whether ``apply`` ran (D17).
+
+        A failed ``apply`` is rolled back: the cached calibration file and the crosstalk offsets are
+        restored to their pre-apply state, so a half-written target is never saved (ADR-0002).
+        """
         try:
             result = self.analyze(target, measurements)
-            self.apply(target, result)
-        except Exception:  # ruff: ignore[blind-except] -- one target's failure must not abort the node
+        except Exception:  # ruff: ignore[blind-except] -- a failed analysis fails only this target
+            logger.opt(exception=True).warning(
+                "Node <i>{node}</i>: analysing <r>{target}</r> failed", node=self.name, target=str(target)
+            )
             failed.append(str(target))
             return False
+
+        file_before = copy.deepcopy(self._file)
+        offsets_before = self._crosstalk.snapshot_offsets() if self._crosstalk is not None else None
+        try:
+            self.apply(target, result)
+        except Exception:  # ruff: ignore[blind-except] -- roll the partial write back, then fail only this target
+            self._file = file_before
+            if offsets_before is not None and self._crosstalk is not None:
+                self._crosstalk.restore_offsets(offsets_before)
+            logger.opt(exception=True).warning(
+                "Node <i>{node}</i>: applying <r>{target}</r> failed; rolled back", node=self.name, target=str(target)
+            )
+            failed.append(str(target))
+            return False
+
         if result.benchmark is not None:
             benchmarks.append(result.benchmark)
         return True

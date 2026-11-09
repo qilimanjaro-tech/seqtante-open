@@ -343,3 +343,102 @@ def test_parallel_node_isolates_an_analysis_failure():
     failed = node.run({})
     assert failed == ["q1"]  # one target's failure does not take the group down
     assert node.applied == [Q2]
+
+
+# --- is_benchmark reads the registry spec, benchmark_results reset, apply rollback ---
+
+
+def test_a_node_without_its_own_benchmark_is_a_benchmark_from_the_seeded_spec(monkeypatch):
+    saves = []
+    monkeypatch.setattr(node_module, "save_calibration", lambda calibration, path: saves.append(path))
+
+    class SeededBenchmarkNode(ScriptedNode):
+        experiment = "t1"  # seeded in NODE_REGISTRY with a BenchmarkSpec
+        benchmark = None  # class does not redeclare it; the seeded spec stands
+
+    node = _make(SeededBenchmarkNode, targets=[Q1])
+    assert node.is_benchmark is True  # from the registry, not the class's own benchmark
+    node.run({})
+    assert saves == []  # a benchmark writes nothing, even without its own BenchmarkSpec (ADR-0002)
+
+
+def test_benchmark_results_are_cleared_when_all_targets_are_dead():
+    node = _make(ScriptedNode, targets=[Q1])
+    node.run({})
+    assert node.benchmark_results != ()  # the first run collected a result
+    node.run({"q1": "earlier_step"})  # a re-run where every target is dead
+    assert node.benchmark_results == ()  # no stale verdict from the previous run
+
+
+def test_a_failed_apply_rolls_back_its_crosstalk_offset():
+    platform = FakePlatform()
+    calibration = _calibration()
+
+    class OffsetNode(ScriptedNode):
+        experiment = "offsetter"
+
+        def apply(self, target, result):
+            self.applied.append(target)
+            self.crosstalk.add_flux_offset("flux_z_q1", 0.1)  # both targets write the same bus
+            if str(target) == "q1":
+                raise RuntimeError("apply boom after writing the offset")
+
+    node = _make(OffsetNode, targets=[Q1, Q2], context=_context(platform=platform, calibration=calibration))
+    failed = node.run({})
+    assert failed == ["q1"]
+    # q1's offset was rolled back on failure; only q2's application remains (0.1, not 0.2).
+    assert calibration.crosstalk_matrix.flux_offsets["flux_z_q1"] == pytest.approx(0.1)
+
+
+# --- group mode (allowed/required): placement conflict and per-target placement isolation ---
+
+
+def _group_point(z: float, parked: dict[str, Flux] | None = None) -> OperatingPoint:
+    return OperatingPoint(
+        flux=Flux(z=z),
+        parked_flux=parked or {},
+        drive=DriveFreqs(lo=4e9, if_=1e8),
+        readout=ReadoutFreqs(lo=7e9, if_=1e8, attenuation=10.0),
+    )
+
+
+def test_group_placement_raises_on_a_flux_conflict():
+    # q1's point parks q2 at 0.3; q2's own point sets it to 0.1 -> conflict on flux_z_q2.
+    file = CalibrationFile(
+        operating_points_version=1,
+        operating_points={
+            "q1": {"sweet": _group_point(0.2, parked={"q2": Flux(z=0.3)})},
+            "q2": {"sweet": _group_point(0.1)},
+        },
+        experiments={
+            "grp": {"q1": ExperimentSection(operating_point="sweet"), "q2": ExperimentSection(operating_point="sweet")}
+        },
+    )
+
+    class GroupNode(ScriptedNode):
+        experiment = "grp"
+        parallel = Parallel.allowed
+        applies_operating_point = True
+
+    node = _make(GroupNode, targets=[Q1, Q2], context=_context(calibration=_calibration(file)))
+    with pytest.raises(RuntimeError, match="conflict"):
+        node.run({})
+
+
+def test_group_placement_drops_a_target_whose_section_is_missing():
+    # Only q1 has a section for "grp2"; q2's placement fails and it drops from the group.
+    file = CalibrationFile(
+        operating_points_version=1,
+        operating_points={"q1": {"sweet": _group_point(0.1)}},
+        experiments={"grp2": {"q1": ExperimentSection(operating_point="sweet")}},
+    )
+
+    class GroupNode2(ScriptedNode):
+        experiment = "grp2"
+        parallel = Parallel.allowed
+        applies_operating_point = True
+
+    node = _make(GroupNode2, targets=[Q1, Q2], context=_context(calibration=_calibration(file)))
+    failed = node.run({})
+    assert failed == ["q2"]  # q2 dropped for a missing section
+    assert node.applied == [Q1]  # q1 still ran
