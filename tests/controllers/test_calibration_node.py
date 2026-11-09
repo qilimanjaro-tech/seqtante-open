@@ -30,14 +30,6 @@ def test_run_context_holds_its_fields():
     assert context.calibration_path == "calibration.yml"
 
 
-def test_base_run_raises_until_the_lifecycle_pr():
-    # run is a concrete stub on the base, not an abstract method (task 5c fills the body); calling it
-    # before then raises NotImplementedError rather than the base being non-instantiable.
-    node = CalibrationNode(name="x", idx=0, targets=[], parameters={}, context=_context())
-    with pytest.raises(NotImplementedError):
-        node.run({})
-
-
 def test_concrete_node_stores_its_inputs():
     class Example(CalibrationNode):
         experiment = "example"

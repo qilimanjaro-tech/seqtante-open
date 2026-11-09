@@ -33,7 +33,7 @@ The two mid-level spines :class:`FixedFluxNode` and :class:`FluxSweepNode` set n
 are not registered; they hold the code the two experiment shapes share as the nodes are ported.
 """
 
-from abc import ABC
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, ClassVar, Generic, Protocol, TypeVar, runtime_checkable
 
