@@ -64,6 +64,21 @@ def test_zeros_bias_even_when_body_raises():
     assert ("set_bias_to_zero", None) in platform.calls
 
 
+def test_zeros_bias_even_when_zeroing_flux_raises():
+    platform = FakePlatform()
+
+    def failing_set_flux_to_zero():
+        platform.calls.append(("set_flux_to_zero", None))
+        raise RuntimeError("flux zeroing failed partway")
+
+    platform.set_flux_to_zero = failing_set_flux_to_zero
+
+    with pytest.raises(RuntimeError):
+        with crosstalk_session(platform, _calibration()):
+            pass
+    assert ("set_bias_to_zero", None) in platform.calls
+
+
 def test_requires_a_crosstalk_matrix():
     platform = FakePlatform()
     empty = Calibration()

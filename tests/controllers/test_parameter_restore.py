@@ -63,6 +63,34 @@ def test_untouched_parameters_are_left_alone():
     assert platform.values["flux_z_q2", Parameter.FLUX] == pytest.approx(0.2)
 
 
+def test_a_failing_restore_still_restores_the_others_and_re_raises():
+    platform = FakePlatform(
+        {
+            ("flux_z_q1", Parameter.FLUX): 0.1,
+            ("flux_z_q2", Parameter.FLUX): 0.2,
+        }
+    )
+    restore = ParameterRestore(platform)
+    restore.set("flux_z_q1", Parameter.FLUX, 0.5)
+    restore.set("flux_z_q2", Parameter.FLUX, 0.6)
+
+    original_set = platform.set_parameter
+
+    def failing_set(*, alias, parameter, value):
+        if alias == "flux_z_q2":
+            raise RuntimeError("instrument said no")
+        original_set(alias=alias, parameter=parameter, value=value)
+
+    platform.set_parameter = failing_set
+
+    with pytest.raises(ExceptionGroup) as excinfo:
+        restore.restore()
+
+    # The failing restore (flux_z_q2) does not strand flux_z_q1 at its set value.
+    assert platform.values["flux_z_q1", Parameter.FLUX] == pytest.approx(0.1)
+    assert [type(error) for error in excinfo.value.exceptions] == [RuntimeError]
+
+
 def test_prior_value_is_read_once_per_parameter():
     platform = FakePlatform({("flux_z_q1", Parameter.FLUX): 0.1})
     restore = ParameterRestore(platform)

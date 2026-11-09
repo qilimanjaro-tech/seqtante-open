@@ -55,10 +55,21 @@ class ParameterRestore:
         self._platform.set_parameter(alias=alias, parameter=parameter, value=value)
 
     def restore(self) -> None:
-        """Put every parameter touched through :meth:`set` back to its prior value, newest first."""
+        """Put every parameter touched through :meth:`set` back to its prior value, newest first.
+
+        Every parameter is attempted even if an earlier one fails to set, so a single failing restore
+        does not strand the rest at their set values. Any failures are re-raised together once every
+        parameter has been attempted.
+        """
+        errors: list[Exception] = []
         for (alias, parameter), value in reversed(self._prior.items()):
-            self._platform.set_parameter(alias=alias, parameter=parameter, value=value)
+            try:
+                self._platform.set_parameter(alias=alias, parameter=parameter, value=value)
+            except Exception as error:  # ruff: ignore[blind-except] -- every parameter must be attempted
+                errors.append(error)
         self._prior.clear()
+        if errors:
+            raise ExceptionGroup("restoring parameters failed", errors)
 
 
 @contextmanager

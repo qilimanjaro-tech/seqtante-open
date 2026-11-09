@@ -65,8 +65,8 @@ def crosstalk_session(platform: Platform, calibration: Calibration) -> Iterator[
     if not isinstance(crosstalk, CrosstalkMatrix):
         raise ValueError("the calibration has no CrosstalkMatrix; a run needs one to set flux")
     platform.set_crosstalk(crosstalk=crosstalk)
-    platform.set_flux_to_zero()
     try:
+        platform.set_flux_to_zero()
         yield CrosstalkSession(crosstalk)
     finally:
         platform.set_bias_to_zero()
