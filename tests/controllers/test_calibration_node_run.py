@@ -23,7 +23,7 @@ from seqtante_open.calibration.model import (
 )
 from seqtante_open.controllers import calibration_node as node_module
 from seqtante_open.controllers.calibration_node import AnalysisResult, CalibrationNode, RunContext
-from seqtante_open.controllers.node_registry import BenchmarkSpec
+from seqtante_open.controllers.node_registry import BenchmarkSpec, Parallel
 from seqtante_open.controllers.verdicts import (
     AnalysisError,
     BenchmarkDirection,
@@ -102,12 +102,14 @@ class ScriptedNode(CalibrationNode):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.executed: list = []
+        self.execute_calls = 0
         self.analyzed: list = []
         self.applied: list = []
         self.seen_flux: dict[str, float] = {}
 
     def execute_node(self, targets):
-        self.executed.extend(targets)  # the base runs one target at a time, so this accumulates
+        self.execute_calls += 1
+        self.executed.extend(targets)
         if self.raise_in_execute:
             raise RuntimeError("hardware boom")
         return {target: [100 + index] for index, target in enumerate(targets)}
@@ -311,3 +313,33 @@ def test_benchmark_does_not_save(monkeypatch):
     node.run({})
 
     assert saves == []
+
+
+# --- parallelisation: forbidden runs one target at a time, allowed/required runs the group at once ---
+
+
+class ParallelNode(ScriptedNode):
+    experiment = "parallel"
+    parallel = Parallel.allowed
+
+
+def test_forbidden_node_runs_one_execute_call_per_target():
+    node = _make(ScriptedNode, targets=[Q1, Q2])  # ScriptedNode is parallel=forbidden
+    node.run({})
+    assert node.execute_calls == 2  # one measurement call per target
+
+
+def test_parallel_node_measures_the_group_in_one_call():
+    node = _make(ParallelNode, targets=[Q1, Q2])
+    failed = node.run({})
+    assert failed == []
+    assert node.execute_calls == 1  # the whole group is measured together
+    assert node.executed == [Q1, Q2]
+    assert node.applied == [Q1, Q2]
+
+
+def test_parallel_node_isolates_an_analysis_failure():
+    node = _make(ParallelNode, targets=[Q1, Q2], fail={"q1"})
+    failed = node.run({})
+    assert failed == ["q1"]  # one target's failure does not take the group down
+    assert node.applied == [Q2]

@@ -205,13 +205,15 @@ class CalibrationNode(ABC, Generic[ResultT]):
     def run(self, dead_targets: dict[str, str]) -> list[str]:
         """Run the three phases for every live target and return the ones that failed (ADR-0006).
 
-        Targets already stopped by an earlier node are skipped. The crosstalk session zeroes flux at
-        the start and bias at the end around the whole node; each target is then run on its own, with
-        its operating point placed right before it runs and undone right after, so a point that parks
-        a neighbour is never held while that neighbour is measured, and two targets' fluxes never sit
-        on the fridge at once. A target whose phase raises -- a failed fit (``AnalysisError``) or any
-        other error -- fails that target alone and the node moves on (D17); benchmark results are
-        collected on :attr:`benchmark_results`.
+        Targets already stopped by an earlier node are skipped, and the crosstalk session zeroes flux
+        at the start and bias at the end around the whole node. A ``forbidden``-parallel node runs each
+        target on its own, placing its operating point right before it runs and undoing it right after,
+        so a point that parks a neighbour is never held while that neighbour is measured and two
+        targets' fluxes never sit on the fridge at once. An ``allowed``/``required`` node runs its
+        targets as one group: their points are placed together and ``execute_node`` is called once with
+        the whole group (:attr:`parallel`). Either way a target whose phase raises -- a failed fit
+        (``AnalysisError``) or any other error -- fails that target alone and the node moves on (D17);
+        benchmark results are collected on :attr:`benchmark_results`.
 
         Args:
             dead_targets (dict[str, str]): Targets already stopped by an earlier node, mapped to the
@@ -226,27 +228,14 @@ class CalibrationNode(ABC, Generic[ResultT]):
 
         failed: list[str] = []
         benchmarks: list[BenchmarkResult] = []
-        applied = False
         platform = self.context.platform
         with crosstalk_session(platform, self.context.calibration) as crosstalk:
             self._crosstalk = crosstalk
             try:
-                for target in live:
-                    try:
-                        with restoring_parameters(platform) as restore:
-                            self._restore = restore
-                            if self.applies_operating_point:
-                                self._place_operating_point(target)
-                            measurements = self.execute_node([target])
-                            result = self.analyze(target, measurements[target])
-                            self.apply(target, result)
-                        applied = True
-                        if result.benchmark is not None:
-                            benchmarks.append(result.benchmark)
-                    except Exception:  # ruff: ignore[blind-except] -- one target's failure must not abort the node
-                        failed.append(str(target))
-                    finally:
-                        self._restore = None
+                if self.parallel is Parallel.forbidden:
+                    applied = self._run_one_at_a_time(live, failed, benchmarks)
+                else:
+                    applied = self._run_as_group(live, failed, benchmarks)
                 if applied and not self.is_benchmark:
                     self._save_calibration()
             finally:
@@ -254,6 +243,64 @@ class CalibrationNode(ABC, Generic[ResultT]):
 
         self.benchmark_results = tuple(benchmarks)
         return failed
+
+    def _run_one_at_a_time(self, live: list[Target], failed: list[str], benchmarks: list[BenchmarkResult]) -> bool:
+        """Run each target in its own operating-point and restore scope (``forbidden`` parallel)."""
+        platform = self.context.platform
+        applied = False
+        for target in live:
+            try:
+                with restoring_parameters(platform) as restore:
+                    self._restore = restore
+                    if self.applies_operating_point:
+                        self._place_operating_point(target)
+                    measurements = self.execute_node([target])[target]
+                applied = self._collect(target, measurements, failed, benchmarks) or applied
+            except Exception:  # ruff: ignore[blind-except] -- a placement/measurement failure fails this target
+                failed.append(str(target))
+            finally:
+                self._restore = None
+        return applied
+
+    def _run_as_group(self, live: list[Target], failed: list[str], benchmarks: list[BenchmarkResult]) -> bool:
+        """Place every target's point and measure the whole group in one call (``allowed``/``required``)."""
+        platform = self.context.platform
+        applied = False
+        try:
+            with restoring_parameters(platform) as restore:
+                self._restore = restore
+                try:
+                    if self.applies_operating_point:
+                        for target in live:
+                            self._place_operating_point(target)
+                    measurements = self.execute_node(live)
+                except Exception:  # ruff: ignore[blind-except] -- a group-wide failure fails every target in it
+                    failed.extend(str(target) for target in live)
+                    return False
+                for target in live:
+                    try:
+                        target_measurements = measurements[target]
+                    except KeyError:
+                        failed.append(str(target))
+                        continue
+                    applied = self._collect(target, target_measurements, failed, benchmarks) or applied
+        finally:
+            self._restore = None
+        return applied
+
+    def _collect(
+        self, target: Target, measurements: list[int], failed: list[str], benchmarks: list[BenchmarkResult]
+    ) -> bool:
+        """Analyze and apply one target, isolating its failure; return whether ``apply`` ran (D17)."""
+        try:
+            result = self.analyze(target, measurements)
+            self.apply(target, result)
+        except Exception:  # ruff: ignore[blind-except] -- one target's failure must not abort the node
+            failed.append(str(target))
+            return False
+        if result.benchmark is not None:
+            benchmarks.append(result.benchmark)
+        return True
 
     def _place_operating_point(self, target: Target) -> None:
         experiment = self.experiment
