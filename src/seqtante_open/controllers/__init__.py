@@ -15,6 +15,7 @@
 from .calibration_graph import CalibrationGraph
 from .calibration_node import CalibrationNode, GraphNode, RunContext
 from .calibration_tree_parser import CalibrationParser, Pipeline, Step, Thresholds, TreeParseError
+from .crosstalk_session import CrosstalkSession, crosstalk_session
 from .node_registry import (
     NODE_REGISTRY,
     BenchmarkSpec,
@@ -24,6 +25,8 @@ from .node_registry import (
     known_experiments,
     register_node,
 )
+from .operating_point import apply_operating_point, operating_point_for, park_lo_outside_sweep
+from .parameter_restore import ParameterRestore, restoring_parameters
 
 __all__ = [
     "NODE_REGISTRY",
@@ -31,15 +34,22 @@ __all__ = [
     "CalibrationGraph",
     "CalibrationNode",
     "CalibrationParser",
+    "CrosstalkSession",
     "ExperimentSpec",
     "GraphNode",
     "Parallel",
+    "ParameterRestore",
     "Pipeline",
     "RunContext",
     "Step",
     "Thresholds",
     "TreeParseError",
+    "apply_operating_point",
+    "crosstalk_session",
     "experiment_spec",
     "known_experiments",
+    "operating_point_for",
+    "park_lo_outside_sweep",
     "register_node",
+    "restoring_parameters",
 ]
