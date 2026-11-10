@@ -58,13 +58,21 @@ class AnalysisError(Exception):
 class BenchmarkThresholds:
     """The tree's Passed/Warning thresholds for a benchmark, in the benchmark's unit (ADR-0002).
 
+    The one threshold type the parser produces and :func:`verdict_for` scores against (QHC-1848).
     ``passed`` is the stricter bound and ``warning`` the looser one; which is numerically larger
     depends on ``direction``. The parser converts the tree's units to the node's and rejects a pair
     ordered against the direction (an unreachable band), so a value only ever scores one verdict.
+
+    Args:
+        passed (float): A value at least this good is Passed, in ``unit``.
+        warning (float): A value at least this good, but not Passed, is Warning; anything worse is Failed.
+        unit (str | None): Unit of ``passed`` and ``warning``, ``None`` when the value is dimensionless.
+        direction (BenchmarkDirection): Whether a higher or a lower value is better.
     """
 
     passed: float
     warning: float
+    unit: str | None
     direction: BenchmarkDirection
 
 
