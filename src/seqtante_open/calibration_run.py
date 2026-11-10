@@ -14,8 +14,10 @@
 
 """Drives one calibration run end to end: compile the tree, run it, close it out."""
 
+import os
 import time
 import warnings
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -27,12 +29,24 @@ from ruamel.yaml import YAML
 from seqtante_open.calibration.io import read_calibration_file
 from seqtante_open.controllers import CalibrationGraph, CalibrationParser, Pipeline, RunContext
 from seqtante_open.outputs import output_controller
+from seqtante_open.run_results import RunResults, StepOutcome
 
 if TYPE_CHECKING:
     from qililab.platform.platform import Platform
     from qililab.qprogram.calibration import Calibration
 
     from seqtante_open.calibration.model import CalibrationFile
+
+
+def _package_version(package: str) -> str:
+    """The installed version of ``package``, or ``"unknown"`` if it cannot be read."""
+    try:
+        from importlib.metadata import version
+
+        return version(package)
+    except Exception:  # ruff: ignore[blind-except] -- the version is cosmetic; never fail a run over it
+        return "unknown"
+
 
 warnings.filterwarnings("ignore", category=QCoDeSDeprecationWarning)
 warnings.filterwarnings("ignore", message="Using UFloat objects with std_dev==0*")
@@ -63,6 +77,8 @@ class CalibrationRun:
         calibration (str | None): Path to the run's calibration file (a serialized ``Calibration``,
             ADR-0001). The nodes read and write it, and an unselected dependency is satisfied from it.
             None runs without one, so no unselected dependency is satisfied.
+        report (bool): Whether to write the PDF report at the end of the run (ADR-0009). ``--no-report``
+            turns it off; with it off the report module is never imported.
     """
 
     def __init__(
@@ -71,11 +87,14 @@ class CalibrationRun:
         config_path: str,
         pipelines: list[str] | None = None,
         calibration: str | None = None,
+        report: bool = True,
     ):
         self.platform_path: str = platform_path
         self.config_path: str = config_path
+        self.report: bool = report
 
         self.start = time.time()
+        self.started_at = datetime.now()
 
         # Load YAML
         config: dict = load_config(self.config_path)
@@ -164,6 +183,8 @@ class CalibrationRun:
         self._safely("end the run entry", output_controller.end_run)
         self._safely("save the calibration data", output_controller.calibration_data.save_file)
         self._safely("disconnect the platform", self.platform.disconnect)
+        if self.report:
+            self._write_report()
 
     @staticmethod
     def _safely(what: str, action):
@@ -172,3 +193,42 @@ class CalibrationRun:
             action()
         except Exception:  # ruff: ignore[blind-except] -- closing out must finish and not mask the run's own error
             logger.opt(exception=True).warning("Could not {what} while ending the run", what=what)
+
+    def _collect_results(self) -> RunResults:
+        """Gather the run's in-memory results for the report (ADR-0009).
+
+        The timestamp, versions and run id, plus every target that failed or was skipped with its
+        reason (from the graph). Benchmark results, operating points and fit plots join this record as
+        the experiment nodes are ported (tasks 6-12); the report renders whatever is present.
+        """
+        run_id = output_controller.run_id
+        results = RunResults(
+            timestamp=self.started_at,
+            seqtante_open_version=_package_version("seqtante_open"),
+            qililab_version=_package_version("qililab"),
+            run_id=run_id if run_id != -1 else None,
+        )
+        for target, step, reason in self.graph.report:
+            results.outcomes.append(StepOutcome(target=target, step=step, reason=reason))
+        return results
+
+    def _write_report(self) -> None:
+        """Write the PDF report, if the ``seqtante_open[report]`` extra is installed (ADR-0009).
+
+        Called after the database entry and the calibration file are saved, so a report failure never
+        costs the run its results. A missing extra logs a warning naming the install and the run
+        finishes normally; any other report error is logged and swallowed for the same reason.
+        """
+        try:
+            from seqtante_open.report import write_report
+        except ImportError:
+            logger.opt(colors=True).warning(
+                'The PDF report needs the report extra. Install it with: pip install "seqtante_open[report]"'
+            )
+            return
+        try:
+            path = os.path.join(output_controller.storage_path, f"report_{self.started_at:%Y-%m-%d_%H-%M-%S}.pdf")
+            write_report(self._collect_results(), path)
+            logger.opt(colors=True).info("Report written to <g>{path}</g>", path=path)
+        except Exception:  # ruff: ignore[blind-except] -- a report failure must not cost the run its saved results
+            logger.opt(exception=True).warning("Writing the PDF report failed; the run's results are already saved")
