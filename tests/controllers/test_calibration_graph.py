@@ -17,10 +17,35 @@
 import networkx as nx
 import pytest
 
+from seqtante_open.calibration.model import (
+    CalibrationFile,
+    DriveFreqs,
+    Flux,
+    OperatingPoint,
+    ReadoutFreqs,
+)
 from seqtante_open.controllers.calibration_graph import CalibrationGraph, GraphBuildError
+from seqtante_open.controllers.calibration_node import AnalysisResult, CalibrationNode, RunContext
 from seqtante_open.controllers.calibration_tree_parser import Pipeline, Step
 from seqtante_open.controllers.legacy_node import LegacyNode
 from seqtante_open.targets import QubitTarget
+
+
+def _operating_point() -> OperatingPoint:
+    return OperatingPoint(
+        flux=Flux(z=0.1),
+        drive=DriveFreqs(lo=4e9, if_=1e8),
+        readout=ReadoutFreqs(lo=7e9, if_=1e8, attenuation=10.0),
+    )
+
+
+def _calibration_file(calibrated: list[str]) -> CalibrationFile:
+    """A calibration file where each named target has an operating point (so any dependency is satisfied)."""
+    return CalibrationFile(
+        operating_points_version=1,
+        operating_points={target: {"sweet": _operating_point()} for target in calibrated},
+        experiments={},
+    )
 
 
 def _targets(*ids: int) -> list[QubitTarget]:
@@ -151,11 +176,75 @@ def test_unselected_dependency_satisfied_by_calibration_file(monkeypatch):
     b = _pipeline("B", [_step("b1", "B", _targets(1, 2))], after=["a1"])
     graph = _build([a, b])
 
-    graph.run_calibration(calibrated_targets={"q1"})  # only q1 is in the calibration file
+    graph.run_calibration(_calibration_file(["q1"]))  # only q1 is in the calibration file
 
     assert calls["b1"]["ran"] == {"q1"}  # q1 satisfied by the file
     assert calls["b1"]["dead"] == {"q2"}  # q2 absent -> blocked
     assert any(entry[0] == "q2" and "missing dependency" in entry[2] for entry in graph.report)
+
+
+def test_a_missing_dependency_also_blocks_the_next_step(monkeypatch):
+    calls = _record_runs(monkeypatch)
+    a = _pipeline("A", [_step("a1", "A", _targets(1, 2))], enabled=False)  # not run this time
+    b = _pipeline("B", [_step("b1", "B", _targets(1, 2)), _step("b2", "B", _targets(1, 2))], after=["a1"])
+    graph = _build([a, b])
+
+    graph.run_calibration(_calibration_file(["q1"]))  # q2's dependency is missing
+
+    # q2 is blocked at b1 for the missing dependency, and must stay blocked at b2.
+    assert calls["b1"] == {"ran": {"q1"}, "dead": {"q2"}}
+    assert calls["b2"] == {"ran": {"q1"}, "dead": {"q2"}}
+
+
+def test_a_target_first_appearing_in_a_later_step_is_checked(monkeypatch):
+    calls = _record_runs(monkeypatch)
+    a = _pipeline("A", [_step("a1", "A", _targets(1))], enabled=False)  # not run this time
+    # q2 first appears at b2, never at the head b1.
+    b = _pipeline("B", [_step("b1", "B", _targets(1)), _step("b2", "B", _targets(1, 2))], after=["a1"])
+    graph = _build([a, b])
+
+    graph.run_calibration(_calibration_file(["q1"]))  # q2's dependency is missing
+
+    assert calls["b1"]["ran"] == {"q1"}
+    assert calls["b2"] == {"ran": {"q1"}, "dead": {"q2"}}  # q2 checked at b2 and blocked
+    assert any(entry[0] == "q2" and entry[1] == "b2" and "missing dependency" in entry[2] for entry in graph.report)
+
+
+# --------------------------- building real nodes ---------------------------
+
+
+def test_graph_builds_the_registry_node_class_with_the_context():
+    class MyNode(CalibrationNode):
+        experiment = "mynode"
+        analyses = ("a",)
+
+        def execute_node(self, targets):
+            return {}
+
+        def analyze(self, target, measurements):
+            return AnalysisResult()
+
+        def apply(self, target, result):
+            pass
+
+    context = RunContext(platform=object(), platform_path="runcard.yml", calibration=object(), calibration_path="c.yml")
+    pipeline = _pipeline("p", [_step("s", "p", _targets(1), experiment="mynode")])
+
+    graph = _build([pipeline], context=context)
+
+    node = graph.graph.nodes[0]["data"]
+    assert isinstance(node, MyNode)
+    assert node.context is context
+
+
+def test_graph_falls_back_to_legacy_when_no_node_class():
+    # single_tone is seeded but has no node_cls, so even with a context it runs through the adapter.
+    context = RunContext(platform=object(), platform_path="runcard.yml", calibration=object(), calibration_path="c.yml")
+    pipeline = _pipeline("p", [_step("s", "p", _targets(1), experiment="single_tone")])
+
+    graph = _build([pipeline], context=context)
+
+    assert isinstance(graph.graph.nodes[0]["data"], LegacyNode)
 
 
 # --------------------------- _validate_node ---------------------------
