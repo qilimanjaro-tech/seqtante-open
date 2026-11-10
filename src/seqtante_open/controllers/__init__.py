@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .calibration_graph import CalibrationGraph
+from .calibration_graph import CalibrationGraph, GraphBuildError
 from .calibration_node import (
     AnalysisResult,
     CalibrationNode,
@@ -23,6 +23,7 @@ from .calibration_node import (
 )
 from .calibration_tree_parser import CalibrationParser, Pipeline, Step, Thresholds, TreeParseError
 from .crosstalk_session import CrosstalkSession, crosstalk_session
+from .legacy_node import LegacyNode
 from .node_registry import (
     NODE_REGISTRY,
     BenchmarkSpec,
@@ -58,7 +59,9 @@ __all__ = [
     "ExperimentSpec",
     "FixedFluxNode",
     "FluxSweepNode",
+    "GraphBuildError",
     "GraphNode",
+    "LegacyNode",
     "Parallel",
     "ParameterRestore",
     "Pipeline",
