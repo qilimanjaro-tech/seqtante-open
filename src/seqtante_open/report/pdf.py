@@ -45,17 +45,17 @@ def write_report(results: RunResults, path: str) -> None:
     styles.add(ParagraphStyle(name="Meta", parent=styles["Normal"], textColor=colors.grey, fontSize=9))
     doc = SimpleDocTemplate(path, pagesize=A4, title="Seqtante-Open calibration report")
 
-    story: list = [Paragraph("Seqtante-Open calibration report", styles["Title"])]
     run_id = "—" if results.run_id is None else str(results.run_id)
-    story.append(
+    story: list = [
+        Paragraph("Seqtante-Open calibration report", styles["Title"]),
         Paragraph(
             f"{results.timestamp:%Y-%m-%d %H:%M:%S} &nbsp;·&nbsp; "
             f"Seqtante-Open {results.seqtante_open_version} &nbsp;·&nbsp; qililab {results.qililab_version} "
             f"&nbsp;·&nbsp; run {run_id}",
             styles["Meta"],
-        )
-    )
-    story.append(Spacer(1, 0.6 * cm))
+        ),
+        Spacer(1, 0.6 * cm),
+    ]
 
     _benchmarks_section(story, results, styles)
     _outcomes_section(story, results, styles)
@@ -67,8 +67,7 @@ def write_report(results: RunResults, path: str) -> None:
 def _benchmarks_section(story: list, results: RunResults, styles) -> None:
     story.append(Paragraph("Benchmarks", styles["Heading2"]))
     if not results.benchmarks:
-        story.append(Paragraph("No benchmarks in this run.", styles["Normal"]))
-        story.append(Spacer(1, 0.4 * cm))
+        story.extend([Paragraph("No benchmarks in this run.", styles["Normal"]), Spacer(1, 0.4 * cm)])
         return
     header = ["Target", "Experiment", "Value", "Verdict", "Thresholds"]
     rows = [header] + [_benchmark_row_cells(row) for row in results.benchmarks]
@@ -83,8 +82,7 @@ def _benchmarks_section(story: list, results: RunResults, styles) -> None:
     for index, row in enumerate(results.benchmarks, start=1):
         style.append(("TEXTCOLOR", (3, index), (3, index), _VERDICT_COLOR.get(str(row.verdict), colors.black)))
     table.setStyle(TableStyle(style))
-    story.append(table)
-    story.append(Spacer(1, 0.5 * cm))
+    story.extend([table, Spacer(1, 0.5 * cm)])
 
 
 def _benchmark_row_cells(row: BenchmarkRow) -> list[str]:
@@ -102,8 +100,7 @@ def _benchmark_row_cells(row: BenchmarkRow) -> list[str]:
 def _outcomes_section(story: list, results: RunResults, styles) -> None:
     story.append(Paragraph("Failed and skipped steps", styles["Heading2"]))
     if not results.outcomes:
-        story.append(Paragraph("Every target completed every step it ran.", styles["Normal"]))
-        story.append(Spacer(1, 0.4 * cm))
+        story.extend([Paragraph("Every target completed every step it ran.", styles["Normal"]), Spacer(1, 0.4 * cm)])
         return
     rows = [["Target", "Step", "Reason"]] + [[o.target, o.step, o.reason] for o in results.outcomes]
     table = Table(rows, hAlign="LEFT")
@@ -117,38 +114,39 @@ def _outcomes_section(story: list, results: RunResults, styles) -> None:
             ]
         )
     )
-    story.append(table)
-    story.append(Spacer(1, 0.5 * cm))
+    story.extend([table, Spacer(1, 0.5 * cm)])
 
 
 def _targets_section(story: list, results: RunResults, styles) -> None:
     if not results.targets:
         return
-    story.append(PageBreak())
-    story.append(Paragraph("Per target", styles["Heading2"]))
+    story.extend([PageBreak(), Paragraph("Per target", styles["Heading2"])])
     for name in sorted(results.targets):
         target = results.targets[name]
-        story.append(Paragraph(name, styles["Heading3"]))
-        story.append(
-            Paragraph(
-                f"<b>Operating point before:</b> {_format_operating_point(target.operating_point_before)}",
-                styles["Normal"],
-            )
-        )
-        story.append(
-            Paragraph(
-                f"<b>Operating point after:</b> {_format_operating_point(target.operating_point_after)}",
-                styles["Normal"],
-            )
+        story.extend(
+            [
+                Paragraph(name, styles["Heading3"]),
+                Paragraph(
+                    f"<b>Operating point before:</b> {_format_operating_point(target.operating_point_before)}",
+                    styles["Normal"],
+                ),
+                Paragraph(
+                    f"<b>Operating point after:</b> {_format_operating_point(target.operating_point_after)}",
+                    styles["Normal"],
+                ),
+            ]
         )
         if target.reset_point_moves:
             story.append(Paragraph("<b>Reset-point move log:</b>", styles["Normal"]))
-            for move in target.reset_point_moves:
-                story.append(Paragraph(f"• {move}", styles["Normal"]))
+            story.extend(Paragraph(f"• {move}", styles["Normal"]) for move in target.reset_point_moves)
         for plot in target.fit_plots:
             if os.path.exists(plot):
-                story.append(Spacer(1, 0.2 * cm))
-                story.append(Image(plot, width=_PLOT_WIDTH, height=_PLOT_WIDTH * 0.5, kind="proportional"))
+                story.extend(
+                    [
+                        Spacer(1, 0.2 * cm),
+                        Image(plot, width=_PLOT_WIDTH, height=_PLOT_WIDTH * 0.5, kind="proportional"),
+                    ]
+                )
         story.append(Spacer(1, 0.5 * cm))
 
 
