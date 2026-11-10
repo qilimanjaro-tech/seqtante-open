@@ -22,6 +22,7 @@ database. The runs the mock manager returns are real ``SequenceRun`` and
 type.
 """
 
+import warnings
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -110,14 +111,14 @@ def test_fitting_config_is_unset_before_reset():
 
     assert outputs.storage_conf == {}
     assert outputs.save_to_database is None
-    assert outputs.specify_parameters is None
+    assert outputs.parameters_to_save is None
 
 
 def test_reset_enables_saving_to_database_by_default(make_outputs):
     outputs = make_outputs()
 
     assert outputs.save_to_database is True
-    assert outputs.specify_parameters is None
+    assert outputs.parameters_to_save is None
 
 
 def test_reset_without_storage_conf_enables_saving_to_database(get_db_manager, monkeypatch, tmp_path):
@@ -127,15 +128,30 @@ def test_reset_without_storage_conf_enables_saving_to_database(get_db_manager, m
     outputs.reset(None)
 
     assert outputs.save_to_database is True
-    assert outputs.specify_parameters is None
+    assert outputs.parameters_to_save is None
 
 
 def test_reset_can_disable_saving_to_database(make_outputs):
     assert make_outputs(save_to_database=False).save_to_database is False
 
 
-def test_specify_parameters_is_stored_as_a_set(make_outputs):
-    assert make_outputs(specify_parameters=["t1", "t2", "t1"]).specify_parameters == {"t1", "t2"}
+def test_fitting_saving_enabled_follows_save_to_database(make_outputs):
+    assert make_outputs().fitting_saving_enabled is True
+    assert make_outputs(save_to_database=False).fitting_saving_enabled is False
+
+
+def test_fitting_saving_enabled_warns_once_while_unset():
+    outputs = Outputs()
+
+    with pytest.warns(RuntimeWarning, match="save_to_database is unset"):
+        assert outputs.fitting_saving_enabled is False
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert outputs.fitting_saving_enabled is False
+
+
+def test_parameters_to_save_is_stored_as_a_set(make_outputs):
+    assert make_outputs(parameters_to_save=["t1", "t2", "t1"]).parameters_to_save == {"t1", "t2"}
 
 
 # ------------------------------- Database manager -------------------------------

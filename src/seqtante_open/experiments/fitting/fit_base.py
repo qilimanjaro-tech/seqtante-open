@@ -16,7 +16,6 @@ import os
 from abc import ABC
 from functools import cached_property
 from typing import TYPE_CHECKING, cast
-from warnings import warn
 
 import numpy as np
 import plotly.graph_objects as go
@@ -81,34 +80,41 @@ class FittingClass(ABC):
         self.fit()
         self.plot()
 
-    def add_fitting(self, parameter: FittedParameter, value: float):
-        """Collect a fitted parameter, rounded to 6 decimals, for :meth:`save_fitting_to_database`."""
+    def add_fitted_parameter(self, parameter: FittedParameter, value: float):
+        """Collect a fitted parameter in memory, for :meth:`save_fitting_to_database` to write.
+
+        Args:
+            parameter (FittedParameter): Name the value is stored under.
+            value (float): Fitted value, rounded to 6 decimals.
+        """
         self.fitting[parameter.value] = round(float(value), 6)
 
     def save_fitting_to_database(self):
         """Write the collected parameters to the ``fitting_parameters`` column of the measurement entry.
 
-        Only the parameters listed in ``storage.specify_parameters`` are written, or all of them when it
-        is not set. Nothing is written when ``storage.save_to_database`` is false, and a warning is raised
-        when it is unset, i.e. before ``output_controller.reset()``.
+        Only the parameters listed in ``storage.parameters_to_save`` are written, or all of them when it
+        is not set. Nothing is written when ``output_controller.fitting_saving_enabled`` is false.
         """
-        if output_controller.save_to_database is None:
-            warn("save_to_database is unset; skipping fitting parameter save.", RuntimeWarning)
-            return
-        if not output_controller.save_to_database:
+        if not output_controller.fitting_saving_enabled:
             return
         parameters = self._filtered_fitting()
         if parameters:
             output_controller.db_manager.add_fitting(id=self.id, parameters=parameters)
 
     def _filtered_fitting(self) -> dict[str, float]:
-        if output_controller.specify_parameters is None:
+        if output_controller.parameters_to_save is None:
             return dict(self.fitting)
-        return {k: v for k, v in self.fitting.items() if k in output_controller.specify_parameters}
+        return {k: v for k, v in self.fitting.items() if k in output_controller.parameters_to_save}
 
     def save_fitting_path_to_database(self, filepath: str):
-        """Write ``filepath`` to the ``fitting_path`` column of the measurement entry, if saving is enabled."""
-        if not output_controller.save_to_database:
+        """Write ``filepath`` to the ``fitting_path`` column of the measurement entry.
+
+        Nothing is written when ``output_controller.fitting_saving_enabled`` is false.
+
+        Args:
+            filepath (str): Path of the fit's representative plot.
+        """
+        if not output_controller.fitting_saving_enabled:
             return
         output_controller.db_manager.add_fitting(id=self.id, path=filepath)
 

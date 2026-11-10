@@ -22,6 +22,7 @@ plain file write, so no image renderer runs.
 """
 
 import os
+import warnings
 
 import plotly.graph_objects as go
 import pytest
@@ -73,9 +74,9 @@ def fake_db(monkeypatch):
 def configure(monkeypatch):
     """Set the controller's fitting config for one test."""
 
-    def _configure(save_to_database, specify_parameters=None):
+    def _configure(save_to_database, parameters_to_save=None):
         monkeypatch.setattr(output_controller, "save_to_database", save_to_database)
-        monkeypatch.setattr(output_controller, "specify_parameters", specify_parameters)
+        monkeypatch.setattr(output_controller, "parameters_to_save", parameters_to_save)
 
     return _configure
 
@@ -89,26 +90,26 @@ def make_fit(path=None, fitting=None):
     return fit
 
 
-# ------------------------------- add_fitting -------------------------------
+# --------------------------- add_fitted_parameter ---------------------------
 
 
-def test_add_fitting_stores_the_plain_key_and_rounds_to_six_decimals():
+def test_add_fitted_parameter_stores_the_plain_key_and_rounds_to_six_decimals():
     fit = make_fit()
-    fit.add_fitting(FittedParameter.T1, 1.23456789)
+    fit.add_fitted_parameter(FittedParameter.T1, 1.23456789)
     assert fit.fitting == {"t1": 1.234568}
     assert type(next(iter(fit.fitting))) is str
 
 
-def test_add_fitting_keeps_fidelity_resolution():
+def test_add_fitted_parameter_keeps_fidelity_resolution():
     fit = make_fit()
-    fit.add_fitting(FittedParameter.READOUT_FIDELITY, 0.99987654)
+    fit.add_fitted_parameter(FittedParameter.READOUT_FIDELITY, 0.99987654)
     assert fit.fitting["readout_fidelity"] == pytest.approx(0.999877, abs=0)
 
 
-def test_add_fitting_accumulates_multiple_parameters():
+def test_add_fitted_parameter_accumulates_multiple_parameters():
     fit = make_fit()
-    fit.add_fitting(FittedParameter.T1, 10.0)
-    fit.add_fitting(FittedParameter.T2, 20.0)
+    fit.add_fitted_parameter(FittedParameter.T1, 10.0)
+    fit.add_fitted_parameter(FittedParameter.T2, 20.0)
     assert fit.fitting == {"t1": 10.0, "t2": 20.0}
 
 
@@ -123,10 +124,24 @@ def test_save_fitting_warns_and_skips_when_unset(fake_db, configure):
     assert fake_db.fitting_calls == []
 
 
-def test_save_fitting_skips_when_disabled(fake_db, configure):
+def test_save_fitting_skips_silently_when_disabled(fake_db, configure):
     configure(False)
     fit = make_fit(fitting={"t1": 1.0})
-    fit.save_fitting_to_database()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        fit.save_fitting_to_database()
+    assert fake_db.fitting_calls == []
+
+
+def test_unset_saving_warns_only_on_first_use(fake_db, configure, tmp_path):
+    configure(None)
+    fit = make_fit(path=str(tmp_path), fitting={"t1": 1.0})
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        fit.save_fitting_to_database()
+        fit.save_plot(go.Figure(), "myplot", save_to_db=True)
+        make_fit(fitting={"t2": 2.0}).save_fitting_to_database()
+    assert [w.category for w in caught] == [RuntimeWarning]
     assert fake_db.fitting_calls == []
 
 
@@ -139,16 +154,16 @@ def test_save_fitting_writes_all_parameters_without_path(fake_db, configure, sch
     assert fake_db.fitting_calls == [{"id": 42, "path": None, "parameters": {"t1": 1.0, "t2": 2.0}}]
 
 
-def test_save_fitting_filters_by_specify_parameters(fake_db, configure):
+def test_save_fitting_filters_by_parameters_to_save(fake_db, configure):
     configure(True, {"t1"})
     fit = make_fit(fitting={"t1": 1.0, "t2": 2.0})
     fit.save_fitting_to_database()
     assert fake_db.fitting_calls == [{"id": 42, "path": None, "parameters": {"t1": 1.0}}]
 
 
-@pytest.mark.parametrize(("fitting", "specify_parameters"), [({}, None), ({"t2": 2.0}, {"t1"})])
-def test_save_fitting_skips_when_nothing_to_write(fake_db, configure, fitting, specify_parameters):
-    configure(True, specify_parameters)
+@pytest.mark.parametrize(("fitting", "parameters_to_save"), [({}, None), ({"t2": 2.0}, {"t1"})])
+def test_save_fitting_skips_when_nothing_to_write(fake_db, configure, fitting, parameters_to_save):
+    configure(True, parameters_to_save)
     fit = make_fit(fitting=fitting)
     fit.save_fitting_to_database()
     assert fake_db.fitting_calls == []
@@ -174,11 +189,18 @@ def test_save_plot_skips_db_by_default(fake_db, configure, tmp_path):
     assert fake_db.fitting_calls == []
 
 
-@pytest.mark.parametrize("save_to_database", [False, None])
-def test_save_plot_skips_db_when_saving_is_off_or_unset(fake_db, configure, tmp_path, save_to_database):
-    configure(save_to_database)
+def test_save_plot_skips_db_when_saving_is_off(fake_db, configure, tmp_path):
+    configure(False)
     fit = make_fit(path=str(tmp_path))
     fit.save_plot(go.Figure(), "myplot", save_to_db=True)
+    assert fake_db.fitting_calls == []
+
+
+def test_save_plot_warns_and_skips_db_when_saving_is_unset(fake_db, configure, tmp_path):
+    configure(None)
+    fit = make_fit(path=str(tmp_path))
+    with pytest.warns(RuntimeWarning, match="save_to_database is unset"):
+        fit.save_plot(go.Figure(), "myplot", save_to_db=True)
     assert fake_db.fitting_calls == []
 
 
@@ -201,8 +223,8 @@ def test_storage_conf_can_disable_saving(fake_db, tmp_path):
     assert fake_db.fitting_calls == []
 
 
-def test_storage_conf_specify_parameters_filters_what_is_saved(fake_db, tmp_path):
-    output_controller.reset({"root_dir": str(tmp_path), "specify_parameters": ["t1"]})
+def test_storage_conf_parameters_to_save_filters_what_is_saved(fake_db, tmp_path):
+    output_controller.reset({"root_dir": str(tmp_path), "parameters_to_save": ["t1"]})
     fit = make_fit(fitting={"t1": 1.0, "t2": 2.0})
     fit.save_fitting_to_database()
     assert fake_db.fitting_calls == [{"id": 42, "path": None, "parameters": {"t1": 1.0}}]

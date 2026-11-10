@@ -70,7 +70,7 @@ class StorageConf(TypedDict, total=False):
     db_manager: DbManagerConf
     log_config: LogConf
     save_to_database: bool
-    specify_parameters: list[str]
+    parameters_to_save: list[str]
 
 
 class FittedParameter(StrEnum):
@@ -120,7 +120,8 @@ class Outputs:
 
         self.storage_conf: StorageConf = {}
         self.save_to_database: bool | None = None
-        self.specify_parameters: set[str] | None = None
+        self.parameters_to_save: set[str] | None = None
+        self._warned_save_to_database_unset = False
 
     def reset(self, storage_conf: StorageConf | None = None):
         self._initialize()
@@ -129,8 +130,8 @@ class Outputs:
         self._storage_path = self._create_storage_path()
         self._db_manager = self._create_db_manager()
         self.save_to_database = self.storage_conf.get("save_to_database", True)
-        specify_parameters = self.storage_conf.get("specify_parameters")
-        self.specify_parameters = set(specify_parameters) if specify_parameters is not None else None
+        parameters_to_save = self.storage_conf.get("parameters_to_save")
+        self.parameters_to_save = set(parameters_to_save) if parameters_to_save is not None else None
 
     @property
     @_requires_initialized
@@ -178,6 +179,24 @@ class Outputs:
         if db_manager.database_schema == "qaas":
             raise ValueError("Seqtante cannot run on the 'qaas' database schema, use 'autocal' or 'measurements'.")
         return db_manager
+
+    @property
+    def fitting_saving_enabled(self) -> bool:
+        """Whether fits write their results to the database, following ``storage.save_to_database``.
+
+        ``save_to_database`` is unset until :meth:`reset`, so a fit used outside a calibration run writes
+        nothing. A warning is raised the first time that happens.
+        """
+        if self.save_to_database is None:
+            if not self._warned_save_to_database_unset:
+                warn(
+                    "save_to_database is unset because the output controller has not been reset; fitting results "
+                    "are not saved to the database.",
+                    RuntimeWarning,
+                )
+                self._warned_save_to_database_unset = True
+            return False
+        return self.save_to_database
 
     # Functions related to the run entry
 

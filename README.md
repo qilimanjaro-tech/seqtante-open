@@ -134,11 +134,11 @@ Fits save their results on the measurement's database entry: the fitted paramete
 ```yaml
 storage:
   save_to_database: true                    # default: true
-  specify_parameters: ["t1", "readout_if"]  # default: all
+  parameters_to_save: ["t1", "readout_if"]  # default: all
 ```
 
 * `save_to_database` turns every fitting write on or off.
-* `specify_parameters` lists the fitted parameters to save, out of the `FittedParameter` values in `seqtante_open.outputs`. When omitted, all of them are saved. Values are rounded to 6 decimals.
+* `parameters_to_save` lists the fitted parameters to save, out of the `FittedParameter` values in `seqtante_open.outputs`. When omitted, all of them are saved. Values are rounded to 6 decimals.
 
 In the `extra` section of the log config, `RUN_ID` is replaced by the id of the current calibration or sequence run in the database.
 

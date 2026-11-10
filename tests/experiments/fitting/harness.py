@@ -363,7 +363,7 @@ class FittingTestCase:
         monkeypatch.setattr(output_controller, "_initialized", True)
         monkeypatch.setattr(output_controller, "_db_manager", db_manager)
         monkeypatch.setattr(output_controller, "save_to_database", True)
-        monkeypatch.setattr(output_controller, "specify_parameters", None)
+        monkeypatch.setattr(output_controller, "parameters_to_save", None)
         yield db_manager
         monkeypatch.undo()
 
