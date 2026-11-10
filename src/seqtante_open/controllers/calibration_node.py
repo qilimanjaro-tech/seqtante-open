@@ -12,30 +12,48 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The abstract base every experiment subclasses, and the context a run hands each node (ADR-0004).
+"""The abstract base every experiment subclasses, and the three-phase lifecycle it runs (ADR-0004, ADR-0006).
 
-A :class:`CalibrationNode` is one step of the calibration tree made runnable: the parser builds one
-per step (ADR-0003). Each subclass declares its ``experiment`` name and the analyses it supports, and
-registers itself in :data:`~seqtante_open.controllers.node_registry.NODE_REGISTRY` through
-``__init_subclass__``. The three-phase lifecycle (``execute_node`` / ``analyze`` / ``apply``, ADR-0006)
-lands on this base in a later PR; here the base carries the declarations, the run context and the graph
-contract (``idx``, ``name``, ``run``) that :class:`~seqtante_open.controllers.calibration_graph.CalibrationGraph`
-drives.
+A :class:`CalibrationNode` is one step of the calibration tree made runnable (ADR-0003). Each subclass
+declares its ``experiment`` name and the analyses it supports, registers itself in
+:data:`~seqtante_open.controllers.node_registry.NODE_REGISTRY` through ``__init_subclass__``, and
+implements three phases that :meth:`CalibrationNode.run` calls in order (ADR-0006):
 
-During the port the graph also runs the experiments that are still legacy functions, through a
-legacy-function adapter that satisfies the same :class:`GraphNode` contract without subclassing this
-base; that adapter and the graph build live with the graph task (QHC-1800, ADR-0007).
+- ``execute_node`` -- hardware only; returns the measurement ids per target.
+- ``analyze`` -- read-only; fits the measurement and returns an :class:`AnalysisResult`, raising
+  :class:`~seqtante_open.controllers.verdicts.AnalysisError` when it cannot (the target fails the step).
+- ``apply`` -- the only writer; writes the operating point, a pulse, a section or the crosstalk offset.
+  It runs only for targets whose ``analyze`` succeeded, and a benchmark's ``apply`` writes nothing.
+
+``run`` wraps the phases in the crosstalk session and the restore context manager, places the targets
+at their operating point when ``applies_operating_point``, collects benchmark results for the report,
+and returns the targets that failed so the graph can skip their later steps (ADR-0004).
+
+The two mid-level spines :class:`FixedFluxNode` and :class:`FluxSweepNode` set no ``experiment`` and
+are not registered; they hold the code the two experiment shapes share as the nodes are ported.
 """
 
-from abc import ABC
+import copy
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, ClassVar, Protocol, runtime_checkable
+from typing import Any, ClassVar, Generic, Protocol, TypeVar, runtime_checkable
 
+from loguru import logger
 from qililab import Platform
 from qililab.qprogram.calibration import Calibration
 
-from seqtante_open.controllers.node_registry import BenchmarkSpec, Parallel, register_node
+from seqtante_open.calibration.io import read_calibration_file, save_calibration, write_calibration_file
+from seqtante_open.calibration.model import CalibrationFile
+from seqtante_open.controllers.crosstalk_session import CrosstalkSession, crosstalk_session
+from seqtante_open.controllers.node_registry import BenchmarkSpec, Parallel, experiment_spec, register_node
+from seqtante_open.controllers.operating_point import apply_operating_point, operating_point_flux_writes
+from seqtante_open.controllers.parameter_restore import ParameterRestore, restoring_parameters
+from seqtante_open.controllers.verdicts import BenchmarkResult
 from seqtante_open.targets import Target
+
+#: The node-specific fitted payload an ``analyze`` hands its ``apply`` (a frequency, a pi amplitude,
+#: readout levels...). The base passes it through untouched; each node fixes its own concrete type.
+ResultT = TypeVar("ResultT")
 
 
 @dataclass(frozen=True)
@@ -59,6 +77,24 @@ class RunContext:
     calibration_path: str
 
 
+@dataclass(frozen=True)
+class AnalysisResult(Generic[ResultT]):
+    """What a node's ``analyze`` produces for one target (ADR-0006). Read-only; ``apply`` does the writing.
+
+    Args:
+        fitted (ResultT | None): The values ``apply`` writes into the calibration file -- a fitted
+            frequency, a pi amplitude, a reset flux, readout levels. Its shape is the node's own; the
+            base passes it from ``analyze`` to ``apply`` untouched. A pure benchmark leaves it ``None``.
+        benchmark (BenchmarkResult | None): The scored result a benchmark reports to the run and the
+            report (ADR-0002); ``None`` for a recalibration.
+        plots (tuple[str, ...]): Paths to the fit plots the report shows per target (ADR-0002).
+    """
+
+    fitted: ResultT | None = None
+    benchmark: BenchmarkResult | None = None
+    plots: tuple[str, ...] = ()
+
+
 @runtime_checkable
 class GraphNode(Protocol):
     """What :class:`CalibrationGraph` needs of a node, whatever implements it (ADR-0007).
@@ -75,12 +111,12 @@ class GraphNode(Protocol):
         ...
 
 
-class CalibrationNode(ABC):
-    """The abstract base every experiment subclasses (ADR-0004).
+class CalibrationNode(ABC, Generic[ResultT]):
+    """The abstract base every experiment subclasses (ADR-0004, ADR-0006).
 
-    A subclass declares its ``experiment`` name and ``analyses`` as class variables, and registers
-    itself in :data:`~seqtante_open.controllers.node_registry.NODE_REGISTRY` automatically. The
-    mid-level spines (``FixedFluxNode``, ``FluxSweepNode``) set no ``experiment`` and are not
+    A subclass declares its ``experiment`` name and ``analyses`` as class variables, registers itself
+    in :data:`~seqtante_open.controllers.node_registry.NODE_REGISTRY` automatically, and implements
+    ``execute_node``, ``analyze`` and ``apply``. The mid-level spines set no ``experiment`` and are not
     registered; only leaf experiments are.
 
     Class variables:
@@ -137,19 +173,284 @@ class CalibrationNode(ABC):
         self.targets = targets
         self.parameters = parameters
         self.context = context
+        self.benchmark_results: tuple[BenchmarkResult, ...] = ()
+        self._file: CalibrationFile | None = None
+        self._restore: ParameterRestore | None = None
+        self._crosstalk: CrosstalkSession | None = None
+
+    @property
+    def is_benchmark(self) -> bool:
+        """Whether this node is a benchmark: it writes nothing and reports a verdict (ADR-0002).
+
+        Reads the registry spec, not the class's own ``benchmark``: ``register_node`` keeps a seeded
+        ``BenchmarkSpec`` when a node class does not redeclare one, so a node that leaves ``benchmark``
+        unset but whose experiment is seeded as a benchmark is still a benchmark (and must not save).
+        """
+        if self.experiment is None:
+            return False
+        spec = experiment_spec(self.experiment)
+        return spec is not None and spec.benchmark is not None
+
+    @property
+    def calibration_file(self) -> CalibrationFile:
+        """The run's calibration-file content, parsed from the shared ``Calibration`` once and cached."""
+        if self._file is None:
+            self._file = read_calibration_file(self.context.calibration)
+        return self._file
+
+    @property
+    def restore(self) -> ParameterRestore:
+        """The restore handle a phase sets platform parameters through; valid only during ``run``."""
+        if self._restore is None:
+            raise RuntimeError("the restore handle is only available while the node is running")
+        return self._restore
+
+    @property
+    def crosstalk(self) -> CrosstalkSession:
+        """The run's crosstalk session a recalibration's ``apply`` writes offsets through; only during ``run``."""
+        if self._crosstalk is None:
+            raise RuntimeError("the crosstalk session is only available while the node is running")
+        return self._crosstalk
 
     def run(self, dead_targets: dict[str, str]) -> list[str]:
-        """Run the three phases for every live target (ADR-0006).
+        """Run the three phases for every live target and return the ones that failed (ADR-0006).
 
-        The three-phase body lands on this base with the lifecycle PR (task 5c); until then the base
-        raises. It is a concrete method, not an abstract one: 5c fills this body rather than every
-        subclass implementing its own, so a leaf subclass is not forced to override it (ADR-0006).
+        Targets already stopped by an earlier node are skipped, and the crosstalk session zeroes flux
+        at the start and bias at the end around the whole node. A ``forbidden``-parallel node runs each
+        target on its own, placing its operating point right before it runs and undoing it right after,
+        so a point that parks a neighbour is never held while that neighbour is measured and two
+        targets' fluxes never sit on the fridge at once. An ``allowed``/``required`` node runs its
+        targets as one group: their points are placed together and ``execute_node`` is called once with
+        the whole group (:attr:`parallel`). Either way a target whose phase raises -- a failed fit
+        (``AnalysisError``) or any other error -- fails that target alone and the node moves on (D17);
+        benchmark results are collected on :attr:`benchmark_results`.
 
         Args:
             dead_targets (dict[str, str]): Targets already stopped by an earlier node, mapped to the
                 node that stopped them.
 
         Returns:
-            list[str]: The targets whose calibration failed or was skipped in this node.
+            list[str]: The targets that failed in this node (a fit error or any other error).
         """
-        raise NotImplementedError("the three-phase run lands with the lifecycle PR (task 5c)")
+        # Reset before the early return below, so a re-run of this node keeps no stale verdicts.
+        self.benchmark_results = ()
+        live = [target for target in self.targets if str(target) not in dead_targets]
+        if not live:
+            return []
+
+        failed: list[str] = []
+        benchmarks: list[BenchmarkResult] = []
+        platform = self.context.platform
+        with crosstalk_session(platform, self.context.calibration) as crosstalk:
+            self._crosstalk = crosstalk
+            try:
+                if self.parallel is Parallel.forbidden:
+                    applied = self._run_one_at_a_time(live, failed, benchmarks)
+                else:
+                    applied = self._run_as_group(live, failed, benchmarks)
+                if applied and not self.is_benchmark:
+                    self._save_calibration()
+            finally:
+                self._crosstalk, self._file = None, None
+
+        self.benchmark_results = tuple(benchmarks)
+        return failed
+
+    def _run_one_at_a_time(self, live: list[Target], failed: list[str], benchmarks: list[BenchmarkResult]) -> bool:
+        """Run each target in its own operating-point and restore scope (``forbidden`` parallel)."""
+        platform = self.context.platform
+        applied = False
+        for target in live:
+            try:
+                with restoring_parameters(platform) as restore:
+                    self._restore = restore
+                    if self.applies_operating_point:
+                        self._place_operating_point(target)
+                    measurements = self.execute_node([target])[target]
+                    # analyze/apply run inside the restore scope, so anything a phase sets is undone.
+                    applied = self._collect(target, measurements, failed, benchmarks) or applied
+            except Exception:  # ruff: ignore[blind-except] -- a placement/measurement/restore failure fails this target
+                logger.opt(exception=True).warning(
+                    "Node <i>{node}</i>: target <r>{target}</r> failed", node=self.name, target=str(target)
+                )
+                failed.append(str(target))
+            finally:
+                self._restore = None
+        return applied
+
+    def _run_as_group(self, live: list[Target], failed: list[str], benchmarks: list[BenchmarkResult]) -> bool:
+        """Place every target's point and measure the whole group in one call (``allowed``/``required``)."""
+        platform = self.context.platform
+        applied = False
+        # Reject a flux conflict between targets' points up front -- this is meant to fail loudly (no
+        # parallel-placement policy yet), so it sits outside the restore-failure guard below.
+        if self.applies_operating_point and self.experiment is not None:
+            self._reject_flux_conflicts(live, self.experiment)
+        try:
+            with restoring_parameters(platform) as restore:
+                self._restore = restore
+                group = self._place_group(live, failed) if self.applies_operating_point else list(live)
+                measurements = None
+                if group:
+                    try:
+                        measurements = self.execute_node(group)
+                    except Exception:  # ruff: ignore[blind-except] -- a group-wide measurement failure fails the group
+                        logger.opt(exception=True).warning(
+                            "Node <i>{node}</i>: group measurement failed", node=self.name
+                        )
+                        failed.extend(str(target) for target in group)
+                if measurements is not None:
+                    for target in group:
+                        try:
+                            target_measurements = measurements[target]
+                        except KeyError:
+                            logger.opt(exception=True).warning(
+                                "Node <i>{node}</i>: no measurement for <r>{target}</r>",
+                                node=self.name,
+                                target=str(target),
+                            )
+                            failed.append(str(target))
+                            continue
+                        applied = self._collect(target, target_measurements, failed, benchmarks) or applied
+        except Exception:  # ruff: ignore[blind-except] -- a restore-on-exit failure must not abort the graph (parity with forbidden mode)
+            logger.opt(exception=True).warning(
+                "Node <i>{node}</i>: restoring parameters failed after the group ran", node=self.name
+            )
+        finally:
+            self._restore = None
+        return applied
+
+    def _place_group(self, live: list[Target], failed: list[str]) -> list[Target]:
+        """Place every target's operating point for a parallel group, before measuring (ADR-0006).
+
+        Places each target, dropping one whose placement raises so a single bad section does not fail
+        the whole group. The conflict check that must fail loudly runs in :meth:`_run_as_group` first.
+        """
+        placed: list[Target] = []
+        for target in live:
+            try:
+                self._place_operating_point(target)
+                placed.append(target)
+            except Exception:  # ruff: ignore[blind-except] -- a target with no placeable point drops from the group
+                logger.opt(exception=True).warning(
+                    "Node <i>{node}</i>: placing <r>{target}</r>'s operating point failed",
+                    node=self.name,
+                    target=str(target),
+                )
+                failed.append(str(target))
+        return placed
+
+    def _reject_flux_conflicts(self, live: list[Target], experiment: str) -> None:
+        """Raise if two targets' operating points write the same flux bus to different values."""
+        planned: dict[str, tuple[str, float]] = {}
+        for target in live:
+            try:
+                writes = operating_point_flux_writes(self.calibration_file, experiment, target)
+            except Exception:  # ruff: ignore[blind-except] -- an uncomputable point drops here; placing for real handles it
+                writes = {}
+            for bus, value in writes.items():
+                prior = planned.get(bus)
+                if prior is not None and prior[1] != value:
+                    raise RuntimeError(
+                        f"parallel placement conflict on bus '{bus}' between {prior[0]} and {target}: "
+                        f"{prior[1]} vs {value}. Parallel operating-point placement has no policy yet."
+                    )
+                planned[bus] = (str(target), value)
+
+    def _collect(
+        self, target: Target, measurements: list[int], failed: list[str], benchmarks: list[BenchmarkResult]
+    ) -> bool:
+        """Analyze and apply one target, isolating its failure; return whether ``apply`` ran (D17).
+
+        A failed ``apply`` is rolled back: the cached calibration file and the crosstalk offsets are
+        restored to their pre-apply state, so a half-written target is never saved (ADR-0002).
+        """
+        try:
+            result = self.analyze(target, measurements)
+        except Exception:  # ruff: ignore[blind-except] -- a failed analysis fails only this target
+            logger.opt(exception=True).warning(
+                "Node <i>{node}</i>: analysing <r>{target}</r> failed", node=self.name, target=str(target)
+            )
+            failed.append(str(target))
+            return False
+
+        file_before = copy.deepcopy(self._file)
+        offsets_before = self._crosstalk.snapshot_offsets() if self._crosstalk is not None else None
+        try:
+            self.apply(target, result)
+        except Exception:  # ruff: ignore[blind-except] -- roll the partial write back, then fail only this target
+            self._file = file_before
+            if offsets_before is not None and self._crosstalk is not None:
+                self._crosstalk.restore_offsets(offsets_before)
+            logger.opt(exception=True).warning(
+                "Node <i>{node}</i>: applying <r>{target}</r> failed; rolled back", node=self.name, target=str(target)
+            )
+            failed.append(str(target))
+            return False
+
+        if result.benchmark is not None:
+            benchmarks.append(result.benchmark)
+        return True
+
+    def _place_operating_point(self, target: Target) -> None:
+        experiment = self.experiment
+        # Spines set no experiment; placing an operating point on one is a programming error.
+        if experiment is None:
+            raise RuntimeError(f"{type(self).__name__} applies an operating point but declares no experiment")
+        apply_operating_point(self.calibration_file, experiment, target, self.restore)
+
+    def _save_calibration(self) -> None:
+        write_calibration_file(self.context.calibration, self.calibration_file)
+        save_calibration(self.context.calibration, self.context.calibration_path)
+
+    @abstractmethod
+    def execute_node(self, targets: list[Target]) -> dict[Target, list[int]]:
+        """Measure every target and return its measurement ids; hardware only, writes nothing (ADR-0006).
+
+        Runs at the operating point ``run`` has placed (unless the node opts out and places it here).
+        A node that re-measures in a loop, like the reset-point search, returns the id of every
+        measurement so the report shows each one. Temporary platform settings go through
+        :attr:`restore`, so ``run`` undoes them.
+        """
+
+    @abstractmethod
+    def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[ResultT]:
+        """Fit ``target``'s measurement and return its result; read-only (ADR-0006).
+
+        Raises:
+            AnalysisError: when the fit does not converge or its quality is below the tree's threshold.
+                The target then fails the step; a ``Failed`` benchmark verdict does not (ADR-0002, D17).
+        """
+
+    @abstractmethod
+    def apply(self, target: Target, result: AnalysisResult[ResultT]) -> None:
+        """Write ``target``'s result into the calibration file or the crosstalk offset (ADR-0006).
+
+        The only writer. Runs only for a target whose ``analyze`` succeeded. Writes into
+        :attr:`calibration_file` (``run`` persists it) or through :attr:`crosstalk`; a benchmark's
+        ``apply`` writes nothing.
+        """
+
+
+class FixedFluxNode(CalibrationNode[ResultT]):
+    """A node that sweeps at the step's operating point (ADR-0004).
+
+    The home for the code the fixed-flux experiments share (``two_tone`` at the sweet spot, ``rabi``,
+    ``t1``, ``t2``, ``landau_zener`` and the ``reset_point_search`` loop). It lands as those nodes are
+    ported (tasks 6, 8-12); for now the spine fixes :attr:`applies_operating_point` and leaves the
+    three phases to the experiment.
+    """
+
+    applies_operating_point: ClassVar[bool] = True
+
+
+class FluxSweepNode(CalibrationNode[ResultT]):
+    """A node that sweeps a flux loop across the operating point (ADR-0004).
+
+    The home for the code the per-loop flux-sweep experiments share (``two_tone_vs_flux``, and
+    ``offset_calibration`` after December), including the coupler-to-readout-qubit mapping. It lands
+    with task 7; the node moves flux itself rather than being pinned to one operating point, so the
+    spine opts out of the automatic placement.
+    """
+
+    applies_operating_point: ClassVar[bool] = False

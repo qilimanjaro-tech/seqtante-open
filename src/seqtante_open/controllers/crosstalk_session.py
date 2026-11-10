@@ -50,6 +50,15 @@ class CrosstalkSession:
         """Add ``offset`` to the crosstalk matrix's flux offset for ``flux_bus`` (ADR-0006, ``apply``)."""
         self._crosstalk.flux_offsets[flux_bus] += float(offset)
 
+    def snapshot_offsets(self) -> dict[str, float]:
+        """A copy of the matrix's flux offsets, to roll an aborted ``apply`` back to (ADR-0006)."""
+        return dict(self._crosstalk.flux_offsets)
+
+    def restore_offsets(self, offsets: dict[str, float]) -> None:
+        """Put the matrix's flux offsets back to a snapshot from :meth:`snapshot_offsets`."""
+        for flux_bus, value in offsets.items():
+            self._crosstalk.flux_offsets[flux_bus] = value
+
 
 @contextmanager
 def crosstalk_session(platform: Platform, calibration: Calibration) -> Iterator[CrosstalkSession]:

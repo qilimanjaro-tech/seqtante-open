@@ -21,7 +21,8 @@ so the run undoes them. The stored frequencies (drive/readout LO and IF) are pla
 experiment itself, not set here.
 
 :func:`park_lo_outside_sweep` moves an LO clear of a frequency sweep's band; its policy is pinned
-in the lifecycle PR (task 5c), where it is wired into the sweep nodes and set on hardware.
+when the sweep nodes are ported (tasks 6-12, e.g. ``two_tone_vs_flux``), where it is wired in and set
+on hardware. The lifecycle PR (task 5c) lands the base and the spines, not the sweep nodes themselves.
 """
 
 from __future__ import annotations
@@ -60,16 +61,28 @@ def apply_operating_point(
     records the prior values, so the run returns every bus to where it was. The ``x`` bias is set
     only where the point stores one (z-only loops omit it).
     """
+    for alias, bias in operating_point_flux_writes(file, experiment, target).items():
+        restore.set(alias, Parameter.FLUX, bias)
+
+
+def operating_point_flux_writes(file: CalibrationFile, experiment: str, target: Target | str) -> dict[str, float]:
+    """The flux-bus writes placing ``target``'s operating point would make: ``{bus alias: bias}``.
+
+    Its own flux and the flux of every neighbour its point parks (ADR-0001). Lets a caller inspect a
+    placement -- e.g. to detect a conflict between two targets in a parallel group -- without setting it.
+    """
     point = operating_point_for(file, experiment, target)
-    _apply_flux(restore, target, point.flux)
+    writes: dict[str, float] = {}
+    _record_flux(writes, target, point.flux)
     for neighbour, flux in point.parked_flux.items():
-        _apply_flux(restore, neighbour, flux)
+        _record_flux(writes, neighbour, flux)
+    return writes
 
 
-def _apply_flux(restore: ParameterRestore, target: Target | str, flux: Flux) -> None:
-    restore.set(bus_alias(target, Role.flux, "z"), Parameter.FLUX, flux.z)
+def _record_flux(writes: dict[str, float], target: Target | str, flux: Flux) -> None:
+    writes[bus_alias(target, Role.flux, "z")] = flux.z
     if flux.x is not None:
-        restore.set(bus_alias(target, Role.flux, "x"), Parameter.FLUX, flux.x)
+        writes[bus_alias(target, Role.flux, "x")] = flux.x
 
 
 def park_lo_outside_sweep(
@@ -79,17 +92,17 @@ def park_lo_outside_sweep(
     lo: float,
     if_band: tuple[float, float],
 ) -> None:
-    """Move ``bus``'s LO clear of a frequency sweep's band, through ``restore`` (task 5c).
+    """Move ``bus``'s LO clear of a frequency sweep's band, through ``restore``.
 
     A sweep covers the absolute IF band ``if_band`` (low, high) and the measured tone is ``LO + IF``,
     so with the LO at the band's centre it sits inside the measurement window. This moves the LO so
     the whole band lies to one side of it, through ``restore`` (the stored LO value is untouched),
     and the restore handle puts it back afterwards.
 
-    The exact shift -- which side of the band, and the margin -- is pinned in the lifecycle PR
-    (task 5c), where this is wired into the sweep nodes and set on hardware.
+    The exact shift -- which side of the band, and the margin -- is pinned when the sweep nodes are
+    ported (tasks 6-12), where this is wired into them and set on hardware.
 
     Raises:
-        NotImplementedError: always, until the policy is pinned in task 5c.
+        NotImplementedError: always, until the policy is pinned with the sweep nodes.
     """
-    raise NotImplementedError("the LO-parking policy is pinned when this is wired into the sweep nodes (task 5c)")
+    raise NotImplementedError("the LO-parking policy is pinned when this is wired into the sweep nodes (tasks 6-12)")
