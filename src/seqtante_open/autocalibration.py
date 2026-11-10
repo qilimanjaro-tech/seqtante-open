@@ -42,5 +42,17 @@ if __name__ == "__main__":
         help="Path to the run's calibration file (a serialized Calibration, ADR-0001). The nodes read "
         "and write it, and an unselected dependency is satisfied from it.",
     )
+    parser.add_argument(
+        "--no-report",
+        dest="report",
+        action="store_false",
+        help="Skip the PDF report at the end of the run (ADR-0009). The report module is not imported.",
+    )
     args = parser.parse_args()
-    CalibrationRun(args.platform_path, args.config_path, pipelines=args.pipelines, calibration=args.calibration)
+    CalibrationRun(
+        args.platform_path,
+        args.config_path,
+        pipelines=args.pipelines,
+        calibration=args.calibration,
+        report=args.report,
+    )
