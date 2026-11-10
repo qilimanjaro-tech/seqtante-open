@@ -39,8 +39,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--calibration",
         default=None,
-        help="Path to the calibration file to read prior values from. "
-        "Overrides storage.calibration_data.file_path in the tree.",
+        help="Path to the run's calibration file (a serialized Calibration, ADR-0001). The nodes read "
+        "and write it, and an unselected dependency is satisfied from it.",
     )
     args = parser.parse_args()
     CalibrationRun(args.platform_path, args.config_path, pipelines=args.pipelines, calibration=args.calibration)

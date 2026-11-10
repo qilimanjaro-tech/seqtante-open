@@ -21,13 +21,18 @@ from typing import TYPE_CHECKING
 from loguru import logger
 from qcodes.utils.deprecate import QCoDeSDeprecationWarning
 from qililab.data_management import build_platform
+from qililab.utils.serialization import deserialize_from
 from ruamel.yaml import YAML
 
-from seqtante_open.controllers import CalibrationGraph, CalibrationParser, Pipeline
+from seqtante_open.calibration.io import read_calibration_file
+from seqtante_open.controllers import CalibrationGraph, CalibrationParser, Pipeline, RunContext
 from seqtante_open.outputs import output_controller
 
 if TYPE_CHECKING:
     from qililab.platform.platform import Platform
+    from qililab.qprogram.calibration import Calibration
+
+    from seqtante_open.calibration.model import CalibrationFile
 
 warnings.filterwarnings("ignore", category=QCoDeSDeprecationWarning)
 warnings.filterwarnings("ignore", message="Using UFloat objects with std_dev==0*")
@@ -55,8 +60,9 @@ class CalibrationRun:
         platform_path (str): Path to the runcard the platform is built from.
         config_path (str): Path to the YAML calibration tree.
         pipelines (list[str] | None): Names of the pipelines to run; None runs every enabled one.
-        calibration (str | None): Path to the calibration file the run reads prior values from;
-            overrides ``storage.calibration_data.file_path`` in the tree. None uses the tree's setting.
+        calibration (str | None): Path to the run's calibration file (a serialized ``Calibration``,
+            ADR-0001). The nodes read and write it, and an unselected dependency is satisfied from it.
+            None runs without one, so no unselected dependency is satisfied.
     """
 
     def __init__(
@@ -78,44 +84,58 @@ class CalibrationRun:
         self.platform: Platform = build_platform(runcard=self.platform_path)
         self.pipelines: list[Pipeline] = CalibrationParser(calibration_config=config, platform=self.platform).parse()
 
-        # --- Build base path for data from YAML ---
-        storage_conf = config.get("storage", {})
-        # A --calibration path overrides the calibration file the run reads prior values from.
-        if calibration is not None:
-            storage_conf.setdefault("calibration_data", {})["file_path"] = calibration
-
         # Set up the output controller and the logger. The run_id is only known once the run starts
         # (after the platform connects), so the logger is set up again then to carry it.
-        output_controller.reset(storage_conf=storage_conf)
+        output_controller.reset(storage_conf=config.get("storage", {}))
         output_controller.setup_logger()
         logger.opt(colors=True).info("Welcome to Seqtante-Open")
+
+        # --- Load the calibration file once (ADR-0001) and build the run context ---
+        # Deserialised here, before the hardware, into the Calibration the nodes share. An unselected
+        # dependency is satisfied from its content.
+        context, calibration_file = self._load_calibration(calibration)
 
         # --- Build the graph from the selected pipelines, before touching the hardware ---
         # Unknown/disabled selections and `after` cycles are raised here, before the platform connects.
         self.graph = CalibrationGraph(self.platform, self.platform_path)
-        self.graph.build(self.pipelines, selected_names=pipelines, data_root=output_controller.storage_path)
-        calibrated_targets = output_controller.calibration_data.calibrated_targets()
+        self.graph.build(
+            self.pipelines, selected_names=pipelines, data_root=output_controller.storage_path, context=context
+        )
 
-        # --- Connect to platform ---
+        # --- Connect to platform; from here the instruments are on, so close the run out in `finally` ---
         self.platform.connect()
-        self.platform.initial_setup()
-        self.platform.turn_on_instruments()
+        try:
+            self.platform.initial_setup()
+            self.platform.turn_on_instruments()
 
-        # Start the run entry once connected, then re-setup the logger so its records carry the run_id.
-        output_controller.start_run(
-            run_tree=config,
-            sample_name=config["sample"],
-            cooldown=config.get("cooldown"),
-            sequence_name=config.get("sequence_name"),
+            # Start the run entry once connected, then re-setup the logger so its records carry the run_id.
+            output_controller.start_run(
+                run_tree=config,
+                sample_name=config["sample"],
+                cooldown=config.get("cooldown"),
+                sequence_name=config.get("sequence_name"),
+            )
+            output_controller.setup_logger()
+
+            logger.opt(colors=True).info(
+                "Executing Calibration. Outputs in folder {path}", path=output_controller.storage_path
+            )
+            self.graph.run_calibration(calibration_file)
+        finally:
+            self._end_calibration()
+
+    def _load_calibration(self, calibration: str | None) -> "tuple[RunContext | None, CalibrationFile | None]":
+        """Deserialise ``--calibration`` into the run context and calibration file, or return ``(None, None)``."""
+        if calibration is None:
+            return None, None
+        calibration_obj: Calibration = deserialize_from(calibration)
+        context = RunContext(
+            platform=self.platform,
+            platform_path=self.platform_path,
+            calibration=calibration_obj,
+            calibration_path=calibration,
         )
-        output_controller.setup_logger()
-
-        logger.opt(colors=True).info(
-            "Executing Calibration. Outputs in folder {path}", path=output_controller.storage_path
-        )
-
-        self.graph.run_calibration(calibrated_targets)
-        self._end_calibration()
+        return context, read_calibration_file(calibration_obj, check_pulses=False)
 
     def _display_time(self):
         """Measure run time."""
@@ -133,8 +153,22 @@ class CalibrationRun:
         )
 
     def _end_calibration(self):
-        """End the calibration run and disconnect from platform."""
+        """Close the run out: zero the bias, end the run entry, save the data and disconnect.
+
+        Called in a ``finally`` after ``connect``, so it runs even when the run raised (a DB error in
+        ``start_run``, a flux conflict, anything escaping ``run_calibration``). Each step is guarded so
+        one failure does not skip the rest, and so closing out never masks the error that caused it.
+        """
         self._display_time()
-        output_controller.end_run()
-        self.platform.disconnect()
-        output_controller.calibration_data.save_file()
+        self._safely("zero the bias", self.platform.set_bias_to_zero)
+        self._safely("end the run entry", output_controller.end_run)
+        self._safely("save the calibration data", output_controller.calibration_data.save_file)
+        self._safely("disconnect the platform", self.platform.disconnect)
+
+    @staticmethod
+    def _safely(what: str, action):
+        """Run ``action``, logging and swallowing any error so the rest of the close-out still runs."""
+        try:
+            action()
+        except Exception:  # ruff: ignore[blind-except] -- closing out must finish and not mask the run's own error
+            logger.opt(exception=True).warning("Could not {what} while ending the run", what=what)
