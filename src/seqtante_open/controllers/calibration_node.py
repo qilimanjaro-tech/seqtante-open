@@ -158,6 +158,7 @@ class CalibrationNode(ABC, Generic[ResultT]):
         targets: list[Target],
         parameters: dict[Target, dict[str, Any]],
         context: RunContext,
+        analysis: str | None = None,
     ) -> None:
         """Build one runnable step.
 
@@ -167,16 +168,29 @@ class CalibrationNode(ABC, Generic[ResultT]):
             targets (list[Target]): The targets the step runs on.
             parameters (dict[Target, dict[str, Any]]): Resolved parameters per target (ADR-0005).
             context (RunContext): The run's platform and calibration file.
+            analysis (str | None): The analysis this step runs, chosen from the experiment's ``analyses``
+                (ADR-0003). ``None`` falls back to the experiment's default analysis, so a node built
+                directly (e.g. in a test) still has one. A node with more than one analysis dispatches
+                its ``analyze``/``apply`` on this.
         """
         self.name = name
         self.idx = idx
         self.targets = targets
         self.parameters = parameters
         self.context = context
+        self.analysis = analysis if analysis is not None else self._default_analysis()
         self.benchmark_results: tuple[BenchmarkResult, ...] = ()
         self._file: CalibrationFile | None = None
         self._restore: ParameterRestore | None = None
         self._crosstalk: CrosstalkSession | None = None
+
+    def _default_analysis(self) -> str | None:
+        """The experiment's default analysis (first declared), or ``None`` for a spine with no experiment."""
+        if self.experiment is not None:
+            spec = experiment_spec(self.experiment)
+            if spec is not None:
+                return spec.default_analysis
+        return self.analyses[0] if self.analyses else None
 
     @property
     def is_benchmark(self) -> bool:
