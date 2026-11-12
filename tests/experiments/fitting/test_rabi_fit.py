@@ -56,7 +56,8 @@ class TestRabiAmplitudeModel(FittingTestCase):
         """The two levels are |0>/|1>, ~2 apart, with |0> the extremum at the first sweep point."""
         level_0, level_0_std, level_1, level_1_std = fitted.readout_levels
         assert abs(level_1 - level_0) == pytest.approx(2.0, abs=0.1)  # the |0>-|1> contrast
-        assert level_0_std > 0 and level_1_std > 0  # uncertainties propagated from the fit
+        assert level_0_std > 0  # uncertainties propagated from the fit
+        assert level_1_std > 0
         # |0> is the extremum the first sweep point (ground state) sits closest to.
         first = fitted.signal[0]
         assert abs(first - level_0) < abs(first - level_1)
