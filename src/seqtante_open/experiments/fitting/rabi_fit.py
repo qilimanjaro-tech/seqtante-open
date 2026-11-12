@@ -97,6 +97,8 @@ class RabiAmplitudeModel(FittingClass):
         offset_std = fit.params["offset"].stderr or 0.0
         amplitude_std = fit.params["amplitude"].stderr or 0.0
 
+        # Both levels (offset ± amplitude) carry the same std, propagated from offset and amplitude
+        # ignoring their covariance -- an accepted approximation for the level uncertainty.
         level_std = float(np.hypot(offset_std, amplitude_std))
         top, bottom = offset + amplitude, offset - amplitude
         # The first sweep point is the ground state; |0> is the extremum its fitted value sits closest to.

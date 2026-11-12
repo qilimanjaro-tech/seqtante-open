@@ -87,6 +87,8 @@ class RabiNode(FixedFluxNode[RabiFitted]):
             params = self.parameters[target]
             point = operating_point_for(self.calibration_file, self.experiment, target)
             sweep = np.linspace(*params["drive_amplitude_sweep"])
+            if len(sweep) < 2:
+                raise ValueError(f"{target}: drive_amplitude_sweep must have at least 2 points, got {len(sweep)}")
             measurement_id = rabi_amplitude(
                 platform=self.context.platform,
                 db_manager=db_manager,
@@ -115,8 +117,8 @@ class RabiNode(FixedFluxNode[RabiFitted]):
     def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[RabiFitted]:
         """Fit the sweep, save the fit to the DB, and return the pi amplitude and readout levels.
 
-        Read-only. A ``readout_levels`` step fails (``AnalysisError``) when the fit's R² is below its
-        minimum; a ``pi_amplitude`` step fails when the fit shows no oscillation (no pi pulse exists).
+        Read-only. Both analyses fail (``AnalysisError``) when the fit's R² is below the step's minimum;
+        a ``pi_amplitude`` step also fails when the fit shows no oscillation (no pi pulse exists).
         """
         params = self.parameters[target]
         model = RabiAmplitudeModel(measurements[-1], target=str(target), path=params.get("data_folder"))
@@ -125,11 +127,9 @@ class RabiNode(FixedFluxNode[RabiFitted]):
         model.save_fitting()
 
         level_0, level_0_std, level_1, level_1_std = model.readout_levels
-        if self.analysis == READOUT_LEVELS and model.r_squared < params.get("min_r2", DEFAULT_MIN_R2):
-            raise AnalysisError(
-                f"{target} rabi fit R² {model.r_squared:.3f} is below the minimum "
-                f"{params.get('min_r2', DEFAULT_MIN_R2)} for readout levels"
-            )
+        min_r2 = params.get("min_r2", DEFAULT_MIN_R2)
+        if model.r_squared < min_r2:
+            raise AnalysisError(f"{target} rabi fit R² {model.r_squared:.3f} is below the minimum {min_r2}")
         if self.analysis == PI_AMPLITUDE and model.results["angular_frequency"] <= 0:
             raise AnalysisError(f"{target} rabi fit shows no oscillation; there is no pi amplitude to apply")
 
@@ -166,6 +166,11 @@ class RabiNode(FixedFluxNode[RabiFitted]):
         drive_pulse = self._drive_pulse(target)
         if self.context.calibration.has_waveform(drive_bus, drive_pulse):
             existing = self.context.calibration.get_waveform(drive_bus, drive_pulse)
+            if not isinstance(existing, IQDrag):
+                raise AnalysisError(
+                    f"{target}: drive pulse '{drive_pulse}' on {drive_bus} is a {type(existing).__name__}, "
+                    "not an IQDrag; cannot update its pi amplitude"
+                )
             pulse = IQDrag(
                 amplitude=fitted.pi_amplitude,
                 duration=existing.duration,
