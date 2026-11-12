@@ -141,7 +141,12 @@ class CalibrationGraph:
         spec = experiment_spec(step.experiment)
         if context is not None and spec is not None and spec.node_cls is not None:
             return spec.node_cls(
-                name=step.name, idx=idx, targets=step.targets, parameters=step.parameters, context=context
+                name=step.name,
+                idx=idx,
+                targets=step.targets,
+                parameters=step.parameters,
+                context=context,
+                analysis=step.analysis,
             )
         node = LegacyNode(
             parameters=step.parameters,
