@@ -19,8 +19,15 @@ calls a driver from ``experiment_classes`` and fits the result.
 """
 
 from .offset_calibration import single_tone_vs_flux
+from .reset_point_search import ResetPointSearchNode
 from .single_tone import single_tone_node
 from .two_tone import two_tone_node
 from .two_tone_vs_flux import two_tone_frequency_vs_flux_node
 
-__all__ = ["single_tone_node", "single_tone_vs_flux", "two_tone_frequency_vs_flux_node", "two_tone_node"]
+__all__ = [
+    "ResetPointSearchNode",
+    "single_tone_node",
+    "single_tone_vs_flux",
+    "two_tone_frequency_vs_flux_node",
+    "two_tone_node",
+]
