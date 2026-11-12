@@ -23,6 +23,14 @@ from qililab.result import AutocalMeasurement, DatabaseManager, Measurement, Str
 from seqtante_open.experiments.analysis import sss_from_array
 from seqtante_open.experiments.qprogram import two_tone_pulsed_saturation, two_tone_spectroscopy
 
+#: Warning raised when a drive bus has no instrument whose power/gain can be set.
+_NO_DRIVE_INSTRUMENT_MSG = "No instrument to set power to."
+
+
+def _measurement_id(stream_array: StreamArray) -> int:
+    """The measurement id of a completed stream, narrowing the measurement union."""
+    return cast("Measurement | AutocalMeasurement", stream_array.measurement).measurement_id
+
 
 def two_tone_pulsed_saturation_experiment(
     platform: Platform,
@@ -112,7 +120,7 @@ def two_tone_pulsed_saturation_experiment(
     elif "QCMRF" in drive_instruments:
         platform.set_parameter(alias=drive_bus, parameter=Parameter.GAIN, value=drive_gain)
     else:
-        warn("No instrument to set power to.")
+        warn(_NO_DRIVE_INSTRUMENT_MSG)
 
     stream_array = StreamArray(
         shape=(len(drive_if_sweep), 2),
@@ -137,7 +145,7 @@ def two_tone_pulsed_saturation_experiment(
         if rohde_schwarz:
             platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=False)
 
-    return cast("Measurement | AutocalMeasurement", stream_array.measurement).measurement_id
+    return _measurement_id(stream_array)
 
 
 def two_tone_frequency(
@@ -191,7 +199,7 @@ def two_tone_frequency(
         elif instrument_platform == "QCMRF":
             platform.set_parameter(alias=drive_bus, parameter=Parameter.GAIN, value=drive_gain)
     else:
-        warn("No instrument to set power to.")
+        warn(_NO_DRIVE_INSTRUMENT_MSG)
 
     stream_array = StreamArray(
         shape=(len(drive_IF_sweep), 2),
@@ -215,7 +223,7 @@ def two_tone_frequency(
         if instrument.name.name == "ROHDE_SCHWARZ":
             platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=False)
 
-    return cast("Measurement | AutocalMeasurement", stream_array.measurement).measurement_id
+    return _measurement_id(stream_array)
 
 
 def two_tone__frequency_vs_flux(
@@ -272,7 +280,7 @@ def two_tone__frequency_vs_flux(
         elif instrument_platform == "QCMRF":
             platform.set_parameter(alias=drive_bus, parameter=Parameter.GAIN, value=drive_gain)
     else:
-        warn("No instrument to set power to.")
+        warn(_NO_DRIVE_INSTRUMENT_MSG)
 
     if flux_parameter == Parameter.FLUX:
         unit = "phi_0"
@@ -314,4 +322,4 @@ def two_tone__frequency_vs_flux(
         if instrument.name.name == "ROHDE_SCHWARZ":
             platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=False)
 
-    return cast("Measurement | AutocalMeasurement", stream_array.measurement).measurement_id
+    return _measurement_id(stream_array)

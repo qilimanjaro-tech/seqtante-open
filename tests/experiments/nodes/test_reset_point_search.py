@@ -188,7 +188,8 @@ def test_giving_up_after_the_move_limit_fails_the_target(monkeypatch):
 def test_first_move_is_a_probe_towards_lower_flux():
     step, slope, required = next_flux_z_step([(0.6, 2.82e9)], target_freq=2.80e9, probe_step=5e-4, max_step=1e-3)
     assert step == pytest.approx(-5e-4)
-    assert slope is None and required is None
+    assert slope is None
+    assert required is None
 
 
 def test_secant_step_steers_towards_the_target():
