@@ -15,7 +15,7 @@ import json
 import os
 import sys
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from functools import wraps
 from importlib.resources import files
 from pathlib import Path
@@ -56,13 +56,6 @@ class DbManagerConf(TypedDict, total=False):
     database_schema: DatabaseSchema
 
 
-class CalibrationDataConf(TypedDict, total=False):
-    """`storage.calibration_data` section. Unpacked into `CalibrationData`, minus `base_path`."""
-
-    file_path: str
-    file_type: Literal["yaml", "json"]
-
-
 class LogConf(TypedDict, total=False):
     """`storage.log_config` section, pointing at the loguru config file."""
 
@@ -75,79 +68,33 @@ class StorageConf(TypedDict, total=False):
 
     root_dir: str
     db_manager: DbManagerConf
-    calibration_data: CalibrationDataConf
     log_config: LogConf
+    save_to_database: bool
+    parameters_to_save: list[str]
 
 
-class CalibrationParameter(Enum):
-    "Output parameters that aren't stored in the runcard"
+class FittedParameter(StrEnum):
+    """Keys fits write to the ``fitting_parameters`` column of their measurement entry (QHC-1497)."""
 
     T1 = "t1"
     T2 = "t2"
     T2_ECHO = "t2_echo"
-    SINGLE_QUBIT_GATE_FIDELITY = "1q_gate_fidelity"
-    DOUBLE_QUBIT_GATE_FIDELITY = "2q_gate_fidelity"
     READOUT_FIDELITY = "readout_fidelity"
-
-
-class CalibrationData:
-    def __init__(self, base_path: str, file_path: str | None = None, file_type: Literal["yaml", "json"] | None = None):
-        if file_path:
-            if file_path.startswith(DEFAULT_FOLDER_ALIAS) and file_path:
-                file_path = file_path.replace(DEFAULT_FOLDER_ALIAS, base_path, 1)
-            self._path = Path(file_path).expanduser().resolve()
-        else:
-            self._path = None
-
-        if file_type in ["yaml", "json"]:
-            self._file_type = file_type
-        elif file_path:
-            _, _, file_extension = file_path.rpartition(".")
-            self._file_type = file_extension if file_extension in ["yml", "json"] else None
-        else:
-            self._file_type = None
-
-        self._data: dict[str, dict[str, float]] = {}
-
-    def __getitem__(self, key):
-        return self._data[key]
-
-    def __setitem__(self, key, value):
-        self._data[key] = value
-
-    def __delitem__(self, key):
-        del self._data[key]
-
-    def save_file(self):
-        if not self._path or not self._file_type:
-            return
-        with self._path.open("w", encoding="utf-8") as f:
-            if self._file_type == "json":
-                json.dump(self._data, f, indent=2)
-            elif self._file_type in ["yaml", "yml"]:
-                yaml.safe_dump(self._data, f, sort_keys=False)
-
-    def load_file(self):
-        """Load an existing calibration file into memory, so prior values can satisfy dependencies."""
-        if not self._path or not self._file_type or not self._path.exists():
-            return
-        with self._path.open("r", encoding="utf-8") as f:
-            loaded = json.load(f) if self._file_type == "json" else yaml.safe_load(f)
-        if isinstance(loaded, dict):
-            self._data = loaded
-
-    def calibrated_targets(self) -> set[str]:
-        """Names of the targets that already have a value in the calibration file."""
-        return set(self._data)
-
-    def __contains__(self, key) -> bool:
-        return key in self._data
-
-    def _store_parameter(self, parameter: CalibrationParameter, target: list[int] | int, value: float):
-        target_str = str(target)
-        if target_str not in self._data:
-            self._data[target_str] = {}
-        self._data[target_str][parameter.value] = float(value)
+    GATE_FIDELITY_1Q = "gate_fidelity_1q"
+    GATE_FIDELITY_2Q = "gate_fidelity_2q"
+    DRIVE_IF = "drive_if"
+    DRIVE_LO = "drive_lo"
+    READOUT_IF = "readout_if"
+    READOUT_LO = "readout_lo"
+    RABI_AMPLITUDE = "rabi_amplitude"
+    DRAG_COEFFICIENT = "drag_coefficient"
+    CZ_AMPLITUDE = "cz_amplitude"
+    FLUX_OFFSET = "flux_offset"
+    SWEET_SPOT_FLUX_OFFSET_Z = "sweet_spot_flux_offset_z"
+    SWEET_SPOT_FLUX_OFFSET_X = "sweet_spot_flux_offset_x"
+    THERMAL_POPULATION = "thermal_population"
+    FIT_R2 = "fit_r2"
+    FIT_REDCHI = "fit_redchi"
 
 
 def _requires_initialized(fn):
@@ -166,14 +113,15 @@ class Outputs:
 
     def _initialize(self):
         self._initialized = False
-        self._calibration_data: CalibrationData | None = None
-
         self._db_manager: DatabaseManager | None = None
         self.run: CalibrationRun | SequenceRun | None = None
 
         self._storage_path: str | None = None
 
         self.storage_conf: StorageConf = {}
+        self.save_to_database: bool | None = None
+        self.parameters_to_save: set[str] | None = None
+        self._warned_save_to_database_unset = False
 
     def reset(self, storage_conf: StorageConf | None = None):
         self._initialize()
@@ -181,7 +129,9 @@ class Outputs:
         self._initialized = True
         self._storage_path = self._create_storage_path()
         self._db_manager = self._create_db_manager()
-        self._calibration_data = self._create_calibration_data()
+        self.save_to_database = self.storage_conf.get("save_to_database", True)
+        parameters_to_save = self.storage_conf.get("parameters_to_save")
+        self.parameters_to_save = set(parameters_to_save) if parameters_to_save is not None else None
 
     @property
     @_requires_initialized
@@ -231,25 +181,22 @@ class Outputs:
         return db_manager
 
     @property
-    @_requires_initialized
-    def calibration_data(self) -> CalibrationData:
-        if self._calibration_data is None:
-            self._calibration_data = self._create_calibration_data()
-        return self._calibration_data
+    def fitting_saving_enabled(self) -> bool:
+        """Whether fits write their results to the database, following ``storage.save_to_database``.
 
-    def _create_calibration_data(self) -> CalibrationData:
-        data_conf = self.storage_conf.get("calibration_data")
-        if data_conf:
-            data = CalibrationData(base_path=self.storage_path, **data_conf)
-        else:
-            data = CalibrationData(base_path=self.storage_path)
-        # Load any existing calibration file so prior values can satisfy unselected dependencies.
-        data.load_file()
-        return data
-
-    def store_parameter(self, parameter: CalibrationParameter, target: list[int] | int, value: float):
-        """Stores a parameter for later serialization if configured"""
-        self.calibration_data._store_parameter(parameter=parameter, target=target, value=value)
+        ``save_to_database`` is unset until :meth:`reset`, so a fit used outside a calibration run writes
+        nothing. A warning is raised the first time that happens.
+        """
+        if self.save_to_database is None:
+            if not self._warned_save_to_database_unset:
+                warn(
+                    "save_to_database is unset because the output controller has not been reset; fitting results "
+                    "are not saved to the database.",
+                    RuntimeWarning,
+                )
+                self._warned_save_to_database_unset = True
+            return False
+        return self.save_to_database
 
     # Functions related to the run entry
 

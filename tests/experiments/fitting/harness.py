@@ -339,9 +339,9 @@ class FittingTestCase:
         """Patch the boundaries every fit class touches, for the whole test class.
 
         ``db_manager`` is a MagicMock whose ``load_entry_by_id`` returns a
-        stand-in measurement. ``store_parameter`` is replaced by a no-op: it is on
-        its way out, and untouched it raises ``AttributeError`` (``Outputs.storage_conf``
-        is only ever set by ``reset()``), so seven fit classes could not run at all.
+        stand-in measurement, and which absorbs the ``add_fitting`` calls the
+        fits make. ``save_to_database`` is turned on so those calls
+        actually happen: left unset, ``save_fitting_to_database`` only warns.
         """
         results, loops = data
         attrs = {
@@ -357,11 +357,13 @@ class FittingTestCase:
 
         db_manager = MagicMock(name="db_manager")
         db_manager.load_entry_by_id.return_value = measurement
+        db_manager.database_schema = "autocal"
 
         monkeypatch = pytest.MonkeyPatch()
         monkeypatch.setattr(output_controller, "_initialized", True)
         monkeypatch.setattr(output_controller, "_db_manager", db_manager)
-        monkeypatch.setattr(output_controller, "store_parameter", lambda **_: None)
+        monkeypatch.setattr(output_controller, "save_to_database", True)
+        monkeypatch.setattr(output_controller, "parameters_to_save", None)
         yield db_manager
         monkeypatch.undo()
 
@@ -440,6 +442,24 @@ class FittingTestCase:
         assert not plt.get_fignums(), (
             f"{self.FIT_CLASS.__name__}.plot() left matplotlib figures open. "
             f"Call save_plot() or plt.close() before returning."
+        )
+
+    def test_fit_writes_to_database_at_most_once(self, fit_obj: Any, environment: MagicMock) -> None:
+        """``fit()`` writes its parameters in one ``add_fitting`` call at most, so a duplicated save fails here."""
+        environment.add_fitting.reset_mock()
+        fit_obj.fit()
+        assert environment.add_fitting.call_count <= 1, (
+            f"{self.FIT_CLASS.__name__}.fit() called add_fitting {environment.add_fitting.call_count} times"
+        )
+
+    def test_plot_writes_to_database_at_most_once(self, fitted: Any, environment: MagicMock, tmp_path: Path) -> None:
+        """``plot()`` stores the path of one representative plot at most."""
+        environment.add_fitting.reset_mock()
+        fitted.path = str(tmp_path)
+        fitted.plot()
+        assert environment.add_fitting.call_count <= 1, (
+            f"{self.FIT_CLASS.__name__}.plot() called add_fitting {environment.add_fitting.call_count} times. "
+            f"Pass save_to_db=True on a single save_plot() call."
         )
 
     def test_plot_shows_when_no_path(self, fitted: Any, shows: dict[str, int]) -> None:

@@ -162,7 +162,6 @@ class CalibrationRun:
         self._display_time()
         self._safely("zero the bias", self.platform.set_bias_to_zero)
         self._safely("end the run entry", output_controller.end_run)
-        self._safely("save the calibration data", output_controller.calibration_data.save_file)
         self._safely("disconnect the platform", self.platform.disconnect)
 
     @staticmethod

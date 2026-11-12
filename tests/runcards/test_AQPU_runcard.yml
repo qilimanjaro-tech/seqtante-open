@@ -58,9 +58,7 @@ instruments:
       scope_hardware_averaging: true
       sampling_rate: 1000000000.0
       hardware_demodulation: true
-      integration_length: 2100
       integration_mode: ssb
-      sequence_timeout: 90
       acquisition_timeout: 600
       scope_store_enabled: false
       threshold: 0.004857990128730904
@@ -80,9 +78,7 @@ instruments:
       scope_hardware_averaging: true
       sampling_rate: 1000000000.0
       hardware_demodulation: true
-      integration_length: 2100
       integration_mode: ssb
-      sequence_timeout: 1
       acquisition_timeout: 1
       scope_store_enabled: false
       threshold: 0.004857990128730904
@@ -159,7 +155,6 @@ instrument_controllers:
       slot_id: 2
     reset: true
     reference_clock: internal
-    ext_trigger: True
 
   - name: qdevil_qdac2
     alias: qdac2_1

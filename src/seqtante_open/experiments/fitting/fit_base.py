@@ -24,7 +24,7 @@ from qililab.data_management import build_platform
 from scipy.special import erf as _erf
 from xarray import DataArray
 
-from seqtante_open.outputs import output_controller
+from seqtante_open.outputs import FittedParameter, output_controller
 
 if TYPE_CHECKING:
     from qililab.platform.platform import Platform
@@ -58,6 +58,7 @@ class FittingClass(ABC):
         )
         self.array, self.loops = self.measurement.load_h5()
 
+        self.fitting: dict[str, float] = {}
         self.path = path
         self.target = target
 
@@ -79,17 +80,56 @@ class FittingClass(ABC):
         self.fit()
         self.plot()
 
-    def save_plot(self, fig: go.Figure, title: str) -> str | None:
+    def add_fitted_parameter(self, parameter: FittedParameter, value: float):
+        """Collect a fitted parameter in memory, for :meth:`save_fitting_to_database` to write.
+
+        Args:
+            parameter (FittedParameter): Name the value is stored under.
+            value (float): Fitted value, rounded to 6 decimals.
+        """
+        self.fitting[parameter.value] = round(float(value), 6)
+
+    def save_fitting_to_database(self):
+        """Write the collected parameters to the ``fitting_parameters`` column of the measurement entry.
+
+        Only the parameters listed in ``storage.parameters_to_save`` are written, or all of them when it
+        is not set. Nothing is written when ``output_controller.fitting_saving_enabled`` is false.
+        """
+        if not output_controller.fitting_saving_enabled:
+            return
+        parameters = self._filtered_fitting()
+        if parameters:
+            output_controller.db_manager.add_fitting(id=self.id, parameters=parameters)
+
+    def _filtered_fitting(self) -> dict[str, float]:
+        if output_controller.parameters_to_save is None:
+            return dict(self.fitting)
+        return {k: v for k, v in self.fitting.items() if k in output_controller.parameters_to_save}
+
+    def save_fitting_path_to_database(self, filepath: str):
+        """Write ``filepath`` to the ``fitting_path`` column of the measurement entry.
+
+        Nothing is written when ``output_controller.fitting_saving_enabled`` is false.
+
+        Args:
+            filepath (str): Path of the fit's representative plot.
+        """
+        if not output_controller.fitting_saving_enabled:
+            return
+        output_controller.db_manager.add_fitting(id=self.id, path=filepath)
+
+    def save_plot(self, fig: go.Figure, title: str, save_to_db: bool = False) -> str | None:
         """Write ``fig`` under :attr:`path`, or show it when there is no path.
 
         Args:
             fig (go.Figure): Figure to render.
             title (str): Basename for the file. Newlines are stripped, so a plot
                 title broken across lines can be passed straight in.
+            save_to_db (bool, optional): Store the written path as the fit's representative plot with
+                :meth:`save_fitting_path_to_database`. Defaults to False.
 
         Returns:
             str | None: Path written, or None when the figure was shown instead.
-                Fits that register their output with ``add_fitting`` need the path.
         """
         if not self.path:
             fig.show()
@@ -99,6 +139,8 @@ class FittingClass(ABC):
         filename = title.replace("\n", "").strip()
         filepath = os.path.join(self.path, f"{filename}.{RENDER_FORMAT}")
         fig.write_image(filepath, format=RENDER_FORMAT, scale=RENDER_SCALE)
+        if save_to_db:
+            self.save_fitting_path_to_database(filepath)
         return filepath
 
     # ----------------- Data-processing------------------
