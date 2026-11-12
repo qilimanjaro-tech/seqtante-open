@@ -16,6 +16,12 @@ from qililab import Arbitrary, Domain, IQPair, QProgram, Square
 
 from seqtante_open.experiments.qprogram.utils import smooth_ringup_wf
 
+#: The drive ring-down is a fixed-length smooth ramp (the calibration script's value), independent of the
+#: configurable ring-up ``duration_ringup_drive``; kept as-is to match the ported script.
+_DRIVE_RINGDOWN_SAMPLES = 200
+#: Fixed readout-wait padding (ns) the script adds on top of the drive duration before the readout starts.
+_READOUT_WAIT_PADDING_NS = 38
+
 
 def two_tone_pulsed_saturation(
     readout_if_freq: float,
@@ -64,7 +70,7 @@ def two_tone_pulsed_saturation(
     weights_shape = Square(amplitude=1, duration=readout_duration)
 
     smooth_rup, d_smooth_rup, _ = smooth_ringup_wf(duration_ringup_drive, drive_sigmas)
-    smooth_rdown, d_smooth_rdown, _ = smooth_ringup_wf(200, drive_sigmas)
+    smooth_rdown, d_smooth_rdown, _ = smooth_ringup_wf(_DRIVE_RINGDOWN_SAMPLES, drive_sigmas)
     smooth_rdown = smooth_rdown[::-1]
     d_smooth_rdown = d_smooth_rdown[::-1]
 
@@ -91,7 +97,7 @@ def two_tone_pulsed_saturation(
             qp_2tone.sync()
             qp_2tone.play(bus="drive", waveform=IQPair(I=d_wf_I, Q=d_wf_Q))
             qp_2tone.play(bus="drive", waveform=IQPair(I=d_rdown_wf_I, Q=d_rdown_wf_Q))
-            qp_2tone.wait(bus="readout", duration=drive_duration + 38 - overlap_time)
+            qp_2tone.wait(bus="readout", duration=drive_duration + _READOUT_WAIT_PADDING_NS - overlap_time)
             if ringup_time > 0:
                 qp_2tone.play(bus="readout", waveform=IQPair(I=ringup_wf_I, Q=ringup_wf_Q))
             qp_2tone.measure(

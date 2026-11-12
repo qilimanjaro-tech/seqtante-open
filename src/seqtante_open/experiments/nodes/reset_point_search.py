@@ -138,6 +138,7 @@ class _SearchOutcome:
 
     flux_z: float
     measurement_id: int
+    plot_path: str | None
 
 
 class ResetPointSearchNode(FixedFluxNode[ResetPoint]):
@@ -178,7 +179,7 @@ class ResetPointSearchNode(FixedFluxNode[ResetPoint]):
         sweep_start = self._param(target, "sweep_start")
         sweep_stop = self._param(target, "sweep_stop")
         initial_center = (sweep_start + sweep_stop) / 2
-        qubit_if = self._find_qubit(target, point, initial_center, ids)
+        qubit_if, plot_path = self._find_qubit(target, point, initial_center, ids)
         if qubit_if is None:
             raise AnalysisError(f"{target}: no qubit line found at flux_z = {flux_z:.5f} in any sweep width")
         qubit_freq_abs = qubit_if + drive_lo
@@ -213,20 +214,24 @@ class ResetPointSearchNode(FixedFluxNode[ResetPoint]):
             flux_z = next_flux_z
             moves += 1
 
-            qubit_if = self._find_qubit(target, point, expected_freq, ids)
+            qubit_if, plot_path = self._find_qubit(target, point, expected_freq, ids)
             if qubit_if is None:
                 raise AnalysisError(f"{target}: lost the qubit line after moving flux_z to {flux_z:.5f}")
             qubit_freq_abs = qubit_if + drive_lo
             history.append((flux_z, qubit_freq_abs))
 
-        self._search[target] = _SearchOutcome(flux_z=flux_z, measurement_id=ids[-1])
+        self._search[target] = _SearchOutcome(flux_z=flux_z, measurement_id=ids[-1], plot_path=plot_path)
         return ids
 
-    def _find_qubit(self, target: Target, point, center: float, ids: list[int]) -> float | None:
-        """Look for the qubit line around ``center`` (absolute Hz), widening the sweep until a fit is accepted."""
+    def _find_qubit(self, target: Target, point, center: float, ids: list[int]) -> tuple[float | None, str | None]:
+        """Look for the qubit line around ``center`` (absolute Hz), widening the sweep until a fit is accepted.
+
+        Every attempt is plotted (accepted or not), so a failed search still leaves its sweeps in the
+        report. Returns the fitted IF and the accepted fit's plot path, so :meth:`analyze` can reuse that
+        plot instead of re-plotting the same measurement.
+        """
         sweep_span = self._param(target, "sweep_stop") - self._param(target, "sweep_start")
         spans = [sweep_span, *self._param(target, "retry_spans")]
-        qubit_if: float | None = None
         for span in spans:
             measurement_id = self._measure_two_tone(target, point, center - span / 2, center + span / 2)
             ids.append(measurement_id)
@@ -237,17 +242,16 @@ class ResetPointSearchNode(FixedFluxNode[ResetPoint]):
                 r2_min=self._param(target, "min_r2"),
             )
             model.fit()
-            model.plot()
+            plot = model.plot()
             if model.accepted:
-                qubit_if = model.fitted_if
-                break
-        return qubit_if
+                return model.fitted_if, plot
+        return None, None
 
     def _measure_two_tone(self, target: Target, point, freq_start: float, freq_stop: float) -> int:
         """Run one two-tone pulsed-saturation sweep over ``[freq_start, freq_stop]`` (absolute Hz); return its id."""
         drive_lo = point.drive.lo
         step = self._param(target, "sweep_step")
-        npoints = int((freq_stop - freq_start) // step + 1)
+        npoints = round((freq_stop - freq_start) / step) + 1
         drive_if_sweep = np.linspace(freq_start, freq_stop, num=npoints, endpoint=True) - drive_lo
         return two_tone_pulsed_saturation_experiment(
             platform=self.context.platform,
@@ -287,12 +291,12 @@ class ResetPointSearchNode(FixedFluxNode[ResetPoint]):
             r2_min=self._param(target, "min_r2"),
         )
         model.fit()
-        plot = model.plot()
         model.save_fitting()
         if not model.accepted or model.fitted_if is None:
             raise AnalysisError(f"{target}: final reset-search fit rejected: {model.results['quality']}")
+        # execute_node already plotted this accepted sweep during the search; reuse that plot.
         fitted = ResetPoint(flux_z=outcome.flux_z, drive_if=model.fitted_if)
-        return AnalysisResult(fitted=fitted, plots=(plot,) if plot else ())
+        return AnalysisResult(fitted=fitted, plots=(outcome.plot_path,) if outcome.plot_path else ())
 
     def apply(self, target: Target, result: AnalysisResult[ResetPoint]) -> None:
         """Write the reset point's absolute ``flux.z`` and drive IF (ADR-0011); the only writer."""
