@@ -133,3 +133,6 @@ data/
 _build
 
 tmp.*
+
+# Agent scratch output (research, specs, evidence)
+.agents/artifacts/

@@ -2,6 +2,8 @@
 
 Automatic calibration and benchmarking of qubits and couplers, driven by a calibration tree of experiments run against a qililab platform.
 
+Terms shared across Qilimanjaro's stack are in the [shared glossary](https://github.com/qilimanjaro-tech/claude-skills/blob/main/onboarding/qilimanjaro-agent-starter-kit/org-context/qilimanjaro-glossary.md); this file holds Seqtante-Open's own.
+
 ## Language
 
 ### Calibration runs
