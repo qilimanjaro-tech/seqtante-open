@@ -48,7 +48,7 @@ from seqtante_open.controllers.crosstalk_session import CrosstalkSession, crosst
 from seqtante_open.controllers.node_registry import BenchmarkSpec, Parallel, experiment_spec, register_node
 from seqtante_open.controllers.operating_point import apply_operating_point, operating_point_flux_writes
 from seqtante_open.controllers.parameter_restore import ParameterRestore, restoring_parameters
-from seqtante_open.controllers.verdicts import BenchmarkResult
+from seqtante_open.controllers.verdicts import BenchmarkResult, BenchmarkThresholds, verdict_for
 from seqtante_open.targets import Target
 
 #: The node-specific fitted payload an ``analyze`` hands its ``apply`` (a frequency, a pi amplitude,
@@ -85,13 +85,16 @@ class AnalysisResult(Generic[ResultT]):
         fitted (ResultT | None): The values ``apply`` writes into the calibration file -- a fitted
             frequency, a pi amplitude, a reset flux, readout levels. Its shape is the node's own; the
             base passes it from ``analyze`` to ``apply`` untouched. A pure benchmark leaves it ``None``.
-        benchmark (BenchmarkResult | None): The scored result a benchmark reports to the run and the
-            report (ADR-0002); ``None`` for a recalibration.
+        value (float | None): A benchmark's measured value, in the benchmark's unit. The run scores it
+            against the tree's thresholds with :func:`~seqtante_open.controllers.verdicts.verdict_for`
+            (QHC-1848), so ``analyze`` reports the value and never the verdict. ``None`` for a recalibration.
+        uncertainty (float | None): The standard uncertainty on ``value`` where the analysis gives one.
         plots (tuple[str, ...]): Paths to the fit plots the report shows per target (ADR-0002).
     """
 
     fitted: ResultT | None = None
-    benchmark: BenchmarkResult | None = None
+    value: float | None = None
+    uncertainty: float | None = None
     plots: tuple[str, ...] = ()
 
 
@@ -388,9 +391,27 @@ class CalibrationNode(ABC, Generic[ResultT]):
             failed.append(str(target))
             return False
 
-        if result.benchmark is not None:
-            benchmarks.append(result.benchmark)
+        if self.is_benchmark and result.value is not None:
+            thresholds = self._thresholds_for(target)
+            if thresholds is not None:
+                benchmarks.append(
+                    BenchmarkResult(
+                        target=str(target),
+                        value=result.value,
+                        uncertainty=result.uncertainty,
+                        verdict=verdict_for(result.value, thresholds),
+                        thresholds=thresholds,
+                    )
+                )
         return True
+
+    def _thresholds_for(self, target: Target) -> BenchmarkThresholds | None:
+        """The parsed Passed/Warning thresholds for ``target``, from its resolved parameters (ADR-0002).
+
+        The parser converts the tree's thresholds to the benchmark's unit and stores them per target;
+        :meth:`_collect` scores the measured value against them with ``verdict_for`` (QHC-1848).
+        """
+        return self.parameters.get(target, {}).get("thresholds")
 
     def _place_operating_point(self, target: Target) -> None:
         experiment = self.experiment

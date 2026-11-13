@@ -21,7 +21,7 @@ from .calibration_node import (
     GraphNode,
     RunContext,
 )
-from .calibration_tree_parser import CalibrationParser, Pipeline, Step, Thresholds, TreeParseError
+from .calibration_tree_parser import CalibrationParser, Pipeline, Step, TreeParseError
 from .crosstalk_session import CrosstalkSession, crosstalk_session
 from .legacy_node import LegacyNode
 from .node_registry import (
@@ -67,7 +67,6 @@ __all__ = [
     "Pipeline",
     "RunContext",
     "Step",
-    "Thresholds",
     "TreeParseError",
     "Verdict",
     "apply_operating_point",
