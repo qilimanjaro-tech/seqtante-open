@@ -34,10 +34,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # A PR runs the oldest and the newest version we support and main fills in
-        # the middle. COVERAGE_PYTHON is the one that measures and uploads coverage;
-        # the env context is not available here, so it has to be spelled out.
-        python-version: ${{ github.event_name == 'push' && fromJSON('["3.11", "3.12", "3.13"]') || fromJSON('["3.11", "3.13"]') }}
+        # Verify the restricted install on every supported Python, including PRs.
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -47,11 +45,15 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
+          version: "0.13.8"
           python-version: ${{ matrix.python-version }}
-          enable-cache: true
-          cache-dependency-glob: |
-            **/pyproject.toml
-            **/uv.lock
+          enable-cache: false
+
+      - name: Install selected Python
+        run: uv python install "$UV_PYTHON"
+
+      - name: Check source-build policy before authentication
+        run: '"$(uv python find)" .github/ci-builds/check_policy.py'
 
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
@@ -94,7 +96,7 @@ jobs:
           printf 'UV_INDEX_QILIMANJARO_PASSWORD=%s\n' "$token" >> "$GITHUB_ENV"
 
       - name: Install dependencies
-        run: uv sync --locked --group dev --all-extras
+        run: uv sync --locked --group dev --all-extras --no-build --no-binary-package qblox-instruments --no-cache
 
       - name: Put the synced environment on PATH
         run: |

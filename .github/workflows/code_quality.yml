@@ -35,11 +35,18 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
         with:
-          enable-cache: true
-          cache-dependency-glob: |
-            **/pyproject.toml
-            **/uv.lock  
+          version: "0.13.8"
+          enable-cache: false
           python-version: "3.13"
+
+      - name: Install selected Python
+        run: uv python install "$UV_PYTHON"
+
+      - name: Check source-build policy before authentication
+        run: '"$(uv python find)" .github/ci-builds/check_policy.py'
+
+      - name: Test build-hash enforcement
+        run: '"$(uv python find)" -m unittest discover -s .github/ci-builds -v'
 
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
@@ -82,7 +89,7 @@ jobs:
           printf 'UV_INDEX_QILIMANJARO_PASSWORD=%s\n' "$token" >> "$GITHUB_ENV"
 
       - name: Install dependencies
-        run: uv sync --locked --group dev --all-extras
+        run: uv sync --locked --group dev --all-extras --no-build --no-binary-package qblox-instruments --no-cache
 
       - name: Put the synced environment on PATH
         run: |

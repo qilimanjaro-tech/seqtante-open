@@ -64,10 +64,8 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
         with:
-          enable-cache: true
-          cache-dependency-glob: |
-            **/pyproject.toml
-            **/uv.lock
+          version: "0.13.8"
+          enable-cache: false
           python-version: "3.13"
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
@@ -110,7 +108,7 @@ jobs:
           printf 'UV_INDEX_QILIMANJARO_PASSWORD=%s\n' "$token" >> "$GITHUB_ENV"
       
       - name: Build project
-        run: uv build
+        run: uv build --no-build --no-cache
 
       - name: Check the built version
         env:
