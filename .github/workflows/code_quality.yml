@@ -39,6 +39,9 @@ jobs:
           enable-cache: false
           python-version: "3.13"
 
+      - name: Install selected Python
+        run: uv python install "$UV_PYTHON"
+
       - name: Check source-build policy before authentication
         run: '"$(uv python find)" .github/ci-builds/check_policy.py'
 
