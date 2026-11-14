@@ -62,6 +62,10 @@ Every merge to `main` that passes Tests and Code Quality also publishes a develo
 
 For development, clone the repository and sync the environment with [uv](https://docs.astral.sh/uv/):
 
+Use uv 0.13.8 or newer. The project enables uv's experimental full build-dependency
+hash checks. See the [CI build policy](.github/ci-builds/README.md) for the reviewed
+source exception and build-tool update process.
+
 ```bash
 git clone https://github.com/qilimanjaro-tech/seqtante-open.git
 cd seqtante-open
