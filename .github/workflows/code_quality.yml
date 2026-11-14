@@ -40,10 +40,10 @@ jobs:
           python-version: "3.13"
 
       - name: Check source-build policy before authentication
-        run: uv run --no-project python .github/ci-builds/check_policy.py
+        run: '"$(uv python find)" .github/ci-builds/check_policy.py'
 
       - name: Test build-hash enforcement
-        run: uv run --no-project python -m unittest discover -s .github/ci-builds -v
+        run: '"$(uv python find)" -m unittest discover -s .github/ci-builds -v'
 
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3

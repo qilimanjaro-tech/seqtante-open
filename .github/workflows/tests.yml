@@ -50,7 +50,7 @@ jobs:
           enable-cache: false
 
       - name: Check source-build policy before authentication
-        run: uv run --no-project python .github/ci-builds/check_policy.py
+        run: '"$(uv python find)" .github/ci-builds/check_policy.py'
 
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3

@@ -189,7 +189,8 @@ class ExceptionPolicyTests(unittest.TestCase):
             lock = Path(directory) / "uv.lock"
             lock.write_text(contents)
             return subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] -- Exercise the policy's public command with a temporary lock.
-                [sys.executable, str(ROOT / ".github/ci-builds/check_policy.py"), str(lock)],
+                [sys.executable, str(ROOT / ".github/ci-builds/check_policy.py")],
+                cwd=directory,
                 capture_output=True,
                 text=True,
                 check=False,

@@ -2,7 +2,6 @@
 # ruff: file-ignore[implicit-namespace-package] -- Standalone CI command.
 """Reject changes to the exact third-party source-build exception."""
 
-import sys
 import tomllib
 from pathlib import Path
 
@@ -12,9 +11,9 @@ QBLOX_SOURCE = {
 }
 
 
-def check_lock(path: Path) -> None:
+def check_lock() -> None:
     """Validate the source exception before CI installs or builds anything."""
-    lock = tomllib.loads(path.read_text())
+    lock = tomllib.loads(Path("uv.lock").read_text())
     exceptions = []
     for package in lock["package"]:
         source = package["source"]
@@ -39,4 +38,4 @@ def check_lock(path: Path) -> None:
 
 
 if __name__ == "__main__":
-    check_lock(Path(sys.argv[1]) if len(sys.argv) > 1 else Path("uv.lock"))
+    check_lock()

@@ -32,8 +32,8 @@ source ref or version scheme is introduced.
 To verify the policy without private dependencies or services:
 
 ```sh
-uv run --no-project python .github/ci-builds/check_policy.py
-uv run --no-project python -m unittest discover -s .github/ci-builds -v
+"$(uv python find)" .github/ci-builds/check_policy.py
+"$(uv python find)" -m unittest discover -s .github/ci-builds -v
 ```
 
 The regressions build harmless fixtures using a loopback index. They prove
