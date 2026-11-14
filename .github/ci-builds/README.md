@@ -1,6 +1,6 @@
 # CI source-build policy
 
-Tests and Code Quality use uv 0.13.8 with the experimental
+Tests, Code Quality and the publish build use uv 0.13.8 with the experimental
 `build-dependency-hashes` feature. The project requires uv >=0.13.8 so older
 clients cannot silently ignore the hashed build configuration.
 
@@ -18,10 +18,16 @@ requested build dependencies. A newly requested dependency fails until reviewed.
 These constraints are recorded in the lock without changing application package
 versions, artifact hashes or private index mappings.
 
-The restricted CI installs use fresh caches because uv does not recheck build
+The restricted CI installs and publish build use fresh caches because uv does not recheck build
 dependency hashes in already-built wheels or installed environments. The Tests
 matrix checks Python 3.11, 3.12 and 3.13 on PRs as well as main, so every supported
 version verifies a clean install. First-party builds remain enabled.
+
+The publish build still checks out its selected source ref, with full Git history
+and tags. Build constraints belong to that source ref. An older ref that predates
+the hash configuration retains its historical build configuration, while the
+workflow still prohibits fresh third-party source builds. No fallback to another
+source ref or version scheme is introduced.
 
 To verify the policy without private dependencies or services:
 
