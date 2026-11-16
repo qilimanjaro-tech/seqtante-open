@@ -53,8 +53,9 @@ def test_a_trajectory_at_the_budget_still_builds():
 
 
 def test_crosstalk_must_cover_exactly_the_flux_buses():
+    mismatched = _crosstalk(("flux_z_q0", "flux_x_q1"))
     with pytest.raises(ValueError, match="exactly two flux buses"):
-        _build(crosstalk=_crosstalk(("flux_z_q0", "flux_x_q1")))
+        _build(crosstalk=mismatched)
 
 
 def test_both_axis_ramp_requires_equal_stage_durations():
