@@ -37,6 +37,14 @@ dependencies = [
     "xarray>=2024.7.0",
 ]
 
+[project.optional-dependencies]
+# The PDF report (ADR-0009). plotly/kaleido (plot rendering) are already core, so the extra is just
+# the PDF assembly library. Pulled in only when the report runs; a calibration run never needs it.
+report = [
+    "reportlab>=4.2.0",
+    "pillow>=10.0.0",
+]
+
 [dependency-groups]
 dev = [
     "mdformat>=0.7.22",
