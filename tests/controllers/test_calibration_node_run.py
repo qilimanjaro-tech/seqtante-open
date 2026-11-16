@@ -123,14 +123,15 @@ class ScriptedNode(CalibrationNode):
 
 
 def _make(cls, *, targets, context=None, thresholds=THRESHOLDS, **config):
-    # A benchmark node is scored against the thresholds in its parameters; omit for a recalibration.
-    params = {} if thresholds is None else {"thresholds": thresholds}
+    # A benchmark node is scored against its per-target thresholds; omit for a recalibration.
+    per_target = {} if thresholds is None else dict.fromkeys(targets, thresholds)
     node = cls(
         name="step",
         idx=0,
         targets=list(targets),
-        parameters={target: dict(params) for target in targets},
+        parameters={target: {} for target in targets},
         context=context or _context(),
+        thresholds=per_target,
     )
     for key, value in config.items():
         setattr(node, key, value)
@@ -189,16 +190,37 @@ def test_benchmark_results_are_collected():
         "q1": Verdict.passed,
         "q2": Verdict.warning,
     }
-    # The base scored the raw value against the thresholds in the node's parameters (QHC-1848).
+    # The run scored the raw value against the node's per-target thresholds (QHC-1848).
     assert {result.target: result.value for result in node.benchmark_results} == {"q1": PASS, "q2": WARN}
 
 
-def test_a_benchmark_without_thresholds_is_not_scored():
-    # With no thresholds in the parameters the base cannot score, so it reports no result.
-    # A proper "not evaluated" verdict for this case is a QHC-1848 follow-up.
+def test_a_benchmark_without_thresholds_is_not_scored(warnings_log):
+    # With no thresholds the run cannot score, so it reports no result and logs that it was left
+    # unscored. A proper "not evaluated" verdict for this case is a QHC-1848 follow-up.
     node = _make(ScriptedNode, targets=[Q1], thresholds=None)
-    node.run({})
+    failed = node.run({})
+    assert failed == []  # an unscored benchmark is not a step failure
     assert node.benchmark_results == ()
+    assert any("left unscored" in message for message in warnings_log)
+
+
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")])
+def test_a_non_finite_benchmark_value_fails_that_target(bad_value):
+    # A fit returning inf/nan must not score a verdict; it fails the step like any bad analysis (D17).
+    # q2 (not in values -> PASS) still scores, proving q1's bad value did not abort the run.
+    node = _make(ScriptedNode, targets=[Q1, Q2], values={"q1": bad_value})
+    failed = node.run({})
+    assert failed == ["q1"]
+    assert {result.target: result.verdict for result in node.benchmark_results} == {"q2": Verdict.passed}
+
+
+def test_group_mode_isolates_a_non_finite_value_to_one_target():
+    # In group mode a scoring failure must fail only its target, not escape to the group handler
+    # and strand the rest (QHC-1848). q1's nan fails q1; q2 scores and the group finishes.
+    node = _make(ParallelNode, targets=[Q1, Q2], values={"q1": float("nan")})
+    failed = node.run({})
+    assert failed == ["q1"]
+    assert {result.target: result.verdict for result in node.benchmark_results} == {"q2": Verdict.passed}
 
 
 def test_crosstalk_wraps_the_run():

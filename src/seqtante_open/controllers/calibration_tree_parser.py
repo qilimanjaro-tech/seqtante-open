@@ -18,7 +18,7 @@ import copy
 import math
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 
 from loguru import logger
@@ -71,6 +71,10 @@ class Step:
         analysis (str): Analysis the step runs, the experiment's default when the tree names none.
         targets (list[Target]): Targets the step runs on.
         parameters (dict[Target, dict[str, Any]]): Resolved parameters per target.
+        thresholds (dict[Target, BenchmarkThresholds]): The benchmark's Passed/Warning thresholds per
+            target, parsed into the benchmark's unit. Empty for a recalibration, or a benchmark target
+            the tree sets no thresholds for. Kept apart from ``parameters`` so acceptance policy is not
+            mixed into the experiment parameters.
     """
 
     name: str
@@ -79,6 +83,7 @@ class Step:
     analysis: str
     targets: list[Target]
     parameters: dict[Target, dict[str, Any]]
+    thresholds: dict[Target, BenchmarkThresholds] = field(default_factory=dict)
 
 
 class _Override(NamedTuple):
@@ -225,12 +230,19 @@ class CalibrationParser:
 
         base = {**defaults.get(experiment, {}), **own}
         parameters: dict[Target, dict[str, Any]] = {}
+        thresholds: dict[Target, BenchmarkThresholds] = {}
         for target in targets:
             resolved = base
             for override in overrides:
                 if target in override.targets:
                     resolved = resolved | override.values
-            parameters[target] = copy.deepcopy(resolved)
+            resolved = copy.deepcopy(resolved)
+            # Thresholds are acceptance policy, not an experiment parameter: lift them out of the
+            # per-target parameters onto the step's own typed field (QHC-1848).
+            threshold = resolved.pop("thresholds", None)
+            if threshold is not None:
+                thresholds[target] = threshold
+            parameters[target] = resolved
 
         return Step(
             name=name,
@@ -239,6 +251,7 @@ class CalibrationParser:
             analysis=analysis,
             targets=targets,
             parameters=parameters,
+            thresholds=thresholds,
         )
 
     def _overrides(

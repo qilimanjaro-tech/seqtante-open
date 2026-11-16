@@ -16,8 +16,9 @@
 
 A step's ``analyze`` is read-only (ADR-0006). It raises :class:`AnalysisError` when it cannot produce
 a result -- the fit does not converge, or its quality is below the threshold set in the tree -- and
-that target fails the step (D17). A benchmark additionally scores its value against the tree's
-Passed/Warning/Failed thresholds and reports a :class:`BenchmarkResult`; a ``Failed`` verdict is a
+that target fails the step (D17). For a benchmark, ``analyze`` reports the measured value and never
+the verdict; the run scores that value against the tree's Passed/Warning/Failed thresholds with
+:func:`verdict_for` and reports a :class:`BenchmarkResult` (QHC-1848). A ``Failed`` verdict is a
 result, not a step failure, so it skips nothing that comes after (ADR-0002, D17).
 
 The tree holds the thresholds and the parser converts their units; the node declares the direction
