@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 from typing import TYPE_CHECKING
+from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -38,24 +39,63 @@ if TYPE_CHECKING:
 _VERDICT_COLOR = {"passed": colors.green, "warning": colors.orange, "failed": colors.red}
 _PLOT_WIDTH = 15 * cm
 
+#: Shared header/grid styling for every table, so the benchmark and outcome tables cannot drift apart.
+#: The benchmark section layers its verdict colours on by styling the verdict cell itself (see below).
+_TABLE_STYLE = TableStyle(
+    [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F2A44")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.lightgrey),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]
+)
+
+#: Fixed column widths for the benchmark table, summing under the ~451 pt A4 frame so a long row (a
+#: value with its unit, a thresholds string) wraps inside its cell instead of overflowing the frame.
+_BENCHMARK_COL_WIDTHS = [55, 95, 95, 55, 150]
+
+#: Body cells are ``Paragraph``s so their text wraps within ``_BENCHMARK_COL_WIDTHS``. A ``TableStyle``
+#: TEXTCOLOR does not reach a ``Paragraph``, so the verdict colour lives in a per-verdict cell style.
+_CELL_STYLE = ParagraphStyle(name="Cell", fontName="Helvetica", fontSize=9, leading=11)
+_VERDICT_CELL_STYLE = {
+    verdict: ParagraphStyle(name=f"Cell-{verdict}", parent=_CELL_STYLE, textColor=color)
+    for verdict, color in _VERDICT_COLOR.items()
+}
+
 
 def write_report(results: RunResults, path: str) -> None:
     """Write the PDF report for ``results`` to ``path`` (ADR-0009)."""
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="Meta", parent=styles["Normal"], textColor=colors.grey, fontSize=9))
+    styles.add(ParagraphStyle(name="Abort", parent=styles["Normal"], textColor=colors.red))
     doc = SimpleDocTemplate(path, pagesize=A4, title="Seqtante-Open calibration report")
 
-    run_id = "—" if results.run_id is None else str(results.run_id)
+    # Versions and the run id are escaped: they reach reportlab's paragraph markup, where an unescaped
+    # '<', '>' or '&' makes the parser raise and the whole report fail (the reset-point moves and the
+    # per-target names below are escaped for the same reason).
+    run_id = "—" if results.run_id is None else escape(str(results.run_id))
     story: list = [
         Paragraph("Seqtante-Open calibration report", styles["Title"]),
         Paragraph(
             f"{results.timestamp:%Y-%m-%d %H:%M:%S} &nbsp;·&nbsp; "
-            f"Seqtante-Open {results.seqtante_open_version} &nbsp;·&nbsp; qililab {results.qililab_version} "
-            f"&nbsp;·&nbsp; run {run_id}",
+            f"Seqtante-Open {escape(results.seqtante_open_version)} &nbsp;·&nbsp; "
+            f"qililab {escape(results.qililab_version)} &nbsp;·&nbsp; run {run_id}",
             styles["Meta"],
         ),
         Spacer(1, 0.6 * cm),
     ]
+    if results.aborted:
+        story.extend(
+            [
+                Paragraph(
+                    "<b>This run was aborted before it finished.</b> It ended with an error, so the results "
+                    "below are partial: any step after the failure never ran and is not listed.",
+                    styles["Abort"],
+                ),
+                Spacer(1, 0.4 * cm),
+            ]
+        )
 
     _benchmarks_section(story, results, styles)
     _outcomes_section(story, results, styles)
@@ -71,61 +111,69 @@ def _benchmarks_section(story: list, results: RunResults, styles) -> None:
         return
     header = ["Target", "Experiment", "Value", "Verdict", "Thresholds"]
     rows = [header] + [_benchmark_row_cells(row) for row in results.benchmarks]
-    table = Table(rows, hAlign="LEFT")
-    style = [
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F2A44")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("GRID", (0, 0), (-1, -1), 0.4, colors.lightgrey),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-    ]
-    for index, row in enumerate(results.benchmarks, start=1):
-        style.append(("TEXTCOLOR", (3, index), (3, index), _VERDICT_COLOR.get(str(row.verdict), colors.black)))
-    table.setStyle(TableStyle(style))
+    table = Table(rows, hAlign="LEFT", colWidths=_BENCHMARK_COL_WIDTHS)
+    table.setStyle(_TABLE_STYLE)
     story.extend([table, Spacer(1, 0.5 * cm)])
+    for row in results.benchmarks:
+        if row.plot and os.path.exists(row.plot):
+            story.extend(
+                [
+                    Paragraph(f"<b>{escape(row.target)} · {escape(row.experiment)}</b>", styles["Normal"]),
+                    Spacer(1, 0.1 * cm),
+                    Image(row.plot, width=_PLOT_WIDTH, height=_PLOT_WIDTH * 0.5, kind="proportional"),
+                    Spacer(1, 0.4 * cm),
+                ]
+            )
 
 
-def _benchmark_row_cells(row: BenchmarkRow) -> list[str]:
+def _cell(text: object) -> Paragraph:
+    """A wrapping, markup-escaped table cell."""
+    return Paragraph(escape(str(text)), _CELL_STYLE)
+
+
+def _verdict_cell(verdict: object) -> Paragraph:
+    """The verdict cell, coloured by verdict (the colour cannot come from the shared ``TableStyle``)."""
+    style = _VERDICT_CELL_STYLE.get(str(verdict), _CELL_STYLE)
+    return Paragraph(escape(str(verdict).capitalize()), style)
+
+
+def _benchmark_row_cells(row: BenchmarkRow) -> list[Paragraph]:
+    unit = f" {row.unit}" if row.unit else ""
     value = f"{row.value:.4g}"
     if row.uncertainty is not None:
         value += f" ± {row.uncertainty:.2g}"
-    if row.unit:
-        value += f" {row.unit}"
-    unit = f" {row.unit}" if row.unit else ""
+    value += unit
     better = "higher is better" if str(row.direction) == "higher_is_better" else "lower is better"
     thresholds = f"passed {row.passed:g}{unit}, warning {row.warning:g}{unit} ({better})"
-    return [row.target, row.experiment, value, str(row.verdict).capitalize(), thresholds]
+    return [_cell(row.target), _cell(row.experiment), _cell(value), _verdict_cell(row.verdict), _cell(thresholds)]
 
 
 def _outcomes_section(story: list, results: RunResults, styles) -> None:
     story.append(Paragraph("Failed and skipped steps", styles["Heading2"]))
     if not results.outcomes:
-        story.extend([Paragraph("Every target completed every step it ran.", styles["Normal"]), Spacer(1, 0.4 * cm)])
+        message = (
+            "No step failed or was skipped before the run was aborted."
+            if results.aborted
+            else "Every target completed every step it ran."
+        )
+        story.extend([Paragraph(message, styles["Normal"]), Spacer(1, 0.4 * cm)])
         return
     rows = [["Target", "Step", "Reason"]] + [[o.target, o.step, o.reason] for o in results.outcomes]
     table = Table(rows, hAlign="LEFT")
-    table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F2A44")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("FONTSIZE", (0, 0), (-1, -1), 9),
-                ("GRID", (0, 0), (-1, -1), 0.4, colors.lightgrey),
-            ]
-        )
-    )
+    table.setStyle(_TABLE_STYLE)
     story.extend([table, Spacer(1, 0.5 * cm)])
 
 
 def _targets_section(story: list, results: RunResults, styles) -> None:
-    if not results.targets:
-        return
     story.extend([PageBreak(), Paragraph("Per target", styles["Heading2"])])
+    if not results.targets:
+        story.extend([Paragraph("No per-target details for this run.", styles["Normal"]), Spacer(1, 0.4 * cm)])
+        return
     for name in sorted(results.targets):
         target = results.targets[name]
         story.extend(
             [
-                Paragraph(name, styles["Heading3"]),
+                Paragraph(escape(name), styles["Heading3"]),
                 Paragraph(
                     f"<b>Operating point before:</b> {_format_operating_point(target.operating_point_before)}",
                     styles["Normal"],
@@ -138,7 +186,7 @@ def _targets_section(story: list, results: RunResults, styles) -> None:
         )
         if target.reset_point_moves:
             story.append(Paragraph("<b>Reset-point move log:</b>", styles["Normal"]))
-            story.extend(Paragraph(f"• {move}", styles["Normal"]) for move in target.reset_point_moves)
+            story.extend(Paragraph(f"• {escape(move)}", styles["Normal"]) for move in target.reset_point_moves)
         for plot in target.fit_plots:
             if os.path.exists(plot):
                 story.extend(

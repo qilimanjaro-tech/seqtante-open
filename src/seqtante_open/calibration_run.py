@@ -27,9 +27,9 @@ from qililab.utils.serialization import deserialize_from
 from ruamel.yaml import YAML
 
 from seqtante_open.calibration.io import read_calibration_file
-from seqtante_open.controllers import CalibrationGraph, CalibrationParser, Pipeline, RunContext
+from seqtante_open.controllers import CalibrationGraph, CalibrationParser, Pipeline, RunContext, experiment_spec
 from seqtante_open.outputs import output_controller
-from seqtante_open.run_results import RunResults, StepOutcome
+from seqtante_open.run_results import BenchmarkRow, RunResults, StepOutcome
 
 if TYPE_CHECKING:
     from qililab.platform.platform import Platform
@@ -92,6 +92,8 @@ class CalibrationRun:
         self.platform_path: str = platform_path
         self.config_path: str = config_path
         self.report: bool = report
+        # Set when the run raises, so the close-out can tell the report the results are partial.
+        self.aborted: bool = False
 
         self.start = time.time()
         self.started_at = datetime.now()
@@ -140,6 +142,10 @@ class CalibrationRun:
                 "Executing Calibration. Outputs in folder {path}", path=output_controller.storage_path
             )
             self.graph.run_calibration(calibration_file)
+        except Exception:
+            # The run did not finish; record it so the report says so rather than reporting a clean run.
+            self.aborted = True
+            raise
         finally:
             self._end_calibration()
 
@@ -196,9 +202,11 @@ class CalibrationRun:
     def _collect_results(self) -> RunResults:
         """Gather the run's in-memory results for the report (ADR-0009).
 
-        The timestamp, versions and run id, plus every target that failed or was skipped with its
-        reason (from the graph). Benchmark results, operating points and fit plots join this record as
-        the experiment nodes are ported (tasks 6-12); the report renders whatever is present.
+        The timestamp, versions and run id; whether the run was aborted; every benchmark result the
+        nodes collected (value, uncertainty, verdict, thresholds and a fit plot); and every target that
+        failed or was skipped with its reason (from the graph). Operating points and the reset-point
+        move log join this record as the remaining experiment nodes are ported (tasks 6-12); the report
+        renders whatever is present.
         """
         run_id = output_controller.run_id
         results = RunResults(
@@ -206,24 +214,73 @@ class CalibrationRun:
             seqtante_open_version=_package_version("seqtante_open"),
             qililab_version=_package_version("qililab"),
             run_id=run_id if run_id != -1 else None,
+            aborted=getattr(self, "aborted", False),
         )
+        self._collect_benchmarks(results)
         for target, step, reason in self.graph.report:
             results.outcomes.append(StepOutcome(target=target, step=step, reason=reason))
         return results
+
+    def _collect_benchmarks(self, results: RunResults) -> None:
+        """Turn each node's ``benchmark_results`` into the report's benchmark rows (ADR-0002, ADR-0009).
+
+        Walks the graph's nodes in order; a benchmark node collects a :class:`BenchmarkResult` per
+        target on :attr:`~seqtante_open.controllers.calibration_node.CalibrationNode.benchmark_results`
+        as it runs. The value, uncertainty, verdict and thresholds come from the result; the unit comes
+        from the experiment's :class:`~seqtante_open.controllers.node_registry.BenchmarkSpec`; the fit
+        plot, when one was produced, from the node's ``analysis_plots``. Legacy function nodes carry no
+        benchmark results and contribute nothing.
+        """
+        graph = getattr(self.graph, "graph", None)
+        if graph is None:
+            return
+        for node_idx in sorted(graph.nodes):
+            node = graph.nodes[node_idx]["data"]
+            benchmark_results = getattr(node, "benchmark_results", ())
+            if not benchmark_results:
+                continue
+            experiment = getattr(node, "experiment", None)
+            spec = experiment_spec(experiment) if experiment else None
+            unit = spec.benchmark.unit if spec is not None and spec.benchmark is not None else None
+            plots_by_target = getattr(node, "analysis_plots", {})
+            for benchmark in benchmark_results:
+                plots = plots_by_target.get(benchmark.target, ())
+                results.benchmarks.append(
+                    BenchmarkRow(
+                        target=benchmark.target,
+                        experiment=experiment or node.name,
+                        value=benchmark.value,
+                        uncertainty=benchmark.uncertainty,
+                        verdict=benchmark.verdict,
+                        passed=benchmark.thresholds.passed,
+                        warning=benchmark.thresholds.warning,
+                        unit=unit,
+                        direction=benchmark.thresholds.direction,
+                        plot=plots[0] if plots else None,
+                    )
+                )
 
     def _write_report(self) -> None:
         """Write the PDF report, if the ``seqtante_open[report]`` extra is installed (ADR-0009).
 
         Called after the database entry and the calibration file are saved, so a report failure never
-        costs the run its results. A missing extra logs a warning naming the install and the run
-        finishes normally; any other report error is logged and swallowed for the same reason.
+        costs the run its results. A genuinely missing extra (``reportlab`` or ``PIL`` not importable)
+        logs a warning naming the install and the run finishes normally; any other import failure -- a
+        bug in ``pdf.py`` or a platypus symbol that has moved -- logs its traceback instead of wrongly
+        telling the user to install an extra they already have. Any other report error is logged and
+        swallowed for the same reason.
         """
         try:
             from seqtante_open.report import write_report
-        except ImportError:
-            logger.opt(colors=True).warning(
-                'The PDF report needs the report extra. Install it with: pip install "seqtante_open[report]"'
-            )
+        except ImportError as exc:
+            if exc.name in {"reportlab", "PIL"}:
+                logger.opt(colors=True).warning(
+                    'The PDF report needs the report extra. Install it with: pip install "seqtante_open[report]"'
+                )
+            else:
+                logger.opt(exception=True).warning(
+                    "The PDF report could not be imported (not a missing extra); the run's results are already saved"
+                )
             return
         try:
             path = os.path.join(output_controller.storage_path, f"report_{self.started_at:%Y-%m-%d_%H-%M-%S}.pdf")

@@ -184,6 +184,9 @@ class CalibrationNode(ABC, Generic[ResultT]):
         self.context = context
         self._thresholds: dict[Target, BenchmarkThresholds] = thresholds or {}
         self.benchmark_results: tuple[BenchmarkResult, ...] = ()
+        # Fit plots produced this run, keyed by target, so the report can show a benchmark's plot and
+        # (later) the per-target fit plots. Populated in ``_collect`` and reset at the start of ``run``.
+        self.analysis_plots: dict[str, tuple[str, ...]] = {}
         self._file: CalibrationFile | None = None
         self._restore: ParameterRestore | None = None
         self._crosstalk: CrosstalkSession | None = None
@@ -242,8 +245,9 @@ class CalibrationNode(ABC, Generic[ResultT]):
         Returns:
             list[str]: The targets that failed in this node (a fit error or any other error).
         """
-        # Reset before the early return below, so a re-run of this node keeps no stale verdicts.
+        # Reset before the early return below, so a re-run of this node keeps no stale verdicts or plots.
         self.benchmark_results = ()
+        self.analysis_plots = {}
         live = [target for target in self.targets if str(target) not in dead_targets]
         if not live:
             return []
@@ -398,6 +402,8 @@ class CalibrationNode(ABC, Generic[ResultT]):
             failed.append(str(target))
             return False
 
+        if result.plots:
+            self.analysis_plots[str(target)] = result.plots
         if self.is_benchmark:
             # Scoring runs inside this per-target guard so a non-finite value or a scoring error
             # fails only this target (D17), rather than escaping to the group-level handler.

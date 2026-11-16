@@ -108,6 +108,9 @@ class RunResults:
         seqtante_open_version (str): The Seqtante-Open version that produced the run.
         qililab_version (str): The qililab version it ran against.
         run_id (int | None): The database run id the ``outputs`` service opened, for cross-reference.
+        aborted (bool): Whether the run ended by raising rather than finishing. When set, the report
+            says the run was aborted and that the results below are partial, instead of reporting a
+            clean run (steps after the failure never ran and so never reach ``outcomes``).
         targets (dict[str, TargetResults]): Per-target results, keyed by target name.
         benchmarks (list[BenchmarkRow]): The benchmark table, one row per benchmark result.
         outcomes (list[StepOutcome]): Every target that failed or was skipped at a step, with the reason.
@@ -117,6 +120,7 @@ class RunResults:
     seqtante_open_version: str
     qililab_version: str
     run_id: int | None = None
+    aborted: bool = False
     targets: dict[str, TargetResults] = field(default_factory=dict)
     benchmarks: list[BenchmarkRow] = field(default_factory=list)
     outcomes: list[StepOutcome] = field(default_factory=list)

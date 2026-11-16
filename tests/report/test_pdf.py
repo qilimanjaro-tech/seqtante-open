@@ -66,6 +66,68 @@ def test_write_report_embeds_a_fit_plot(tmp_path):
     assert path.read_bytes().startswith(b"%PDF-")
 
 
+def test_write_report_renders_a_benchmark_plot(tmp_path):
+    plot = tmp_path / "bench.png"
+    Image.new("RGB", (8, 8), "white").save(plot)
+
+    results = _results()
+    results.benchmarks.append(
+        BenchmarkRow(
+            target="q2",
+            experiment="landau_zener",
+            value=0.01,
+            uncertainty=None,
+            verdict=Verdict.failed,
+            passed=1e-3,
+            warning=5e-3,
+            unit=None,
+            direction=BenchmarkDirection.lower_is_better,
+            plot=str(plot),
+        )
+    )
+    path = tmp_path / "report.pdf"
+    write_report(results, str(path))
+
+    assert path.read_bytes().startswith(b"%PDF-")
+
+
+def test_write_report_marks_an_aborted_run(tmp_path):
+    results = _results()
+    results.aborted = True
+    path = tmp_path / "report.pdf"
+    write_report(results, str(path))  # the aborted banner must render, not crash
+    assert path.read_bytes().startswith(b"%PDF-")
+
+
+def test_write_report_escapes_markup_special_characters(tmp_path):
+    # Angle brackets and ampersands reach reportlab's paragraph markup; unescaped, they make the
+    # paraparser raise and the whole report fail. They must be escaped everywhere they flow in.
+    results = RunResults(
+        timestamp=datetime(2026, 11, 10, 12, 0, 0),
+        seqtante_open_version="1.0 <dev> & co",
+        qililab_version="0.1",
+        run_id=None,
+    )
+    results.benchmarks.append(
+        BenchmarkRow(
+            target="q1 <a>",
+            experiment="t1 & t2",
+            value=1.0,
+            uncertainty=None,
+            verdict=Verdict.passed,
+            passed=1.0,
+            warning=0.5,
+            unit="a<b",
+            direction=BenchmarkDirection.higher_is_better,
+        )
+    )
+    target = results.target("q<1>")
+    target.reset_point_moves = ["r2 0.75 < 0.8, widening span to 60 MHz & more"]
+    path = tmp_path / "report.pdf"
+    write_report(results, str(path))  # must not raise despite < > & in the text
+    assert path.read_bytes().startswith(b"%PDF-")
+
+
 def test_write_report_handles_an_empty_run(tmp_path):
     empty = RunResults(
         timestamp=datetime(2026, 11, 10, 12, 0, 0),
