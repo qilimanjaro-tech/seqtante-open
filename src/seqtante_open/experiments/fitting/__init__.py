@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from .fit_base import FittingClass
+from .landau_zener_fit import LandauZenerFit
 from .single_tone_fit import FluxoniumSingleToneModel
 from .single_tone_vs_flux_fit import FluxoniumSingleToneFluxModel
 from .two_tone_fit import FluxoniumTwoToneModel
@@ -25,5 +26,6 @@ __all__ = [
     "FluxoniumSingleToneModel",
     "FluxoniumTwoToneFluxModel",
     "FluxoniumTwoToneModel",
+    "LandauZenerFit",
     "cosfunc",
 ]

@@ -18,10 +18,12 @@ Copied from ``qilitools.experiments``. The node-level experiment functions the
 calibration graph runs live under ``nodes/`` and call into these.
 """
 
+from .landau_zener import lz_transition_not_idling_reset__custom_linear_ramp
 from .single_tone import single_tone__frequency_sweep, single_tone__frequency_vs_flux
 from .two_tone import two_tone__frequency_vs_flux, two_tone_frequency
 
 __all__ = [
+    "lz_transition_not_idling_reset__custom_linear_ramp",
     "single_tone__frequency_sweep",
     "single_tone__frequency_vs_flux",
     "two_tone__frequency_vs_flux",
