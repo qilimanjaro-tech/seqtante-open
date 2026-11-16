@@ -27,7 +27,7 @@ from qililab.utils.serialization import deserialize_from
 from ruamel.yaml import YAML
 
 from seqtante_open.calibration.io import read_calibration_file
-from seqtante_open.controllers import CalibrationGraph, CalibrationParser, Pipeline, RunContext, experiment_spec
+from seqtante_open.controllers import CalibrationGraph, CalibrationParser, Pipeline, RunContext
 from seqtante_open.outputs import output_controller
 from seqtante_open.run_results import BenchmarkRow, RunResults, StepOutcome
 
@@ -142,8 +142,10 @@ class CalibrationRun:
                 "Executing Calibration. Outputs in folder {path}", path=output_controller.storage_path
             )
             self.graph.run_calibration(calibration_file)
-        except Exception:
-            # The run did not finish; record it so the report says so rather than reporting a clean run.
+        except BaseException:
+            # The run did not finish -- an error or a manual Ctrl-C (KeyboardInterrupt is a BaseException,
+            # not an Exception, so it is caught here and re-raised). Record it so the report says so
+            # rather than reporting a clean run.
             self.aborted = True
             raise
         finally:
@@ -205,8 +207,8 @@ class CalibrationRun:
         The timestamp, versions and run id; whether the run was aborted; every benchmark result the
         nodes collected (value, uncertainty, verdict, thresholds and a fit plot); and every target that
         failed or was skipped with its reason (from the graph). Operating points and the reset-point
-        move log join this record as the remaining experiment nodes are ported (tasks 6-12); the report
-        renders whatever is present.
+        move log join this record as the remaining experiment nodes are ported; the report renders
+        whatever is present.
         """
         run_id = output_controller.run_id
         results = RunResults(
@@ -226,10 +228,10 @@ class CalibrationRun:
 
         Walks the graph's nodes in order; a benchmark node collects a :class:`BenchmarkResult` per
         target on :attr:`~seqtante_open.controllers.calibration_node.CalibrationNode.benchmark_results`
-        as it runs. The value, uncertainty, verdict and thresholds come from the result; the unit comes
-        from the experiment's :class:`~seqtante_open.controllers.node_registry.BenchmarkSpec`; the fit
-        plot, when one was produced, from the node's ``analysis_plots``. Legacy function nodes carry no
-        benchmark results and contribute nothing.
+        as it runs. The value, uncertainty, verdict, thresholds and unit all come from the result (the
+        run scored it against the thresholds, whose unit #38 checks against the experiment's spec); the
+        fit plot, when one was produced, from the node's ``analysis_plots``. Legacy function nodes carry
+        no benchmark results and contribute nothing.
         """
         graph = getattr(self.graph, "graph", None)
         if graph is None:
@@ -240,8 +242,6 @@ class CalibrationRun:
             if not benchmark_results:
                 continue
             experiment = getattr(node, "experiment", None)
-            spec = experiment_spec(experiment) if experiment else None
-            unit = spec.benchmark.unit if spec is not None and spec.benchmark is not None else None
             plots_by_target = getattr(node, "analysis_plots", {})
             for benchmark in benchmark_results:
                 plots = plots_by_target.get(benchmark.target, ())
@@ -254,7 +254,7 @@ class CalibrationRun:
                         verdict=benchmark.verdict,
                         passed=benchmark.thresholds.passed,
                         warning=benchmark.thresholds.warning,
-                        unit=unit,
+                        unit=benchmark.thresholds.unit,
                         direction=benchmark.thresholds.direction,
                         plot=plots[0] if plots else None,
                     )

@@ -76,7 +76,9 @@ def test_run_id_minus_one_becomes_none(monkeypatch):
 
 
 def test_collect_results_builds_benchmark_rows_from_the_nodes(monkeypatch):
-    thresholds = BenchmarkThresholds(passed=1e-5, warning=5e-6, direction=BenchmarkDirection.higher_is_better)
+    thresholds = BenchmarkThresholds(
+        passed=1e-5, warning=5e-6, direction=BenchmarkDirection.higher_is_better, unit="ns"
+    )
     benchmark = BenchmarkResult(
         target="q1", value=1.2e-5, uncertainty=1e-7, verdict=Verdict.passed, thresholds=thresholds
     )
@@ -90,7 +92,7 @@ def test_collect_results_builds_benchmark_rows_from_the_nodes(monkeypatch):
     assert (row.target, row.experiment, row.value, row.uncertainty) == ("q1", "t1", 1.2e-5, 1e-7)
     assert row.verdict is Verdict.passed
     assert (row.passed, row.warning) == (1e-5, 5e-6)
-    assert row.unit == "ns"  # from the experiment's BenchmarkSpec
+    assert row.unit == "ns"  # carried on the scored thresholds (QHC-1848)
     assert row.direction is BenchmarkDirection.higher_is_better
     assert row.plot == "/tmp/fit.png"
 

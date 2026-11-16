@@ -55,6 +55,10 @@ _TABLE_STYLE = TableStyle(
 #: value with its unit, a thresholds string) wraps inside its cell instead of overflowing the frame.
 _BENCHMARK_COL_WIDTHS = [55, 95, 95, 55, 150]
 
+#: Column widths for the outcomes table, summing under the same frame; the Reason column is widest
+#: because it holds the step's failure message, which can be a long exception string.
+_OUTCOME_COL_WIDTHS = [70, 120, 260]
+
 #: Body cells are ``Paragraph``s so their text wraps within ``_BENCHMARK_COL_WIDTHS``. A ``TableStyle``
 #: TEXTCOLOR does not reach a ``Paragraph``, so the verdict colour lives in a per-verdict cell style.
 _CELL_STYLE = ParagraphStyle(name="Cell", fontName="Helvetica", fontSize=9, leading=11)
@@ -158,8 +162,11 @@ def _outcomes_section(story: list, results: RunResults, styles) -> None:
         )
         story.extend([Paragraph(message, styles["Normal"]), Spacer(1, 0.4 * cm)])
         return
-    rows = [["Target", "Step", "Reason"]] + [[o.target, o.step, o.reason] for o in results.outcomes]
-    table = Table(rows, hAlign="LEFT")
+    header = ["Target", "Step", "Reason"]
+    # Body cells are wrapping, escaped Paragraphs (like the benchmark table) so a long reason -- an
+    # exception message -- wraps inside its column instead of overflowing the A4 frame.
+    rows = [header] + [[_cell(o.target), _cell(o.step), _cell(o.reason)] for o in results.outcomes]
+    table = Table(rows, hAlign="LEFT", colWidths=_OUTCOME_COL_WIDTHS)
     table.setStyle(_TABLE_STYLE)
     story.extend([table, Spacer(1, 0.5 * cm)])
 
