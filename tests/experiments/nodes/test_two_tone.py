@@ -148,8 +148,8 @@ def _patch(monkeypatch):
     monkeypatch.setattr(node_module, "save_calibration", lambda calibration, path: None)
     monkeypatch.setattr(output_controller, "_initialized", True)
     monkeypatch.setattr(output_controller, "_db_manager", object())
-    FakeLorentzian.saved = []
-    FakeLorentzian.accepted_result = True
+    monkeypatch.setattr(FakeLorentzian, "saved", [])
+    monkeypatch.setattr(FakeLorentzian, "accepted_result", True)
     return calls
 
 
@@ -171,7 +171,7 @@ def test_accepted_fit_writes_the_drive_if_and_keeps_the_lo(monkeypatch):
 
 def test_rejected_fit_fails_the_target_and_leaves_the_point(monkeypatch):
     _patch(monkeypatch)
-    FakeLorentzian.accepted_result = False
+    monkeypatch.setattr(FakeLorentzian, "accepted_result", False)
     calibration = _calibration()
     node = _make(calibration)
 

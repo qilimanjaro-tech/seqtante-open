@@ -107,8 +107,8 @@ class TwoToneNode(FixedFluxNode[TwoToneSweetSpot]):
             drive_gain=self._param(target, "drive_power"),
             drive_sigmas=self._param(target, "drive_sigmas"),
             duration_ringup_drive=self._param(target, "duration_ringup_drive"),
-            drive_LO=drive_lo,
-            readout_LO=point.readout.lo,
+            drive_LO=int(drive_lo),
+            readout_LO=int(point.readout.lo),
             target=str(target),
             calibration=self.context.calibration,
         )
@@ -146,7 +146,7 @@ class TwoToneNode(FixedFluxNode[TwoToneSweetSpot]):
 
     def apply(self, target: Target, result: AnalysisResult[TwoToneSweetSpot]) -> None:
         """Write the fitted drive IF onto the sweet-spot operating point; the only writer (the LO is untouched)."""
-        if result.fitted is None:  # pragma: no cover - two_tone always fits a point
-            return
-        point = operating_point_for(self.calibration_file, self.experiment, target)
-        point.drive.if_ = result.fitted.drive_if
+        # analyze returns a fitted point or raises, so apply always has one; the guard is just a type narrow.
+        if result.fitted is not None:
+            point = operating_point_for(self.calibration_file, self.experiment, target)
+            point.drive.if_ = result.fitted.drive_if
