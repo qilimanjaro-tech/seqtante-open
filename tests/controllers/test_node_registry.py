@@ -79,9 +79,10 @@ def test_two_classes_cannot_claim_the_same_experiment():
 
 
 def test_legacy_experiments_are_seeded_without_a_node_class():
-    # During the port the four legacy experiments are known to the parser but carry no node class;
-    # the graph builder (QHC-1800) falls back to their legacy function.
-    for experiment in ("single_tone", "two_tone", "offset_calibration", "two_tone_vs_flux"):
+    # During the port the remaining legacy experiments are known to the parser but carry no node class;
+    # the graph builder (QHC-1800) falls back to their legacy function. "two_tone" has been ported to a
+    # node (QHC-1805) and now carries a node_cls, so it is no longer in this list.
+    for experiment in ("single_tone", "offset_calibration", "two_tone_vs_flux"):
         spec = experiment_spec(experiment)
         assert spec is not None
         assert spec.node_cls is None

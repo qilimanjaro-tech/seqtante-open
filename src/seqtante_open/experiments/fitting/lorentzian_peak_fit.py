@@ -52,14 +52,24 @@ class LorentzianPeakModel(FittingClass):
         target: Swept target token, e.g. ``"q14"``.
         path: Folder to save the plot into; if ``None`` the plot is shown.
         r2_min: Smallest R² accepted as a fit. Defaults to 0.8 (the script's value).
+        title: Plot-title prefix, so each caller labels its own sweep (the target is appended). Defaults
+            to ``"Two tone"``.
     """
 
     results: _LorentzianResults
 
-    def __init__(self, measurement_id: int, target: str | None = None, path: str | None = None, r2_min: float = 0.8):
+    def __init__(
+        self,
+        measurement_id: int,
+        target: str | None = None,
+        path: str | None = None,
+        r2_min: float = 0.8,
+        title: str = "Two tone",
+    ):
         super().__init__(measurement_id=measurement_id, target=target, path=path)
         self.target = target
         self.r2_min = r2_min
+        self._plot_title = title
         xarr = self.get_xarray()
         frequency_coord = xarr[xarr.dims[0]]
         self.frequencies = np.asarray(frequency_coord.data, dtype=float)
@@ -157,7 +167,7 @@ class LorentzianPeakModel(FittingClass):
         """Plot the sweep and, when accepted, its Lorentzian fit; save it next to the measurement."""
         self._require_fit()
         results = self.results
-        title = f"Two tone (reset search) {self.target}"
+        title = f"{self._plot_title} {self.target}"
         frequencies_mhz = self.frequencies * 1e-6
 
         fig = go.Figure()
