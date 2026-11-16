@@ -34,6 +34,7 @@ are not registered; they hold the code the two experiment shapes share as the no
 """
 
 import copy
+import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, ClassVar, Generic, Protocol, TypeVar, runtime_checkable
@@ -48,7 +49,7 @@ from seqtante_open.controllers.crosstalk_session import CrosstalkSession, crosst
 from seqtante_open.controllers.node_registry import BenchmarkSpec, Parallel, experiment_spec, register_node
 from seqtante_open.controllers.operating_point import apply_operating_point, operating_point_flux_writes
 from seqtante_open.controllers.parameter_restore import ParameterRestore, restoring_parameters
-from seqtante_open.controllers.verdicts import BenchmarkResult
+from seqtante_open.controllers.verdicts import AnalysisError, BenchmarkResult, BenchmarkThresholds, verdict_for
 from seqtante_open.targets import Target
 
 #: The node-specific fitted payload an ``analyze`` hands its ``apply`` (a frequency, a pi amplitude,
@@ -85,13 +86,16 @@ class AnalysisResult(Generic[ResultT]):
         fitted (ResultT | None): The values ``apply`` writes into the calibration file -- a fitted
             frequency, a pi amplitude, a reset flux, readout levels. Its shape is the node's own; the
             base passes it from ``analyze`` to ``apply`` untouched. A pure benchmark leaves it ``None``.
-        benchmark (BenchmarkResult | None): The scored result a benchmark reports to the run and the
-            report (ADR-0002); ``None`` for a recalibration.
+        value (float | None): A benchmark's measured value, in the benchmark's unit. The run scores it
+            against the tree's thresholds with :func:`~seqtante_open.controllers.verdicts.verdict_for`
+            (QHC-1848), so ``analyze`` reports the value and never the verdict. ``None`` for a recalibration.
+        uncertainty (float | None): The standard uncertainty on ``value`` where the analysis gives one.
         plots (tuple[str, ...]): Paths to the fit plots the report shows per target (ADR-0002).
     """
 
     fitted: ResultT | None = None
-    benchmark: BenchmarkResult | None = None
+    value: float | None = None
+    uncertainty: float | None = None
     plots: tuple[str, ...] = ()
 
 
@@ -158,6 +162,7 @@ class CalibrationNode(ABC, Generic[ResultT]):
         targets: list[Target],
         parameters: dict[Target, dict[str, Any]],
         context: RunContext,
+        thresholds: dict[Target, BenchmarkThresholds] | None = None,
     ) -> None:
         """Build one runnable step.
 
@@ -167,12 +172,17 @@ class CalibrationNode(ABC, Generic[ResultT]):
             targets (list[Target]): The targets the step runs on.
             parameters (dict[Target, dict[str, Any]]): Resolved parameters per target (ADR-0005).
             context (RunContext): The run's platform and calibration file.
+            thresholds (dict[Target, BenchmarkThresholds] | None): The benchmark's Passed/Warning
+                thresholds per target, parsed into the node's unit (QHC-1848). ``None`` or empty for a
+                recalibration, or a benchmark target the tree sets no thresholds for. Kept apart from
+                ``parameters`` so acceptance policy is not mixed into the experiment parameters.
         """
         self.name = name
         self.idx = idx
         self.targets = targets
         self.parameters = parameters
         self.context = context
+        self._thresholds: dict[Target, BenchmarkThresholds] = thresholds or {}
         self.benchmark_results: tuple[BenchmarkResult, ...] = ()
         self._file: CalibrationFile | None = None
         self._restore: ParameterRestore | None = None
@@ -388,9 +398,72 @@ class CalibrationNode(ABC, Generic[ResultT]):
             failed.append(str(target))
             return False
 
-        if result.benchmark is not None:
-            benchmarks.append(result.benchmark)
+        if self.is_benchmark:
+            # Scoring runs inside this per-target guard so a non-finite value or a scoring error
+            # fails only this target (D17), rather than escaping to the group-level handler.
+            try:
+                scored = self._score(target, result)
+            except Exception:  # ruff: ignore[blind-except] -- a bad benchmark value fails only this target (D17)
+                logger.opt(exception=True).warning(
+                    "Node <i>{node}</i>: scoring <r>{target}</r> failed", node=self.name, target=str(target)
+                )
+                failed.append(str(target))
+                return False
+            if scored is not None:
+                benchmarks.append(scored)
         return True
+
+    def _score(self, target: Target, result: AnalysisResult[ResultT]) -> BenchmarkResult | None:
+        """Score one benchmark target's measured value against its thresholds (QHC-1848, ADR-0002, D17).
+
+        Returns the :class:`~seqtante_open.controllers.verdicts.BenchmarkResult`, or ``None`` when the
+        benchmark cannot be scored -- no measured value or no thresholds -- which is logged and left
+        unscored (a proper "not evaluated" verdict is a QHC-1848 follow-up). Raises
+        :class:`~seqtante_open.controllers.verdicts.AnalysisError` when the value is non-finite or the
+        thresholds do not match the benchmark's unit/direction, so the target fails the step.
+        """
+        thresholds = self._thresholds_for(target)
+        if result.value is None or thresholds is None:
+            logger.warning(
+                "Node <i>{node}</i>: <r>{target}</r> has no {missing}; benchmark left unscored",
+                node=self.name,
+                target=str(target),
+                missing="measured value" if result.value is None else "thresholds",
+            )
+            return None
+        if not math.isfinite(result.value):
+            raise AnalysisError(f"{target}: benchmark value {result.value} is not finite")
+        self._check_scoring_units(thresholds)
+        return BenchmarkResult(
+            target=str(target),
+            value=result.value,
+            uncertainty=result.uncertainty,
+            verdict=verdict_for(result.value, thresholds),
+            thresholds=thresholds,
+        )
+
+    def _check_scoring_units(self, thresholds: BenchmarkThresholds) -> None:
+        """Guard that ``thresholds`` were parsed in the benchmark's own unit and direction (QHC-1848).
+
+        The parser converts the tree's thresholds with whichever :class:`BenchmarkSpec` the experiment
+        declared then; this checks that spec still matches at scoring time, so a value in one unit is
+        never scored against thresholds in another (which would score a good qubit Failed silently).
+        """
+        spec = experiment_spec(self.experiment) if self.experiment is not None else None
+        benchmark = spec.benchmark if spec is not None else None
+        if benchmark is not None and (thresholds.unit != benchmark.unit or thresholds.direction != benchmark.direction):
+            raise AnalysisError(
+                f"thresholds unit/direction ({thresholds.unit}, {thresholds.direction}) do not match "
+                f"the '{self.experiment}' benchmark spec ({benchmark.unit}, {benchmark.direction})"
+            )
+
+    def _thresholds_for(self, target: Target) -> BenchmarkThresholds | None:
+        """The parsed Passed/Warning thresholds for ``target`` (ADR-0002).
+
+        The parser converts the tree's thresholds to the benchmark's unit and the node holds them per
+        target, apart from ``parameters``; :meth:`_score` scores the measured value against them (QHC-1848).
+        """
+        return self._thresholds.get(target)
 
     def _place_operating_point(self, target: Target) -> None:
         experiment = self.experiment

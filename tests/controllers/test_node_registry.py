@@ -10,6 +10,10 @@ from seqtante_open.controllers.node_registry import (
     known_experiments,
     register_node,
 )
+from seqtante_open.controllers.verdicts import BenchmarkDirection
+
+HIGHER = BenchmarkDirection.higher_is_better
+LOWER = BenchmarkDirection.lower_is_better
 
 
 def test_subclass_registers_itself_with_its_class():
@@ -136,7 +140,7 @@ def test_reregistering_the_same_class_is_allowed():
 
 def test_a_node_class_keeps_the_seeded_benchmark():
     # "t1" is seeded with a benchmark; a node class that does not re-declare one keeps it.
-    assert experiment_spec("t1").benchmark == BenchmarkSpec(unit="ns", direction="higher")
+    assert experiment_spec("t1").benchmark == BenchmarkSpec(unit="ns", direction=HIGHER)
 
     class T1(CalibrationNode):
         experiment = "t1"
@@ -145,19 +149,19 @@ def test_a_node_class_keeps_the_seeded_benchmark():
         def run(self, dead_targets):  # pragma: no cover
             return []
 
-    assert experiment_spec("t1").benchmark == BenchmarkSpec(unit="ns", direction="higher")
+    assert experiment_spec("t1").benchmark == BenchmarkSpec(unit="ns", direction=HIGHER)
 
 
 def test_a_node_class_declares_its_own_benchmark():
     class Benchmarked(CalibrationNode):
         experiment = "benchmarked"
         analyses = ("a",)
-        benchmark = BenchmarkSpec(unit="us", direction="lower")
+        benchmark = BenchmarkSpec(unit="us", direction=LOWER)
 
         def run(self, dead_targets):  # pragma: no cover
             return []
 
-    assert experiment_spec("benchmarked").benchmark == BenchmarkSpec(unit="us", direction="lower")
+    assert experiment_spec("benchmarked").benchmark == BenchmarkSpec(unit="us", direction=LOWER)
 
 
 def test_default_parallel_is_forbidden():
