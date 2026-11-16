@@ -88,13 +88,14 @@ class T1Fit(FittingClass):
         self.add_fitted_parameter(FittedParameter.FIT_R2, self.r_squared)
         self.save_fitting_to_database()
 
-    def _require_fit(self):
+    def _require_fit(self) -> np.ndarray:
         if self.results is None:
             raise RuntimeError("No fit results available, call fit() first.")
+        return self.results
 
     def plot(self):
         """Plot the rotated decay and the fitted exponential."""
-        self._require_fit()
+        results = self._require_fit()
         title = f"{self.target}_T1"
 
         fig = go.Figure(
@@ -109,7 +110,7 @@ class T1Fit(FittingClass):
         fig.add_trace(
             go.Scatter(
                 x=self.wait_values,
-                y=self.exponential(self.wait_values, *self.results),
+                y=self.exponential(self.wait_values, *results),
                 mode="lines",
                 name="Fitted exponential",
                 line={"color": "red"},

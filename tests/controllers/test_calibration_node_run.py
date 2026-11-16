@@ -384,7 +384,7 @@ def test_a_node_without_its_own_benchmark_is_a_benchmark_from_the_seeded_spec(mo
     monkeypatch.setattr(node_module, "save_calibration", lambda calibration, path: saves.append(path))
 
     class SeededBenchmarkNode(ScriptedNode):
-        experiment = "t1"  # seeded in NODE_REGISTRY with a BenchmarkSpec
+        experiment = "t2"  # seeded in NODE_REGISTRY with a BenchmarkSpec (t1 now has a real node, QHC-1803)
         benchmark = None  # class does not redeclare it; the seeded spec stands
 
     node = _make(SeededBenchmarkNode, targets=[Q1])

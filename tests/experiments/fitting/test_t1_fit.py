@@ -63,7 +63,9 @@ class TestT1Fit(FittingTestCase):
 
         fit_obj.fit()
         recorded: dict = {}
-        monkeypatch.setattr(fit_obj, "add_fitted_parameter", lambda parameter, value: recorded.__setitem__(parameter, value))
+        monkeypatch.setattr(
+            fit_obj, "add_fitted_parameter", lambda parameter, value: recorded.__setitem__(parameter, value)
+        )
         monkeypatch.setattr(fit_obj, "save_fitting_to_database", lambda: recorded.__setitem__("saved", True))
 
         fit_obj.save_fitting()

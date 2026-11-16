@@ -32,14 +32,15 @@ def test_subclass_registers_itself_with_its_class():
 
 
 def test_default_analysis_is_the_first():
-    class T1(CalibrationNode):
-        experiment = "t1"
-        analyses = ("exponential_decay",)
+    # Uses t2 as a still-unclaimed seeded experiment; t1 now has a real node class (T1Node, QHC-1803).
+    class T2(CalibrationNode):
+        experiment = "t2"
+        analyses = ("decaying_oscillation",)
 
         def run(self, dead_targets):  # pragma: no cover
             return []
 
-    assert experiment_spec("t1").default_analysis == "exponential_decay"
+    assert experiment_spec("t2").default_analysis == "decaying_oscillation"
 
 
 def test_a_spine_without_experiment_does_not_register():
@@ -139,17 +140,18 @@ def test_reregistering_the_same_class_is_allowed():
 
 
 def test_a_node_class_keeps_the_seeded_benchmark():
-    # "t1" is seeded with a benchmark; a node class that does not re-declare one keeps it.
-    assert experiment_spec("t1").benchmark == BenchmarkSpec(unit="ns", direction=HIGHER)
+    # "t2" is seeded with a benchmark; a node class that does not re-declare one keeps it. (Uses t2
+    # rather than t1, which now has a real node class that claims it, T1Node, QHC-1803.)
+    assert experiment_spec("t2").benchmark == BenchmarkSpec(unit="ns", direction=HIGHER)
 
-    class T1(CalibrationNode):
-        experiment = "t1"
-        analyses = ("exponential_decay",)
+    class T2(CalibrationNode):
+        experiment = "t2"
+        analyses = ("decaying_oscillation",)
 
         def run(self, dead_targets):  # pragma: no cover
             return []
 
-    assert experiment_spec("t1").benchmark == BenchmarkSpec(unit="ns", direction=HIGHER)
+    assert experiment_spec("t2").benchmark == BenchmarkSpec(unit="ns", direction=HIGHER)
 
 
 def test_a_node_class_declares_its_own_benchmark():

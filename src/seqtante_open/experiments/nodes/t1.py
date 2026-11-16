@@ -109,9 +109,7 @@ class T1Node(FixedFluxNode[None]):
         if model.r_squared < min_r2:
             raise AnalysisError(f"{target} T1 fit R² {model.r_squared:.3f} is below the minimum {min_r2}")
 
-        return AnalysisResult(
-            value=model.t1_us, uncertainty=model.t1_uncertainty_us, plots=(plot,) if plot else ()
-        )
+        return AnalysisResult(value=model.t1_us, uncertainty=model.t1_uncertainty_us, plots=(plot,) if plot else ())
 
     def apply(self, target: Target, result: AnalysisResult[None]) -> None:
         """A benchmark writes nothing to the calibration file; the run records the scored verdict (ADR-0002)."""
