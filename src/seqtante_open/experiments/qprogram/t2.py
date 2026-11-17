@@ -60,12 +60,13 @@ def t2_single(
     """
     r_wf_I = Square(amplitude=r_amp, duration=r_duration)
     r_wf_Q = Square(amplitude=0.0, duration=r_duration)
+    # Pi-half pulse: the played amplitude is pi_pulse_amp / 2.
     pihalf_wf = IQDrag(
         amplitude=pi_pulse_amp / 2,
         duration=pi_pulse_duration,
         num_sigmas=pi_pulse_sigmas,
         drag_coefficient=pi_drag_coef,
-    )  # Pi half pulse
+    )
     if ringup_time > 0:
         ringup_wf = Square(amplitude=r_amp, duration=ringup_time)
 
