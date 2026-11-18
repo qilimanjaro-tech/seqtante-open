@@ -108,8 +108,10 @@ class _RestoringPlatform:
             raise NotImplementedError("restoring_platform does not support extra set_parameter arguments yet")
         self._restore.set(alias, parameter, value)
 
-    def __getattr__(self, name: str) -> Any:
+    def __getattr__(self, name: str) -> object:
         # Reached only for attributes this proxy does not define, so set_parameter is never delegated.
+        # The proxy is only ever used through the Platform-typed restoring_platform() below, so this
+        # return type is not what callers see; object keeps it off Any without weakening that boundary.
         return getattr(self._platform, name)
 
 
