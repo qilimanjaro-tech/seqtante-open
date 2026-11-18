@@ -38,6 +38,7 @@ class T1Fit(FittingClass):
 
     results: np.ndarray | None
     #: Set by :meth:`fit`; left unset until then so a missing fit is an error, not a silent default.
+    rate: float
     T1: float
     t1_uncertainty: float
     r_squared: float
@@ -50,7 +51,13 @@ class T1Fit(FittingClass):
         self.arr = np.real(self.rotate_iq(self.array[:, 0] + 1j * self.array[:, 1]))
 
     def fit(self):
-        """Fit the exponential, then record T1 (ns), its uncertainty (ns) and the fit R²."""
+        """Fit the exponential, then record the rate, T1 (ns), its uncertainty (ns) and the fit R².
+
+        ``T1 = -1 / rate`` is physical only for a decaying exponential (``rate < 0``). The raw ``rate``
+        is always recorded, but T1 and its uncertainty are left non-finite when ``rate >= 0``: dividing
+        would give a negative lifetime, or raise on ``rate == 0``. :attr:`is_physical_decay` then reports
+        the failure so ``analyze`` fails the target instead of scoring a non-physical value (QHC-1803).
+        """
         self.results, pcov = sp.curve_fit(
             self.exponential,
             self.wait_values,
@@ -58,14 +65,36 @@ class T1Fit(FittingClass):
             p0=self.exponential_initial_guess(self.wait_values, self.arr),
         )
         rate = float(self.results[1])
-        self.T1 = -1.0 / rate
-        rate_std = float(np.sqrt(pcov[1, 1]))
-        # T1 = -1/rate, so dT1/drate = 1/rate²; propagate the rate's standard uncertainty.
-        self.t1_uncertainty = rate_std / rate**2
+        self.rate = rate
+        if rate < 0.0:
+            self.T1 = -1.0 / rate
+            rate_std = float(np.sqrt(pcov[1, 1]))
+            # T1 = -1/rate, so dT1/drate = 1/rate²; propagate the rate's standard uncertainty.
+            self.t1_uncertainty = rate_std / rate**2
+        else:
+            # A non-decaying (or flat) fit has no physical T1; flag it rather than dividing.
+            self.T1 = float("nan")
+            self.t1_uncertainty = float("nan")
         model = self.exponential(self.wait_values, *self.results)
         ss_res = float(np.sum((self.arr - model) ** 2))
         ss_tot = float(np.sum((self.arr - np.mean(self.arr)) ** 2))
         self.r_squared = 1.0 - ss_res / ss_tot
+
+    @property
+    def is_physical_decay(self) -> bool:
+        """Whether the fit is a real decay (``rate < 0``), so ``T1 = -1/rate`` is positive and finite."""
+        self._require_fit()
+        return self.rate < 0.0
+
+    @property
+    def relative_uncertainty(self) -> float:
+        """The standard uncertainty on T1 as a fraction of T1 (unit-independent, so us or ns give the same).
+
+        Non-finite when ``curve_fit`` could not estimate the covariance (``inf``) or the fit is
+        non-physical (``nan``); ``analyze`` rejects both.
+        """
+        self._require_fit()
+        return abs(self.t1_uncertainty / self.T1)
 
     @property
     def t1_us(self) -> float:

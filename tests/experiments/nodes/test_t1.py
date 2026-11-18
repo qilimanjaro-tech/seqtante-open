@@ -3,7 +3,11 @@
 Drives the full three-phase run with the T1 saturation driver and the exponential fit scripted (a fake
 :class:`T1Fit`, a stubbed driver, no hardware, no database, no disk), and asserts the node measures at
 the operating point, reports its value in microseconds, and lets the run score the benchmark. The
-low-R² path checks that a bad fit fails the target and leaves no benchmark result.
+rejection paths check that a bad fit (low R², non-physical decay, ill-determined lifetime) fails the
+target, records no benchmark result, and never reaches the DB.
+
+The platform fake and the output/save stubbing come from :mod:`tests.experiments.nodes.harness`; only
+the T1-specific driver and fit stubs live here.
 """
 
 import numpy as np
@@ -20,13 +24,11 @@ from seqtante_open.calibration.model import (
     OperatingPoint,
     ReadoutFreqs,
 )
-from seqtante_open.controllers import calibration_node as node_module
-from seqtante_open.controllers.calibration_node import RunContext
 from seqtante_open.controllers.verdicts import BenchmarkDirection, BenchmarkThresholds, Verdict
 from seqtante_open.experiments.nodes import T1Node
 from seqtante_open.experiments.nodes import t1 as t1_module
-from seqtante_open.outputs import output_controller
 from seqtante_open.targets import ExperimentTarget
+from tests.experiments.nodes.harness import build_context, stub_output_and_save
 
 Q1 = ExperimentTarget.from_str("q1")
 CROSSTALK_BUSES = ("flux_z_q1", "flux_x_q1")
@@ -57,36 +59,23 @@ THRESHOLDS = {
 }
 
 
-class FakePlatform:
-    def __init__(self):
-        self.values: dict = {}
-        self.calls: list = []
-
-    def set_crosstalk(self, *, crosstalk):
-        self.calls.append("set_crosstalk")
-
-    def set_flux_to_zero(self):
-        self.calls.append("set_flux_to_zero")
-
-    def set_bias_to_zero(self):
-        self.calls.append("set_bias_to_zero")
-
-    def get_parameter(self, *, alias, parameter):
-        return self.values.get((alias, parameter), 0.0)
-
-    def set_parameter(self, *, alias, parameter, value):
-        self.values[alias, parameter] = value
-        self.calls.append(f"set:{alias}")
-
-
 class FakeT1Fit:
-    """Scripted stand-in for ``T1Fit``: no DB load, an accepted fit at ``T1_US`` ± ``T1_SIGMA_US``."""
+    """Scripted stand-in for ``T1Fit``: no DB load, an accepted decay at ``T1_US`` ± ``T1_SIGMA_US``.
+
+    The class-level knobs (``r2``, ``physical``, ``rel_unc``) let a test script an accepted or a rejected
+    fit, and ``save_calls`` counts how often ``save_fitting`` ran, so a test can assert a rejected fit is
+    never saved.
+    """
 
     r2 = 0.99
+    physical = True
+    rel_unc = 0.03
+    save_calls = 0
 
     def __init__(self, target=None, measurement_id=None, path=None):
         self.target = target
         self.id = measurement_id
+        self.path = path
 
     def fit(self):
         return None
@@ -95,11 +84,24 @@ class FakeT1Fit:
         return None
 
     def save_fitting(self):
-        return None
+        type(self).save_calls += 1
 
     @property
     def r_squared(self):
         return type(self).r2
+
+    @property
+    def is_physical_decay(self):
+        return type(self).physical
+
+    @property
+    def rate(self):
+        # Negative for a decay; a positive rate is the non-physical case the node must reject.
+        return -1.0e-4 if type(self).physical else 1.0e-4
+
+    @property
+    def relative_uncertainty(self):
+        return type(self).rel_unc
 
     @property
     def t1_us(self):
@@ -138,20 +140,15 @@ def _calibration() -> Calibration:
     return calibration
 
 
-def _make(calibration: Calibration, thresholds) -> T1Node:
-    context = RunContext(
-        platform=FakePlatform(),
-        platform_path="runcard.yml",
-        calibration=calibration,
-        calibration_path="calibration.yml",
-    )
+def _make(calibration: Calibration, thresholds, platform=None) -> T1Node:
+    context = build_context(calibration, platform)
     return T1Node(
         name="t1_sweet_spot", idx=0, targets=[Q1], parameters={Q1: dict(PARAMS)}, context=context, thresholds=thresholds
     )
 
 
 def _patch(monkeypatch):
-    """No hardware, no disk: stub the T1 driver, the fit and the calibration save."""
+    """No hardware, no disk: stub the T1 driver, the fit and the shared output/save boundaries."""
     calls: dict = {"n": 0}
 
     def fake_driver(**kwargs):
@@ -161,17 +158,19 @@ def _patch(monkeypatch):
 
     monkeypatch.setattr(t1_module, "t1_pulsed_saturation_experiment", fake_driver)
     monkeypatch.setattr(t1_module, "T1Fit", FakeT1Fit)
-    monkeypatch.setattr(node_module, "save_calibration", lambda calibration, path: None)
-    monkeypatch.setattr(output_controller, "_initialized", True)
-    monkeypatch.setattr(output_controller, "_db_manager", object())
+    stub_output_and_save(monkeypatch)
+    # Reset the fit knobs to an accepted decay; each test flips the one it exercises.
     monkeypatch.setattr(FakeT1Fit, "r2", 0.99)
+    monkeypatch.setattr(FakeT1Fit, "physical", True)
+    monkeypatch.setattr(FakeT1Fit, "rel_unc", 0.03)
+    monkeypatch.setattr(FakeT1Fit, "save_calls", 0)
     return calls
 
 
-def test_runs_the_saturation_sweep_at_the_point_and_scores_the_benchmark(monkeypatch):
+def test_runs_the_saturation_sweep_at_the_point_and_scores_the_benchmark(monkeypatch, fake_platform):
     calls = _patch(monkeypatch)
     calibration = _calibration()
-    node = _make(calibration, THRESHOLDS)
+    node = _make(calibration, THRESHOLDS, platform=fake_platform)
 
     failed = node.run({})
 
@@ -189,6 +188,7 @@ def test_runs_the_saturation_sweep_at_the_point_and_scores_the_benchmark(monkeyp
     assert result.value == pytest.approx(T1_US)
     assert result.uncertainty == pytest.approx(T1_SIGMA_US)
     assert result.verdict is Verdict.passed
+    assert FakeT1Fit.save_calls == 1  # the accepted fit was saved once
 
 
 def test_low_r2_fails_the_target_and_records_no_benchmark(monkeypatch):
@@ -201,3 +201,42 @@ def test_low_r2_fails_the_target_and_records_no_benchmark(monkeypatch):
 
     assert failed == ["q1"]  # the fit is rejected: the target fails the step
     assert node.benchmark_results == ()
+    assert FakeT1Fit.save_calls == 0  # a rejected fit is never written to the DB
+
+
+def test_non_physical_decay_fails_the_target_and_is_not_saved(monkeypatch):
+    _patch(monkeypatch)
+    monkeypatch.setattr(FakeT1Fit, "physical", False)  # rate >= 0: T1 would be negative/infinite
+    calibration = _calibration()
+    node = _make(calibration, THRESHOLDS)
+
+    failed = node.run({})
+
+    assert failed == ["q1"]
+    assert node.benchmark_results == ()
+    assert FakeT1Fit.save_calls == 0
+
+
+def test_large_relative_uncertainty_fails_the_target_and_is_not_saved(monkeypatch):
+    _patch(monkeypatch)
+    monkeypatch.setattr(FakeT1Fit, "rel_unc", 2.0)  # sigma_T1 twice T1: above the default maximum
+    calibration = _calibration()
+    node = _make(calibration, THRESHOLDS)
+
+    failed = node.run({})
+
+    assert failed == ["q1"]
+    assert node.benchmark_results == ()
+    assert FakeT1Fit.save_calls == 0
+
+
+def test_infinite_uncertainty_fails_the_target(monkeypatch):
+    _patch(monkeypatch)
+    monkeypatch.setattr(FakeT1Fit, "rel_unc", float("inf"))  # curve_fit could not estimate the covariance
+    calibration = _calibration()
+    node = _make(calibration, THRESHOLDS)
+
+    failed = node.run({})
+
+    assert failed == ["q1"]
+    assert FakeT1Fit.save_calls == 0

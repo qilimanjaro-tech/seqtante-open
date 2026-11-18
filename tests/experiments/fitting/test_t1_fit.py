@@ -73,3 +73,28 @@ class TestT1Fit(FittingTestCase):
         assert recorded[FittedParameter.T1] == pytest.approx(T1_NS / 1000, rel=0.02)
         assert recorded[FittedParameter.FIT_R2] == pytest.approx(1.0, abs=0.05)
         assert recorded["saved"] is True
+
+    def test_is_physical_decay(self, fitted):
+        """A clean decay fits to rate < 0, so it reads as a physical decay with a small relative uncertainty."""
+        assert fitted.is_physical_decay is True
+        assert fitted.relative_uncertainty < 0.1
+
+    def test_relative_uncertainty(self, fit_obj, monkeypatch):
+        """A fit that lands on rate >= 0: T1 and its uncertainty are left non-finite and the fit is flagged.
+
+        The node turns that flag into a failed target instead of scoring a negative or infinite lifetime
+        (QHC-1803). ``relative_uncertainty`` is ``nan`` there, which the node also rejects. ``curve_fit``
+        is stubbed to a non-negative rate so the branch is tested without depending on the optimiser.
+        """
+        from seqtante_open.experiments.fitting import t1_fit as t1_fit_module
+
+        monkeypatch.setattr(
+            t1_fit_module.sp, "curve_fit", lambda *args, **kwargs: (np.array([1.0, 1.0e-4, 0.0]), np.eye(3))
+        )
+        fit_obj.fit()
+
+        assert fit_obj.rate >= 0.0
+        assert fit_obj.is_physical_decay is False
+        assert np.isnan(fit_obj.T1)
+        assert np.isnan(fit_obj.t1_uncertainty)
+        assert np.isnan(fit_obj.relative_uncertainty)

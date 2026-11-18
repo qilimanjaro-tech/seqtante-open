@@ -32,15 +32,15 @@ def test_subclass_registers_itself_with_its_class():
 
 
 def test_default_analysis_is_the_first():
-    # Uses t2 as a still-unclaimed seeded experiment; t1 now has a real node class (T1Node, QHC-1803).
-    class T2(CalibrationNode):
-        experiment = "t2"
-        analyses = ("decaying_oscillation",)
+    # A made-up experiment name no real node will ever claim, so a new node landing never breaks this.
+    class DefaultAnalysisProbe(CalibrationNode):
+        experiment = "default_analysis_probe"
+        analyses = ("first_analysis", "second_analysis")
 
         def run(self, dead_targets):  # pragma: no cover
             return []
 
-    assert experiment_spec("t2").default_analysis == "decaying_oscillation"
+    assert experiment_spec("default_analysis_probe").default_analysis == "first_analysis"
 
 
 def test_a_spine_without_experiment_does_not_register():
