@@ -24,7 +24,7 @@ happens for every node instead of a hand-written ``finally`` per experiment.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -83,3 +83,43 @@ def restoring_parameters(platform: Platform) -> Iterator[ParameterRestore]:
         yield restore
     finally:
         restore.restore()
+
+
+class _RestoringPlatform:
+    """A platform-facing proxy whose ``set_parameter`` records prior values for restore (ADR-0006).
+
+    An experiment driver ported from the legacy code calls ``platform.set_parameter`` directly for the
+    LO, IF and power it needs, which bypasses the restore handle and leaves those values on the fridge
+    for the next node. Passing this proxy in its place routes every ``set_parameter`` through a
+    :class:`ParameterRestore`, so :func:`restoring_parameters` undoes them, without the driver having to
+    know about the handle. Everything else -- ``get_parameter``, ``execute_qprogram``, ``get_element``,
+    the attributes :class:`~qililab.result.StreamArray` reads -- is delegated to the real platform.
+    """
+
+    def __init__(self, platform: Platform, restore: ParameterRestore) -> None:
+        self._platform = platform
+        self._restore = restore
+
+    def set_parameter(self, alias: str, parameter: Parameter, value: ParameterValue, *args: Any, **kwargs: Any) -> None:
+        """Set ``parameter`` on ``alias`` through the restore handle so ``run`` can undo it."""
+        if args or kwargs:
+            # The restore handle keys on (alias, parameter) only; a channel-scoped set cannot be undone
+            # through it yet. Fail loudly rather than silently leaving the change unrestored.
+            raise NotImplementedError("restoring_platform does not support extra set_parameter arguments yet")
+        self._restore.set(alias, parameter, value)
+
+    def __getattr__(self, name: str) -> object:
+        # Reached only for attributes this proxy does not define, so set_parameter is never delegated.
+        # The proxy is only ever used through the Platform-typed restoring_platform() below, so this
+        # return type is not what callers see; object keeps it off Any without weakening that boundary.
+        return getattr(self._platform, name)
+
+
+def restoring_platform(platform: Platform, restore: ParameterRestore) -> Platform:
+    """A :class:`~qililab.Platform`-typed proxy whose parameter writes go through ``restore`` (ADR-0006).
+
+    Typed as a ``Platform`` so a driver that takes one accepts it; at runtime it is the thin
+    :class:`_RestoringPlatform` proxy, which records each ``set_parameter`` for
+    :func:`restoring_parameters` to undo and delegates everything else to ``platform``.
+    """
+    return cast("Platform", _RestoringPlatform(platform, restore))
