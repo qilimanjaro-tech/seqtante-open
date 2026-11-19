@@ -32,6 +32,7 @@ dependencies = [
     "pydantic>=2.0",
     "pyyaml>=6.0.2",
     "qcodes",
+    "qili-qprograms",
     "ruamel-yaml>=0.18.10",
     "scipy>=1.15",
     "xarray>=2024.7.0",
@@ -88,6 +89,8 @@ url = "https://aws@qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.c
 [tool.uv.sources]
 qililab = { index = "qilimanjaro" }
 qpysequence = { index = "qilimanjaro" }
+# qili-qprograms is not published yet; pin to a main commit until it cuts a release (then move to the index).
+qili-qprograms = { git = "https://github.com/qilimanjaro-tech/qili-qprograms.git", rev = "33a77511f6d8eb62cb44f9412058564b03084281" }
 
 [tool.ruff]
 line-length = 120

@@ -31,7 +31,6 @@ import numpy as np
 
 from seqtante_open.calibration.bus_alias import Role, bus_alias
 from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode
-from seqtante_open.controllers.operating_point import operating_point_for
 from seqtante_open.controllers.parameter_restore import restoring_platform
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.experiment_classes import t1_pulsed_saturation_experiment
@@ -71,31 +70,32 @@ class T1Node(FixedFluxNode[None]):
         measurements: dict[Target, list[int]] = {}
         for target in targets:
             params = self.parameters[target]
-            operating_point = operating_point_for(self.calibration_file, self.experiment, target)
+            # The readout pulse and the drive/readout IFs come from the operating point in the
+            # calibration file (qili_qprograms reads them); this node resolves its name and LOs.
+            section = self.calibration_file.experiments[self.experiment][str(target)]
+            operating_point_name = section.operating_point
+            operating_point = self.calibration_file.operating_points[str(target)][operating_point_name]
             durations_idle = np.linspace(*params["idle_sweep"]).astype(int)
             measurement_id = t1_pulsed_saturation_experiment(
                 platform=platform,
                 db_manager=db_manager,
+                calibration=self.context.calibration,
+                target=str(target),
+                operating_point=operating_point_name,
                 readout_bus=bus_alias(target, Role.readout),
                 drive_bus=bus_alias(target, Role.drive),
                 durations_idle=durations_idle,
-                drive_if_freq=operating_point.drive.if_,
+                averages=params["averages"],
+                relax_duration=params["relax_duration"],
                 drive_duration=params["drive_duration"],
                 drive_amplitude=params["drive_amplitude"],
                 drive_gain=params["drive_power"],
-                readout_if_freq=int(operating_point.readout.if_),
-                readout_duration=params["readout_duration"],
-                readout_amplitude=params["readout_amplitude"],
-                overlap_time=params.get("overlap_time", 0),
-                relax_duration=params["relax_duration"],
-                averages=params["averages"],
-                ringup_time=params.get("ringup_time", 0),
-                duration_ringup_drive=params.get("duration_ringup_drive", 200),
-                drive_sigmas=params.get("drive_sigmas", 4),
                 drive_LO=int(operating_point.drive.lo),
                 readout_LO=int(operating_point.readout.lo),
-                target=str(target),
-                calibration=self.context.calibration,
+                overlap_time=params.get("overlap_time", 0),
+                readout_ringup_time=params.get("ringup_time", 0),
+                drive_ringup_time=params.get("duration_ringup_drive", 200),
+                drive_n_sigmas=params.get("drive_sigmas", 4),
             )
             measurements[target] = [measurement_id]
         return measurements

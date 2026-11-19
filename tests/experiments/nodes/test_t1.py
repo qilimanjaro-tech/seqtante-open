@@ -42,6 +42,8 @@ T1_SIGMA_US = 1.5
 MEAS_ID = 100
 
 #: Idle sweep the step hands the node (np.linspace args) and the measurement knobs the fake driver ignores.
+#: The readout pulse and the drive/readout IFs are no longer step knobs: qili_qprograms reads them from
+#: the operating point in the calibration file, so the node passes only its name (and the LOs) down.
 IDLE_SWEEP = (0, 40_000, 41)
 PARAMS = {
     "idle_sweep": IDLE_SWEEP,
@@ -50,8 +52,6 @@ PARAMS = {
     "drive_duration": 20_000,
     "drive_amplitude": 0.5,
     "drive_power": -20,
-    "readout_duration": 1000,
-    "readout_amplitude": 0.4,
 }
 #: Tree thresholds, in the benchmark's unit (us); T1_US above `passed` scores Passed.
 THRESHOLDS = {
@@ -176,9 +176,11 @@ def test_runs_the_saturation_sweep_at_the_point_and_scores_the_benchmark(monkeyp
 
     assert failed == []
     assert calls["n"] == 1  # one T1 saturation sweep
-    # The driver ran at the target's operating point, over the step's idle sweep.
-    assert calls["drive_if_freq"] == pytest.approx(DRIVE_IF)
-    assert calls["readout_if_freq"] == int(READOUT_IF)
+    # The driver ran at the target's operating point, over the step's idle sweep. The IFs and the
+    # readout pulse are not passed: qili_qprograms reads them from the named operating point.
+    assert calls["target"] == "q1"
+    assert calls["operating_point"] == "sweet_spot"
+    assert calls["calibration"] is calibration
     assert calls["drive_LO"] == int(DRIVE_LO)
     assert calls["readout_LO"] == int(READOUT_LO)
     np.testing.assert_array_equal(calls["durations_idle"], np.linspace(*IDLE_SWEEP).astype(int))

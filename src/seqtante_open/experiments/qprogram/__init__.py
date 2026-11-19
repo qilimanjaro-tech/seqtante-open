@@ -14,7 +14,6 @@
 
 from .spectroscopy import resonator_spectroscopy
 from .spectroscopy_vs_flux import single_tone_vs_flux
-from .t1 import t1_saturation
 from .two_tone import two_tone_spectroscopy
 from .utils import multi_wait_for_trigger
 
@@ -22,6 +21,5 @@ __all__ = [
     "multi_wait_for_trigger",
     "resonator_spectroscopy",
     "single_tone_vs_flux",
-    "t1_saturation",
     "two_tone_spectroscopy",
 ]
