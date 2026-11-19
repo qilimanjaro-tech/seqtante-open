@@ -196,12 +196,12 @@ class RabiNode(FixedFluxNode[RabiFitted]):
 
     def apply(self, target: Target, result: AnalysisResult[RabiFitted]) -> None:
         """Write the chosen analysis's result (``readout_levels`` onto the point, ``pi_amplitude`` to the pulse)."""
-        if result.fitted is None:  # pragma: no cover - a benchmark path rabi never takes
-            return
-        if self.analysis == READOUT_LEVELS:
-            self._apply_readout_levels(target, result.fitted)
-        else:
-            self._apply_pi_amplitude(target, result.fitted)
+        # rabi always fits a result; the guard is defensive against a benchmark path rabi never takes.
+        if result.fitted is not None:
+            if self.analysis == READOUT_LEVELS:
+                self._apply_readout_levels(target, result.fitted)
+            else:
+                self._apply_pi_amplitude(target, result.fitted)
 
     def _apply_readout_levels(self, target: Target, fitted: RabiFitted) -> None:
         """Write the |0>/|1> levels onto the target's operating point, tagged with the readout pulse."""
