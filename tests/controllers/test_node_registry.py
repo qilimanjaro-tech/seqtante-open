@@ -17,16 +17,17 @@ LOWER = BenchmarkDirection.lower_is_better
 
 
 def test_subclass_registers_itself_with_its_class():
-    class Rabi(CalibrationNode):
-        experiment = "rabi"
+    # A fresh example name (``rabi`` is now a real node, so it cannot double as a free example here).
+    class ExampleMultiAnalysis(CalibrationNode):
+        experiment = "example_multi_analysis"
         analyses = ("pi_amplitude", "readout_levels")
 
         def run(self, dead_targets):  # pragma: no cover - not exercised here
             return []
 
-    spec = experiment_spec("rabi")
+    spec = experiment_spec("example_multi_analysis")
     assert spec is not None
-    assert spec.node_cls is Rabi
+    assert spec.node_cls is ExampleMultiAnalysis
     assert spec.analyses == ("pi_amplitude", "readout_levels")
     assert spec.default_analysis == "pi_amplitude"
 
