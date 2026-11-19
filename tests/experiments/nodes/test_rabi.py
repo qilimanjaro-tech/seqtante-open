@@ -6,8 +6,11 @@ hardware, a database or a disk write: ``readout_levels`` writes the |0>/|1> leve
 point, ``pi_amplitude`` writes the fitted amplitude into the named DRAG pulse in ``Calibration.waveforms``.
 """
 
+from types import SimpleNamespace
+
+import numpy as np
 import pytest
-from qililab import IQDrag
+from qililab import IQDrag, Parameter
 from qililab.qprogram.calibration import Calibration
 from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 
@@ -25,6 +28,7 @@ from seqtante_open.controllers.calibration_node import RunContext
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.nodes import RabiNode
 from seqtante_open.experiments.nodes import rabi as rabi_module
+from seqtante_open.outputs import output_controller
 from seqtante_open.targets import ExperimentTarget
 
 Q1 = ExperimentTarget.from_str("q1")
@@ -56,6 +60,44 @@ class FakePlatform:
     def set_parameter(self, *, alias, parameter, value):
         self.values[alias, parameter] = value
         self.calls.append(f"set:{alias}")
+
+
+class FakeRabiPlatform(FakePlatform):
+    """A :class:`FakePlatform` that also answers the execution calls the inlined node makes.
+
+    ``get_element`` reports a Rohde & Schwarz drive instrument (so the IQ-modulation/POWER/RF branch
+    runs) and ``execute_qprogram`` returns a readout result. On execute it snapshots the parameters set
+    so far into :attr:`values_at_execute`, before the node's run restores them.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.values_at_execute: dict = {}
+
+    def get_element(self, alias):
+        self.calls.append(f"get_element:{alias}")
+        return SimpleNamespace(instruments=[SimpleNamespace(name=SimpleNamespace(name="ROHDE_SCHWARZ"))])
+
+    def execute_qprogram(self, qprogram, **kwargs):
+        self.calls.append("execute_qprogram")
+        self.values_at_execute = dict(self.values)
+        return SimpleNamespace(results={"readout_q1": [SimpleNamespace(array=np.zeros((2, 2)))]})
+
+
+class FakeStreamArray:
+    """Stand-in for ``StreamArray``: a context manager that swallows the write and carries a measurement id."""
+
+    def __init__(self, **kwargs):
+        self.measurement = SimpleNamespace(measurement_id=777)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def __setitem__(self, key, value):
+        return None
 
 
 class FakeRabiModel:
@@ -190,6 +232,50 @@ def test_readout_levels_fit_below_min_r2_fails_the_step(monkeypatch):
 
     assert failed == ["q1"]  # a poor fit fails the target
     assert read_calibration_file(calibration).operating_points["q1"]["reset"].readout.levels is None
+
+
+def test_execute_builds_the_qili_sweep_and_sets_the_hardware(monkeypatch):
+    """The real ``execute_node`` builds the qili QProgram at the operating point and sets the HW from it."""
+    monkeypatch.setattr(node_module, "save_calibration", lambda calibration, path: None)
+    monkeypatch.setattr(rabi_module, "RabiAmplitudeModel", FakeRabiModel)
+    monkeypatch.setattr(output_controller, "_initialized", True)
+    monkeypatch.setattr(output_controller, "_db_manager", object())
+    built: dict = {}
+
+    def fake_rabi_amplitude(**kwargs):
+        built.update(kwargs)
+        return SimpleNamespace(name="qprogram")  # sentinel; the fake platform/stream ignore its content
+
+    monkeypatch.setattr(rabi_module, "rabi_amplitude", fake_rabi_amplitude)
+    monkeypatch.setattr(rabi_module, "StreamArray", FakeStreamArray)
+
+    calibration = _calibration(_rabi_file("sweet_spot"))
+    platform = FakeRabiPlatform()
+    context = RunContext(
+        platform=platform, platform_path="runcard.yml", calibration=calibration, calibration_path="calibration.yml"
+    )
+    params = {"drive_amplitude_sweep": (0.0, 1.0, 21), "averages": 1000, "relax_duration": 50_000, "drive_power": -10}
+    node = RabiNode(
+        name="step", idx=0, targets=[Q1], parameters={Q1: params}, context=context, analysis="readout_levels"
+    )
+
+    failed = node.run({})
+
+    assert failed == []
+    # The sweep was built at the target's operating point; the pulses/IFs come from the named point.
+    assert built["target"] == "q1"
+    assert built["operating_point"] == "sweet_spot"
+    assert built["calibration"] is calibration
+    np.testing.assert_array_equal(built["drive_amplitude_sweep"], np.linspace(0.0, 1.0, 21))
+    # The node set the operating point's hardware itself (snapshotted before the run restored it):
+    # drive/readout LOs, readout attenuation, drive power, and the R&S IQ modulation and RF output.
+    snap = platform.values_at_execute
+    assert snap["drive_q1", Parameter.LO_FREQUENCY] == int(4e9)
+    assert snap["readout_q1", Parameter.LO_FREQUENCY] == int(7e9)
+    assert snap["readout_q1", Parameter.OUT0_ATT] == 10
+    assert snap["drive_q1", Parameter.POWER] == -10
+    assert snap["drive_q1", Parameter.IQ_MODULATION] is True
+    assert snap["drive_q1", Parameter.RF_ON] is True
 
 
 def test_analyze_raises_analysis_error_below_min_r2(monkeypatch):

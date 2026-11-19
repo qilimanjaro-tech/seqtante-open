@@ -31,21 +31,31 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
+from warnings import warn
 
 import numpy as np
-from qililab import IQDrag
+from qili_qprograms.experiments import rabi_amplitude
+from qililab import IQDrag, Parameter
+from qililab.result import StreamArray
 
 from seqtante_open.calibration.bus_alias import Role, bus_alias
 from seqtante_open.calibration.model import Measured, ReadoutLevels
 from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode
 from seqtante_open.controllers.operating_point import operating_point_for
 from seqtante_open.controllers.verdicts import AnalysisError
-from seqtante_open.experiments.experiment_classes import rabi_amplitude
 from seqtante_open.experiments.fitting import RabiAmplitudeModel
+from seqtante_open.experiments.results import measurement_id
 from seqtante_open.outputs import output_controller
 
 if TYPE_CHECKING:
+    from seqtante_open.controllers.parameter_restore import ParameterRestore
     from seqtante_open.targets import Target
+
+#: Stream/experiment name the measurement is stored under.
+_EXPERIMENT_NAME = "rabi_amplitude_drag"
+
+#: Warned when the drive bus has no instrument whose power this node knows how to set.
+_NO_DRIVE_INSTRUMENT_MSG = "No instrument to set power to."
 
 #: Analysis names (ADR-0003). The first is the default when a step names none.
 READOUT_LEVELS = "readout_levels"
@@ -80,39 +90,81 @@ class RabiNode(FixedFluxNode[RabiFitted]):
     analyses: ClassVar[tuple[str, ...]] = (PI_AMPLITUDE, READOUT_LEVELS)
 
     def execute_node(self, targets: list[Target]) -> dict[Target, list[int]]:
-        """Run the amplitude sweep on each target and return its measurement id (hardware only)."""
-        db_manager = output_controller.db_manager
-        measurements: dict[Target, list[int]] = {}
-        for target in targets:
-            params = self.parameters[target]
-            point = operating_point_for(self.calibration_file, self.experiment, target)
-            sweep = np.linspace(*params["drive_amplitude_sweep"])
-            if len(sweep) < 2:
-                raise ValueError(f"{target}: drive_amplitude_sweep must have at least 2 points, got {len(sweep)}")
-            measurement_id = rabi_amplitude(
-                platform=self.context.platform,
-                db_manager=db_manager,
-                readout_bus=bus_alias(target, Role.readout),
-                readout_if_freq=point.readout.if_,
-                readout_duration=params["readout_duration"],
-                readout_amplitude=params["readout_amplitude"],
-                drive_bus=bus_alias(target, Role.drive),
-                drive_power=params["drive_power"],
-                drive_if_freq=point.drive.if_,
-                drive_amplitude_sweep=sweep,
-                drive_duration=params["drive_duration"],
-                averages=params["averages"],
-                relax_duration=params["relax_duration"],
-                ringup_time=params.get("ringup_time", 0),
-                drive_sigmas=params.get("drive_sigmas", _DRIVE_SHAPE_DEFAULTS["drive_sigmas"]),
-                drive_drag=params.get("drive_drag", _DRIVE_SHAPE_DEFAULTS["drive_drag"]),
-                drive_LO=point.drive.lo,
-                readout_LO=point.readout.lo,
-                target=str(target),
-                calibration=self.context.calibration,
-            )
-            measurements[target] = [measurement_id]
-        return measurements
+        """Run the amplitude sweep on each target at its operating point and return its measurement id."""
+        return {target: [self._run_amplitude_sweep(target)] for target in targets}
+
+    def _run_amplitude_sweep(self, target: Target) -> int:
+        """Build the Rabi amplitude QProgram, set the operating point's hardware, run the sweep and stream it.
+
+        The QProgram is the shared ``qili_qprograms`` experiment: it plays the calibrated ``pi-<op>``
+        pulse (normalised to unit amplitude) through a gain sweep and reads the ``readout-<op>`` pulse,
+        all from the calibration file. This node sets what the QProgram does not -- the drive/readout
+        LOs, the readout attenuation and the drive power/RF -- from the operating point, through the
+        restore handle so the run undoes them (ADR-0006).
+        """
+        params = self.parameters[target]
+        section = self.calibration_file.experiments[self.experiment][str(target)]
+        operating_point_name = section.operating_point
+        point = self.calibration_file.operating_points[str(target)][operating_point_name]
+        drive_bus = bus_alias(target, Role.drive)
+        readout_bus = bus_alias(target, Role.readout)
+        sweep = np.linspace(*params["drive_amplitude_sweep"])
+        if len(sweep) < 2:
+            raise ValueError(f"{target}: drive_amplitude_sweep must have at least 2 points, got {len(sweep)}")
+
+        qprogram = rabi_amplitude(
+            calibration=self.context.calibration,
+            target=str(target),
+            operating_point=operating_point_name,
+            drive_amplitude_sweep=sweep,
+            averages=params["averages"],
+            relax_duration=params["relax_duration"],
+            readout_ringup_time=params.get("ringup_time", 0),
+        )
+
+        restore = self.restore
+        restore.set(drive_bus, Parameter.LO_FREQUENCY, int(point.drive.lo))
+        restore.set(readout_bus, Parameter.LO_FREQUENCY, int(point.readout.lo))
+        restore.set(readout_bus, Parameter.OUT0_ATT, int(point.readout.attenuation))
+        self._set_drive_source(restore, drive_bus, params["drive_power"])
+
+        platform = self.context.platform
+        stream_array = StreamArray(
+            shape=(len(sweep), 2),
+            loops={
+                "drive_amplitude": {"array": sweep, "units": "amp", "bus": drive_bus, "parameter": "drive_amplitude"}
+            },
+            platform=platform,
+            experiment_name=_EXPERIMENT_NAME,
+            db_manager=output_controller.db_manager,
+            qprogram=qprogram,
+            calibration=self.context.calibration,
+            qubit_idx=str(target),
+        )
+        with stream_array:
+            results = platform.execute_qprogram(qprogram).results
+            stream_array[()] = results[readout_bus][0].array.T
+        return measurement_id(stream_array)
+
+    def _set_drive_source(self, restore: ParameterRestore, drive_bus: str, drive_power: float) -> None:
+        """Set the drive power, and arm a Rohde & Schwarz source to play the IQ drive.
+
+        The power goes through the parameter the bus's drive instrument uses (R&S ``POWER``, QCMRF
+        ``GAIN``). A Rohde & Schwarz source also needs IQ modulation switched on -- otherwise it emits a
+        bare carrier instead of the DRAG pulse's IQ waveform -- and its RF output switched on. Both, like
+        the power, go through the restore handle, so the node's run turns them back off at the end.
+        """
+        drive_instruments = [
+            instrument.name.name for instrument in self.context.platform.get_element(drive_bus).instruments
+        ]
+        if "ROHDE_SCHWARZ" in drive_instruments:
+            restore.set(drive_bus, Parameter.IQ_MODULATION, True)
+            restore.set(drive_bus, Parameter.POWER, drive_power)
+            restore.set(drive_bus, Parameter.RF_ON, True)
+        elif "QCMRF" in drive_instruments:
+            restore.set(drive_bus, Parameter.GAIN, drive_power)
+        else:
+            warn(_NO_DRIVE_INSTRUMENT_MSG, stacklevel=2)
 
     def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[RabiFitted]:
         """Fit the sweep, save the fit to the DB, and return the pi amplitude and readout levels.

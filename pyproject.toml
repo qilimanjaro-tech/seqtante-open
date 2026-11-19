@@ -32,6 +32,7 @@ dependencies = [
     "pydantic>=2.0",
     "pyyaml>=6.0.2",
     "qcodes",
+    "qili-qprograms",
     "ruamel-yaml>=0.18.10",
     "scipy>=1.15",
     "xarray>=2024.7.0",
@@ -88,6 +89,8 @@ url = "https://aws@qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.c
 [tool.uv.sources]
 qililab = { index = "qilimanjaro" }
 qpysequence = { index = "qilimanjaro" }
+# Shared production QPrograms; dev builds are published to the index on every push to its main.
+qili-qprograms = { index = "qilimanjaro" }
 
 [tool.ruff]
 line-length = 120
