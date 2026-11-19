@@ -2437,11 +2437,15 @@ wheels = [
 [[package]]
 name = "qili-qprograms"
 version = "0.0.2.dev8+g33a7751"
-source = { git = "https://github.com/qilimanjaro-tech/qili-qprograms.git?rev=33a77511f6d8eb62cb44f9412058564b03084281#33a77511f6d8eb62cb44f9412058564b03084281" }
+source = { registry = "https://qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.com/pypi/qilimanjaro/simple" }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pydantic" },
+]
+sdist = { url = "https://qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.com/pypi/qilimanjaro/simple/qili-qprograms/0.0.2.dev8+g33a7751/qili_qprograms-0.0.2.dev8+g33a7751.tar.gz", hash = "sha512:c6a468274fe1bca5c84951ea4669419ca8545228fa7322d7f09f417a7e2913ba3bb395ac627b801d803fef94e8104affb2638b1beeaf1776bac7698b8f022078", size = 213584, upload_time = "2026-11-18T15:39:01.85Z" }
+wheels = [
+    { url = "https://qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.com/pypi/qilimanjaro/simple/qili-qprograms/0.0.2.dev8+g33a7751/qili_qprograms-0.0.2.dev8+g33a7751-py3-none-any.whl", hash = "sha512:4e91afebd1c605d52689e9b87dae8d96d00e5f0077ab3392b2ed75b5d309ea063db7c346f6793c18af515cbbcd3e21e24d6f0c683ce7ab18e3553e45f03ed45a", size = 36226, upload_time = "2026-11-18T15:39:01.174Z" },
 ]
 
 [[package]]
@@ -2810,7 +2814,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "qcodes" },
-    { name = "qili-qprograms", git = "https://github.com/qilimanjaro-tech/qili-qprograms.git?rev=33a77511f6d8eb62cb44f9412058564b03084281" },
+    { name = "qili-qprograms", index = "https://qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.com/pypi/qilimanjaro/simple" },
     { name = "qililab", specifier = ">=0.36.0,<0.37", index = "https://qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.com/pypi/qilimanjaro/simple" },
     { name = "ruamel-yaml", specifier = ">=0.18.10" },
     { name = "scipy", specifier = ">=1.15" },

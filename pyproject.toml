@@ -89,8 +89,9 @@ url = "https://aws@qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.c
 [tool.uv.sources]
 qililab = { index = "qilimanjaro" }
 qpysequence = { index = "qilimanjaro" }
-# qili-qprograms is not published yet; pin to a main commit until it cuts a release (then move to the index).
-qili-qprograms = { git = "https://github.com/qilimanjaro-tech/qili-qprograms.git", rev = "33a77511f6d8eb62cb44f9412058564b03084281" }
+# Dev builds are published to the index on every push to qili-qprograms' main; uv.lock pins the
+# current main-head build. Switch to a version range here once it cuts a tagged release.
+qili-qprograms = { index = "qilimanjaro" }
 
 [tool.ruff]
 line-length = 120
