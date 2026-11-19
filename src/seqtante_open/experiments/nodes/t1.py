@@ -118,7 +118,7 @@ class T1Node(FixedFluxNode[None]):
         platform.set_parameter(
             alias=readout_bus, parameter=Parameter.OUT0_ATT, value=int(operating_point.readout.attenuation)
         )
-        self._set_drive_power(platform, drive_bus, params["drive_power"])
+        self._set_drive_source(platform, drive_bus, params["drive_power"])
 
         stream_array = StreamArray(
             shape=(len(durations_idle), 2),
@@ -136,14 +136,18 @@ class T1Node(FixedFluxNode[None]):
                 stream_array[idx,] = results[readout_bus][idx].array.T
         return measurement_id(stream_array)
 
-    def _set_drive_power(self, platform: Platform, drive_bus: str, drive_power: float) -> None:
-        """Set the drive power through the parameter the bus's drive instrument uses (R&S ``POWER``, QCMRF ``GAIN``).
+    def _set_drive_source(self, platform: Platform, drive_bus: str, drive_power: float) -> None:
+        """Set the drive power, and arm a Rohde & Schwarz source to play the IQ drive.
 
-        A Rohde & Schwarz source also has its RF output switched on; the restore handle switches it back
-        off when the node's run ends, so no explicit teardown is needed here.
+        The power goes through the parameter the bus's drive instrument uses (R&S ``POWER``, QCMRF
+        ``GAIN``). A Rohde & Schwarz source also needs IQ modulation switched on -- otherwise it emits a
+        bare carrier instead of the saturation drive's IQ waveform -- and its RF output switched on. Both,
+        like the power, go through the restore handle, so the node's run turns them back off at the end;
+        no explicit teardown is needed here.
         """
         drive_instruments = [instrument.name.name for instrument in platform.get_element(drive_bus).instruments]
         if "ROHDE_SCHWARZ" in drive_instruments:
+            platform.set_parameter(alias=drive_bus, parameter=Parameter.IQ_MODULATION, value=True)
             platform.set_parameter(alias=drive_bus, parameter=Parameter.POWER, value=drive_power)
             platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=True)
         elif "QCMRF" in drive_instruments:

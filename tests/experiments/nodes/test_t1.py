@@ -234,12 +234,13 @@ def test_runs_the_saturation_sweep_at_the_point_and_scores_the_benchmark(monkeyp
     assert build["calibration"] is calibration
     np.testing.assert_array_equal(build["idle_duration_sweep"], np.linspace(*IDLE_SWEEP).astype(int))
     # The node set the operating point's hardware itself (snapshotted before the run restored it):
-    # drive/readout LOs, readout attenuation, drive power and the R&S RF output.
+    # drive/readout LOs, readout attenuation, drive power, and the R&S IQ modulation and RF output.
     snap = platform.values_at_execute
     assert snap[DRIVE_BUS, Parameter.LO_FREQUENCY] == int(DRIVE_LO)
     assert snap[READOUT_BUS, Parameter.LO_FREQUENCY] == int(READOUT_LO)
     assert snap[READOUT_BUS, Parameter.OUT0_ATT] == int(READOUT_ATT)
     assert snap[DRIVE_BUS, Parameter.POWER] == DRIVE_POWER
+    assert snap[DRIVE_BUS, Parameter.IQ_MODULATION] is True
     assert snap[DRIVE_BUS, Parameter.RF_ON] is True
     # analyze reported the value in us; the run scored it (higher-is-better, 42 us >= 20 us passed).
     result = node.benchmark_results[0]
