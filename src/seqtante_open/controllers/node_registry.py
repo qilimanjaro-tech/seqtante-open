@@ -32,16 +32,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
+
+from seqtante_open.controllers.verdicts import BenchmarkDirection
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from seqtante_open.controllers.calibration_node import CalibrationNode
-
-
-#: Whether a higher or a lower benchmark value is the better calibration (ADR-0002).
-Direction = Literal["higher", "lower"]
 
 
 class Parallel(StrEnum):
@@ -63,11 +61,11 @@ class BenchmarkSpec:
 
     Args:
         unit (str | None): Unit of the value, ``None`` when it is dimensionless.
-        direction (Direction): Whether a higher or a lower value is better.
+        direction (BenchmarkDirection): Whether a higher or a lower value is better.
     """
 
     unit: str | None
-    direction: Direction
+    direction: BenchmarkDirection
 
 
 @dataclass(frozen=True)
@@ -101,10 +99,17 @@ NODE_REGISTRY: dict[str, ExperimentSpec] = {
     "two_tone_vs_flux": ExperimentSpec(analyses=("parabola_vertex",)),
     "reset_point_search": ExperimentSpec(analyses=("lorentzian_peak",)),
     "rabi": ExperimentSpec(analyses=("pi_amplitude", "readout_levels")),
-    "t1": ExperimentSpec(analyses=("exponential_decay",), benchmark=BenchmarkSpec(unit="ns", direction="higher")),
-    "t2": ExperimentSpec(analyses=("decaying_oscillation",), benchmark=BenchmarkSpec(unit="ns", direction="higher")),
+    "t1": ExperimentSpec(
+        analyses=("exponential_decay",),
+        benchmark=BenchmarkSpec(unit="ns", direction=BenchmarkDirection.higher_is_better),
+    ),
+    "t2": ExperimentSpec(
+        analyses=("decaying_oscillation",),
+        benchmark=BenchmarkSpec(unit="ns", direction=BenchmarkDirection.higher_is_better),
+    ),
     "landau_zener": ExperimentSpec(
-        analyses=("theory_agreement",), benchmark=BenchmarkSpec(unit=None, direction="lower")
+        analyses=("theory_agreement",),
+        benchmark=BenchmarkSpec(unit=None, direction=BenchmarkDirection.lower_is_better),
     ),
 }
 

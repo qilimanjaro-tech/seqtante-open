@@ -27,14 +27,16 @@ from seqtante_open.controllers.node_registry import BenchmarkSpec, Parallel
 from seqtante_open.controllers.verdicts import (
     AnalysisError,
     BenchmarkDirection,
-    BenchmarkResult,
     BenchmarkThresholds,
     Verdict,
 )
 from seqtante_open.targets import ExperimentTarget
 
 CROSSTALK_BUSES = ("flux_z_q1", "flux_z_q2", "flux_x_q1")
-THRESHOLDS = BenchmarkThresholds(passed=1.0, warning=0.5, direction=BenchmarkDirection.higher_is_better)
+THRESHOLDS = BenchmarkThresholds(passed=1.0, warning=0.5, unit="ns", direction=BenchmarkDirection.higher_is_better)
+
+# Values that score each verdict against THRESHOLDS (passed 1.0, warning 0.5, higher is better).
+PASS, WARN, FAIL = 2.0, 0.7, 0.1
 
 
 class FakePlatform:
@@ -82,21 +84,17 @@ def _context(platform=None, calibration=None) -> RunContext:
     )
 
 
-def _benchmark_result(target: str, verdict: Verdict) -> BenchmarkResult:
-    return BenchmarkResult(target=target, value=1.0, uncertainty=None, verdict=verdict, thresholds=THRESHOLDS)
-
-
 class ScriptedNode(CalibrationNode):
     """A benchmark node whose phases record their calls; it writes nothing, so no file is read."""
 
     experiment = "scripted"
     analyses = ("a",)
     applies_operating_point = False
-    benchmark = BenchmarkSpec(unit="ns", direction="higher")
+    benchmark = BenchmarkSpec(unit="ns", direction=BenchmarkDirection.higher_is_better)
 
     # Per-instance config, set by _make.
     fail: ClassVar[set[str]] = set()
-    verdicts: ClassVar[dict[str, Verdict]] = {}
+    values: ClassVar[dict[str, float]] = {}  # the benchmark value per target; the base scores it
     raise_in_execute: ClassVar[bool] = False
 
     def __init__(self, **kwargs):
@@ -118,20 +116,22 @@ class ScriptedNode(CalibrationNode):
         self.analyzed.append(target)
         if str(target) in self.fail:
             raise AnalysisError(f"{target} fit did not converge")
-        verdict = self.verdicts.get(str(target), Verdict.passed)
-        return AnalysisResult(benchmark=_benchmark_result(str(target), verdict))
+        return AnalysisResult(value=self.values.get(str(target), PASS))
 
     def apply(self, target, result):
         self.applied.append(target)
 
 
-def _make(cls, *, targets, context=None, **config):
+def _make(cls, *, targets, context=None, thresholds=THRESHOLDS, **config):
+    # A benchmark node is scored against its per-target thresholds; omit for a recalibration.
+    per_target = {} if thresholds is None else dict.fromkeys(targets, thresholds)
     node = cls(
         name="step",
         idx=0,
         targets=list(targets),
         parameters={target: {} for target in targets},
         context=context or _context(),
+        thresholds=per_target,
     )
     for key, value in config.items():
         setattr(node, key, value)
@@ -176,7 +176,7 @@ def test_analysis_error_fails_that_target_only():
 
 
 def test_failed_verdict_is_not_a_step_failure():
-    node = _make(ScriptedNode, targets=[Q1], verdicts={"q1": Verdict.failed})
+    node = _make(ScriptedNode, targets=[Q1], values={"q1": FAIL})
     failed = node.run({})
     assert failed == []  # a Failed verdict fails nothing (ADR-0002, D17)
     assert node.applied == [Q1]
@@ -184,12 +184,43 @@ def test_failed_verdict_is_not_a_step_failure():
 
 
 def test_benchmark_results_are_collected():
-    node = _make(ScriptedNode, targets=[Q1, Q2], verdicts={"q1": Verdict.passed, "q2": Verdict.warning})
+    node = _make(ScriptedNode, targets=[Q1, Q2], values={"q1": PASS, "q2": WARN})
     node.run({})
     assert {result.target: result.verdict for result in node.benchmark_results} == {
         "q1": Verdict.passed,
         "q2": Verdict.warning,
     }
+    # The run scored the raw value against the node's per-target thresholds (QHC-1848).
+    assert {result.target: result.value for result in node.benchmark_results} == {"q1": PASS, "q2": WARN}
+
+
+def test_a_benchmark_without_thresholds_is_not_scored(warnings_log):
+    # With no thresholds the run cannot score, so it reports no result and logs that it was left
+    # unscored. A proper "not evaluated" verdict for this case is a QHC-1848 follow-up.
+    node = _make(ScriptedNode, targets=[Q1], thresholds=None)
+    failed = node.run({})
+    assert failed == []  # an unscored benchmark is not a step failure
+    assert node.benchmark_results == ()
+    assert any("left unscored" in message for message in warnings_log)
+
+
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")])
+def test_a_non_finite_benchmark_value_fails_that_target(bad_value):
+    # A fit returning inf/nan must not score a verdict; it fails the step like any bad analysis (D17).
+    # q2 (not in values -> PASS) still scores, proving q1's bad value did not abort the run.
+    node = _make(ScriptedNode, targets=[Q1, Q2], values={"q1": bad_value})
+    failed = node.run({})
+    assert failed == ["q1"]
+    assert {result.target: result.verdict for result in node.benchmark_results} == {"q2": Verdict.passed}
+
+
+def test_group_mode_isolates_a_non_finite_value_to_one_target():
+    # In group mode a scoring failure must fail only its target, not escape to the group handler
+    # and strand the rest (QHC-1848). q1's nan fails q1; q2 scores and the group finishes.
+    node = _make(ParallelNode, targets=[Q1, Q2], values={"q1": float("nan")})
+    failed = node.run({})
+    assert failed == ["q1"]
+    assert {result.target: result.verdict for result in node.benchmark_results} == {"q2": Verdict.passed}
 
 
 def test_crosstalk_wraps_the_run():

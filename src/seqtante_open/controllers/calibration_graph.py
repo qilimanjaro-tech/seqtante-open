@@ -147,6 +147,7 @@ class CalibrationGraph:
                 parameters=step.parameters,
                 context=context,
                 analysis=step.analysis,
+                thresholds=step.thresholds,
             )
         node = LegacyNode(
             parameters=step.parameters,
