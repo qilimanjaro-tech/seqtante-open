@@ -87,26 +87,28 @@ def two_tone_pulsed_saturation(
 
     freq = qp_2tone.variable(label="frequency", domain=Domain.Frequency)
 
-    with qp_2tone.average(averages):
-        with qp_2tone.for_loop(
+    with (
+        qp_2tone.average(averages),
+        qp_2tone.for_loop(
             variable=freq, start=drive_if_sweep[0], stop=drive_if_sweep[-1], step=drive_if_sweep[1] - drive_if_sweep[0]
-        ):
-            qp_2tone.set_frequency(bus="drive", frequency=freq)
-            qp_2tone.reset_phase(bus="drive")
-            qp_2tone.play(bus="drive", waveform=IQPair(I=d_rup_wf_I, Q=d_rup_wf_Q))
-            qp_2tone.sync()
-            qp_2tone.play(bus="drive", waveform=IQPair(I=d_wf_I, Q=d_wf_Q))
-            qp_2tone.play(bus="drive", waveform=IQPair(I=d_rdown_wf_I, Q=d_rdown_wf_Q))
-            qp_2tone.wait(bus="readout", duration=drive_duration + _READOUT_WAIT_PADDING_NS - overlap_time)
-            if ringup_time > 0:
-                qp_2tone.play(bus="readout", waveform=IQPair(I=ringup_wf_I, Q=ringup_wf_Q))
-            qp_2tone.measure(
-                bus="readout",
-                waveform=IQPair(I=r_wf_I, Q=r_wf_Q),
-                weights=IQPair(I=weights_shape, Q=weights_shape),
-            )
-            qp_2tone.sync()
-            qp_2tone.wait(bus="readout", duration=relax_duration)
+        ),
+    ):
+        qp_2tone.set_frequency(bus="drive", frequency=freq)
+        qp_2tone.reset_phase(bus="drive")
+        qp_2tone.play(bus="drive", waveform=IQPair(I=d_rup_wf_I, Q=d_rup_wf_Q))
+        qp_2tone.sync()
+        qp_2tone.play(bus="drive", waveform=IQPair(I=d_wf_I, Q=d_wf_Q))
+        qp_2tone.play(bus="drive", waveform=IQPair(I=d_rdown_wf_I, Q=d_rdown_wf_Q))
+        qp_2tone.wait(bus="readout", duration=drive_duration + _READOUT_WAIT_PADDING_NS - overlap_time)
+        if ringup_time > 0:
+            qp_2tone.play(bus="readout", waveform=IQPair(I=ringup_wf_I, Q=ringup_wf_Q))
+        qp_2tone.measure(
+            bus="readout",
+            waveform=IQPair(I=r_wf_I, Q=r_wf_Q),
+            weights=IQPair(I=weights_shape, Q=weights_shape),
+        )
+        qp_2tone.sync()
+        qp_2tone.wait(bus="readout", duration=relax_duration)
 
     return qp_2tone
 

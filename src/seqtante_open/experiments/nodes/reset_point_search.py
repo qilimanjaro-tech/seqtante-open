@@ -302,8 +302,8 @@ class ResetPointSearchNode(FixedFluxNode[ResetPoint]):
 
     def apply(self, target: Target, result: AnalysisResult[ResetPoint]) -> None:
         """Write the reset point's absolute ``flux.z`` and drive IF (ADR-0011); the only writer."""
-        if result.fitted is None:  # pragma: no cover - reset_point_search always fits a point
-            return
-        point = operating_point_for(self.calibration_file, self.experiment, target)
-        point.flux.z = result.fitted.flux_z
-        point.drive.if_ = result.fitted.drive_if
+        # reset_point_search always fits a point, so result.fitted is set here; the guard is defensive.
+        if result.fitted is not None:
+            point = operating_point_for(self.calibration_file, self.experiment, target)
+            point.flux.z = result.fitted.flux_z
+            point.drive.if_ = result.fitted.drive_if
