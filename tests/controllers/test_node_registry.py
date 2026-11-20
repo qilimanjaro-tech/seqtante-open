@@ -92,18 +92,19 @@ def test_legacy_experiments_are_seeded_without_a_node_class():
 
 
 def test_a_node_class_fills_a_seeded_metadata_entry():
-    # "t2" is seeded as metadata only; a node class claiming it fills node_cls and keeps a parser entry.
-    assert experiment_spec("t2").node_cls is None
+    # "reset_point_search" is seeded as metadata only (t2 now has a real node class, T2Node); a node
+    # class claiming the seed fills node_cls and keeps a parser entry.
+    assert experiment_spec("reset_point_search").node_cls is None
 
-    class T2(CalibrationNode):
-        experiment = "t2"
-        analyses = ("decaying_oscillation",)
+    class ResetPointSearch(CalibrationNode):
+        experiment = "reset_point_search"
+        analyses = ("lorentzian_peak",)
 
         def run(self, dead_targets):  # pragma: no cover
             return []
 
-    assert experiment_spec("t2").node_cls is T2
-    assert "t2" in known_experiments()
+    assert experiment_spec("reset_point_search").node_cls is ResetPointSearch
+    assert "reset_point_search" in known_experiments()
 
 
 def test_unknown_experiment_has_no_spec():
