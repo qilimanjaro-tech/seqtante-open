@@ -32,6 +32,7 @@ dependencies = [
     "pydantic>=2.0",
     "pyyaml>=6.0.2",
     "qcodes",
+    "qili-qprograms",
     "ruamel-yaml>=0.18.10",
     "scipy>=1.15",
     "xarray>=2024.7.0",
@@ -86,6 +87,7 @@ name = "qilimanjaro"
 url = "https://aws@qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.com/pypi/qilimanjaro/simple"
 
 [tool.uv.sources]
+qili-qprograms = { index = "qilimanjaro" }
 qililab = { index = "qilimanjaro" }
 qpysequence = { index = "qilimanjaro" }
 
