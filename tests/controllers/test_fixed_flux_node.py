@@ -145,8 +145,9 @@ def test_qcm_rf_sets_gain_and_hardware_modulation(leaf_cls):
     ],
 )
 def test_the_drive_instrument_needs_its_own_key(leaf_cls, instrument, kwargs, message):
+    platform = InstrumentPlatform(instrument)
     with pytest.raises(ValueError, match=message):
-        _set(leaf_cls, InstrumentPlatform(instrument), **kwargs)
+        _set(leaf_cls, platform, **kwargs)
 
 
 def test_an_unknown_drive_instrument_warns_and_sets_no_power(leaf_cls):
@@ -159,13 +160,16 @@ def test_an_unknown_drive_instrument_warns_and_sets_no_power(leaf_cls):
 
 
 def test_a_fractional_attenuation_is_rejected(leaf_cls):
+    platform = InstrumentPlatform("ROHDE_SCHWARZ")
+    calibration = _calibration(attenuation=31.5)
     with pytest.raises(ValueError, match="not a whole number of dB"):
-        _set(leaf_cls, InstrumentPlatform("ROHDE_SCHWARZ"), _calibration(attenuation=31.5), drive_power=-20)
+        _set(leaf_cls, platform, calibration, drive_power=-20)
 
 
 def test_a_node_without_an_experiment_cannot_set_hardware():
     class Spine(_Leaf, FixedFluxNode[None]):  # sets no experiment, so it never registers
         pass
 
+    node = Spine.__new__(Spine)
     with pytest.raises(TypeError, match="sets no experiment"):
-        Spine.__new__(Spine)._set_operating_point_hardware(Q1, drive_power=-20)
+        node._set_operating_point_hardware(Q1, drive_power=-20)

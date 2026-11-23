@@ -158,8 +158,8 @@ class T1Node(FixedFluxNode[None]):
             raise AnalysisError(f"{target} T1 fit is not a decay (rate {model.rate:.3e} >= 0); T1 is not physical")
 
         min_r2 = self._param(target, "min_r2")
-        # Written as `not >=` so a NaN R² (a flat trace) is rejected too: every comparison with NaN is False.
-        if not model.r_squared >= min_r2:
+        # A flat trace leaves R² NaN; reject it explicitly, since every comparison with NaN is False.
+        if math.isnan(model.r_squared) or model.r_squared < min_r2:
             raise AnalysisError(f"{target} T1 fit R² {model.r_squared:.3f} is below the minimum {min_r2}")
 
         max_rel_uncertainty = self._param(target, "max_rel_uncertainty")
