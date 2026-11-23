@@ -58,3 +58,23 @@ class TestLorentzianPeakModel(FittingTestCase):
         parameters = kwargs["parameters"]
         assert parameters[FittedParameter.DRIVE_IF.value] == pytest.approx(QUBIT_IF, abs=FREQ_STEP)
         assert FittedParameter.FIT_R2.value in parameters
+
+    def test_flat_trace_is_rejected_with_an_undefined_r_squared(self, fitted, monkeypatch) -> None:
+        """A flat trace has no variance: R² is ``nan``, not a division by zero, and the fit is rejected.
+
+        Every comparison with ``nan`` is False, so without the explicit check a flat trace whose fitted
+        centre lands inside the sweep would be accepted. ``curve_fit`` is stubbed so the branch does not
+        depend on the optimiser.
+        """
+        from seqtante_open.experiments.fitting import lorentzian_peak_fit as module
+
+        monkeypatch.setattr(fitted, "magnitude", np.ones(len(fitted.frequencies)))
+        linewidth = 4 * FREQ_STEP
+        monkeypatch.setattr(
+            module, "curve_fit", lambda *args, **kwargs: (np.array([QUBIT_IF, 1.0, linewidth, 1.0]), np.eye(4))
+        )
+        fitted.fit()
+
+        assert np.isnan(fitted.r_squared)
+        assert not fitted.accepted
+        assert fitted.fitted_if is None

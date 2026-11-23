@@ -20,9 +20,10 @@ from seqtante_open.calibration.model import (
 )
 from seqtante_open.controllers import calibration_node as node_module
 from seqtante_open.controllers.calibration_node import RunContext
+from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.nodes import ResetPointSearchNode
 from seqtante_open.experiments.nodes import reset_point_search as reset_module
-from seqtante_open.experiments.nodes.reset_point_search import next_flux_z_step
+from seqtante_open.experiments.nodes.reset_point_search import _SearchOutcome, next_flux_z_step
 from seqtante_open.targets import ExperimentTarget
 from tests.experiments.nodes.harness import FakePlatform, identity_crosstalk
 
@@ -35,7 +36,14 @@ FIRST_ID = 100
 
 
 class FakeLorentzian:
-    """Scripted stand-in for ``LorentzianPeakModel``: no DB load, fit keyed by measurement id."""
+    """Scripted stand-in for ``LorentzianPeakModel``: no DB load, fit keyed by measurement id.
+
+    ``accept`` scripts whether a fit is accepted, and ``saves`` counts ``save_fitting`` calls, so a test
+    can assert a rejected fit is never written to the DB.
+    """
+
+    accept = True
+    saves = 0
 
     def __init__(self, measurement_id, target=None, path=None, r2_min=0.8):
         self.id = measurement_id
@@ -48,11 +56,11 @@ class FakeLorentzian:
         return None
 
     def save_fitting(self):
-        return None
+        type(self).saves += 1
 
     @property
     def accepted(self):
-        return True
+        return type(self).accept
 
     @property
     def fitted_if(self):
@@ -108,6 +116,8 @@ def _patch(monkeypatch):
 
     monkeypatch.setattr(ResetPointSearchNode, "_measure_two_tone_saturation", fake_two_tone)
     monkeypatch.setattr(reset_module, "LorentzianPeakModel", FakeLorentzian)
+    monkeypatch.setattr(FakeLorentzian, "accept", True)
+    monkeypatch.setattr(FakeLorentzian, "saves", 0)
     monkeypatch.setattr(reset_module.time, "sleep", lambda *_: None)
     monkeypatch.setattr(node_module, "save_calibration", lambda calibration, path: None)
 
@@ -128,6 +138,18 @@ def test_loop_moves_flux_into_the_window_and_writes_the_point(monkeypatch):
     assert written.drive.if_ == pytest.approx(IF_INSIDE)  # drive IF taken from the final fit
     # The flux move went through the platform (via the restore handle).
     assert "set:flux_z_q1" in node.context.platform.calls
+
+
+def test_a_rejected_final_fit_fails_the_target_and_is_not_saved(monkeypatch):
+    _patch(monkeypatch)
+    node = _make(_calibration())
+    node._search[Q1] = _SearchOutcome(flux_z=0.6, measurement_id=FIRST_ID + 1, plot_path=None)
+    monkeypatch.setattr(FakeLorentzian, "accept", False)
+
+    with pytest.raises(AnalysisError, match="final reset-search fit rejected"):
+        node.analyze(Q1, [FIRST_ID + 1])
+
+    assert FakeLorentzian.saves == 0  # fit -> check -> save: a rejected fit never reaches the DB
 
 
 def test_giving_up_after_the_move_limit_fails_the_target(monkeypatch):

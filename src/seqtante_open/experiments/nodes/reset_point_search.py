@@ -247,7 +247,11 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
         return self._measure_two_tone_saturation(target, drive_if_sweep)
 
     def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[ResetPoint]:
-        """Check the final fit and return the reset point's flux_z and drive IF; read-only.
+        """Fit the final sweep, check it, save it, and return the reset point's flux_z and drive IF; read-only.
+
+        Fit, then the acceptance check, then save: a rejected fit never reaches the DB (a reader would
+        otherwise see a plausible ``drive_if`` for a step the run marked failed), as for T1 (QHC-1803).
+        The plot was already made during the search and is reused.
 
         Raises:
             AnalysisError: when the final two-tone fit is rejected (the step fails for this target).
@@ -260,9 +264,9 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
             r2_min=self._param(target, "min_r2"),
         )
         model.fit()
-        model.save_fitting()
         if not model.accepted or model.fitted_if is None:
             raise AnalysisError(f"{target}: final reset-search fit rejected: {model.results['quality']}")
+        model.save_fitting()
         # execute_node already plotted this accepted sweep during the search; reuse that plot.
         fitted = ResetPoint(flux_z=outcome.flux_z, drive_if=model.fitted_if)
         return AnalysisResult(fitted=fitted, plots=(outcome.plot_path,) if outcome.plot_path else ())
