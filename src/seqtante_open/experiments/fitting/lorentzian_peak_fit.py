@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
 from typing import TypedDict
 
 import numpy as np
@@ -92,12 +93,17 @@ class LorentzianPeakModel(FittingClass):
         else:
             params = (float(best[0]), float(best[1]), float(best[2]), float(best[3]))
             model = _lorentzian(frequency, *best)
-            r_squared = float(1 - np.sum((magnitude - model) ** 2) / np.sum((magnitude - np.mean(magnitude)) ** 2))
+            ss_res = float(np.sum((magnitude - model) ** 2))
+            ss_tot = float(np.sum((magnitude - np.mean(magnitude)) ** 2))
+            # A flat trace (drive off, readout saturated) has no variance to explain: R² is undefined (NaN),
+            # not a division by zero, and it is rejected below like a low R².
+            r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
             step = abs(frequency[1] - frequency[0])
             span = abs(frequency[-1] - frequency[0])
             linewidth = abs(best[2])
             quality = f"R2 = {r_squared:.2f}, f_q IF = {best[0] * 1e-6:.3f} MHz, linewidth = {linewidth * 1e-3:.0f} kHz"
-            if r_squared < self.r2_min:
+            # Every comparison with NaN is False, so an undefined R² is rejected explicitly.
+            if math.isnan(r_squared) or r_squared < self.r2_min:
                 quality += f": rejected, R2 below {self.r2_min}"
             elif not min(frequency) <= best[0] <= max(frequency):
                 quality += ": rejected, centre outside the sweep"

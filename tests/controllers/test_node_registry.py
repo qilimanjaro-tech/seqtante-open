@@ -2,9 +2,11 @@
 
 import pytest
 
+from seqtante_open.controllers import node_registry
 from seqtante_open.controllers.calibration_node import CalibrationNode
 from seqtante_open.controllers.node_registry import (
     BenchmarkSpec,
+    ExperimentSpec,
     Parallel,
     experiment_spec,
     known_experiments,
@@ -15,18 +17,27 @@ from seqtante_open.controllers.verdicts import BenchmarkDirection
 HIGHER = BenchmarkDirection.higher_is_better
 LOWER = BenchmarkDirection.lower_is_better
 
+# Every experiment a test registers is a made-up name no real node will claim, so a node landing on a
+# real experiment (rabi, t2, reset_point_search, ...) never breaks these tests. The controllers conftest
+# restores NODE_REGISTRY after each test.
+
+
+def _seed(experiment: str, *, benchmark: BenchmarkSpec | None = None) -> None:
+    """Seed ``experiment`` as metadata only (no node class), as the real seeds are before their node lands."""
+    node_registry.NODE_REGISTRY[experiment] = ExperimentSpec(analyses=("a",), benchmark=benchmark)
+
 
 def test_subclass_registers_itself_with_its_class():
-    class Rabi(CalibrationNode):
-        experiment = "rabi"
+    class ExampleMultiAnalysis(CalibrationNode):
+        experiment = "example_multi_analysis"
         analyses = ("pi_amplitude", "readout_levels")
 
         def run(self, dead_targets):  # pragma: no cover - not exercised here
             return []
 
-    spec = experiment_spec("rabi")
+    spec = experiment_spec("example_multi_analysis")
     assert spec is not None
-    assert spec.node_cls is Rabi
+    assert spec.node_cls is ExampleMultiAnalysis
     assert spec.analyses == ("pi_amplitude", "readout_levels")
     assert spec.default_analysis == "pi_amplitude"
 
@@ -84,9 +95,8 @@ def test_two_classes_cannot_claim_the_same_experiment():
 
 
 def test_legacy_experiments_are_seeded_without_a_node_class():
-    # During the port the remaining legacy experiments are known to the parser but carry no node class;
-    # the graph builder (QHC-1800) falls back to their legacy function. "two_tone" has been ported to a
-    # node (QHC-1805) and now carries a node_cls, so it is no longer in this list.
+    # The legacy experiments no node ports are known to the parser but carry no node class; the graph
+    # builder (QHC-1800) falls back to their legacy function until they are removed (QHC-1930).
     for experiment in ("single_tone", "offset_calibration", "two_tone_vs_flux"):
         spec = experiment_spec(experiment)
         assert spec is not None
@@ -94,18 +104,19 @@ def test_legacy_experiments_are_seeded_without_a_node_class():
 
 
 def test_a_node_class_fills_a_seeded_metadata_entry():
-    # "t2" is seeded as metadata only; a node class claiming it fills node_cls and keeps a parser entry.
-    assert experiment_spec("t2").node_cls is None
+    # A seeded metadata-only entry; a node class claiming it fills node_cls and keeps a parser entry.
+    _seed("seeded_experiment")
+    assert experiment_spec("seeded_experiment").node_cls is None
 
-    class T2(CalibrationNode):
-        experiment = "t2"
-        analyses = ("decaying_oscillation",)
+    class SeededNode(CalibrationNode):
+        experiment = "seeded_experiment"
+        analyses = ("a",)
 
         def run(self, dead_targets):  # pragma: no cover
             return []
 
-    assert experiment_spec("t2").node_cls is T2
-    assert "t2" in known_experiments()
+    assert experiment_spec("seeded_experiment").node_cls is SeededNode
+    assert "seeded_experiment" in known_experiments()
 
 
 def test_unknown_experiment_has_no_spec():
@@ -141,18 +152,18 @@ def test_reregistering_the_same_class_is_allowed():
 
 
 def test_a_node_class_keeps_the_seeded_benchmark():
-    # "t2" is seeded with a benchmark; a node class that does not re-declare one keeps it. (Uses t2
-    # rather than t1, which now has a real node class that claims it, T1Node, QHC-1803.)
-    assert experiment_spec("t2").benchmark == BenchmarkSpec(unit="ns", direction=HIGHER)
+    # A seeded benchmark; a node class that does not re-declare one keeps it.
+    seeded = BenchmarkSpec(unit="ns", direction=HIGHER)
+    _seed("seeded_benchmark", benchmark=seeded)
 
-    class T2(CalibrationNode):
-        experiment = "t2"
-        analyses = ("decaying_oscillation",)
+    class SeededBenchmarkNode(CalibrationNode):
+        experiment = "seeded_benchmark"
+        analyses = ("a",)
 
         def run(self, dead_targets):  # pragma: no cover
             return []
 
-    assert experiment_spec("t2").benchmark == BenchmarkSpec(unit="ns", direction=HIGHER)
+    assert experiment_spec("seeded_benchmark").benchmark == seeded
 
 
 def test_a_node_class_declares_its_own_benchmark():
