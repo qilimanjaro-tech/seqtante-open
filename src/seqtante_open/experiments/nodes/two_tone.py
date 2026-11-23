@@ -32,7 +32,7 @@ calibration file (ADR-0001). The Lorentzian fit is shared with ``reset_point_sea
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 
@@ -40,16 +40,22 @@ from seqtante_open.controllers.calibration_node import AnalysisResult
 from seqtante_open.controllers.operating_point import operating_point_for
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.fitting import LorentzianPeakModel
-from seqtante_open.experiments.nodes.two_tone_saturation import TwoToneSaturationNode
+from seqtante_open.experiments.nodes.two_tone_saturation import TWO_TONE_SATURATION_DEFAULTS, TwoToneSaturationNode
 from seqtante_open.outputs import FittedParameter
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from seqtante_open.targets import Target
 
 LORENTZIAN_PEAK = "lorentzian_peak"
 
 #: Default minimum R² a Lorentzian fit must reach to pass the step (overridable per step).
 DEFAULT_MIN_R2 = 0.8
+
+#: The node's ``defaults``: the shared two-tone measurement's, plus the fit acceptance. The sweep window
+#: (``sweep_start``, ``sweep_stop``, ``sweep_step``, absolute Hz) has no default: the step must set it.
+TWO_TONE_DEFAULTS: Mapping[str, Any] = {**TWO_TONE_SATURATION_DEFAULTS, "min_r2": DEFAULT_MIN_R2}
 
 
 @dataclass(frozen=True)
@@ -64,6 +70,7 @@ class TwoToneNode(TwoToneSaturationNode[TwoToneSweetSpot]):
 
     experiment: ClassVar[str] = "two_tone"
     analyses: ClassVar[tuple[str, ...]] = (LORENTZIAN_PEAK,)
+    defaults = TWO_TONE_DEFAULTS
 
     def execute_node(self, targets: list[Target]) -> dict[Target, list[int]]:
         """Run one two-tone sweep per target and return its measurement id (hardware only)."""
@@ -76,9 +83,9 @@ class TwoToneNode(TwoToneSaturationNode[TwoToneSweetSpot]):
 
     def _drive_if_sweep(self, target: Target, drive_lo: float) -> np.ndarray:
         """Build the drive-IF sweep (Hz) from the step's absolute-frequency window and the placed LO."""
-        start = self.parameters[target]["sweep_start"]
-        stop = self.parameters[target]["sweep_stop"]
-        step = self.parameters[target]["sweep_step"]
+        start = self._param(target, "sweep_start")
+        stop = self._param(target, "sweep_stop")
+        step = self._param(target, "sweep_step")
         npoints = round((stop - start) / step) + 1
         return np.linspace(start, stop, num=npoints, endpoint=True) - drive_lo
 
@@ -93,7 +100,7 @@ class TwoToneNode(TwoToneSaturationNode[TwoToneSweetSpot]):
             measurements[-1],
             target=str(target),
             path=self.parameters[target].get("data_folder"),
-            r2_min=self.parameters[target].get("min_r2", DEFAULT_MIN_R2),
+            r2_min=self._param(target, "min_r2"),
             title="Two tone (sweet spot)",
         )
         model.fit()

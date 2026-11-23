@@ -26,7 +26,7 @@ from seqtante_open.experiments.nodes import TwoToneNode
 from seqtante_open.experiments.nodes import two_tone as two_tone_module
 from seqtante_open.outputs import FittedParameter
 from seqtante_open.targets import ExperimentTarget
-from tests.experiments.nodes.fakes import FakePlatform, identity_crosstalk
+from tests.experiments.nodes.harness import FakePlatform, identity_crosstalk
 
 Q1 = ExperimentTarget.from_str("q1")
 
