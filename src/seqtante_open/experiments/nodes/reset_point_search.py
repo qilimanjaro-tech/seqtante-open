@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from qililab.typings.enums import Parameter
@@ -49,13 +49,15 @@ from seqtante_open.experiments.fitting import LorentzianPeakModel
 from seqtante_open.experiments.nodes.two_tone_saturation import TWO_TONE_SATURATION_DEFAULTS, TwoToneSaturationNode
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from seqtante_open.targets import Target
 
 LORENTZIAN_PEAK = "lorentzian_peak"
 
-#: Defaults are the experimentalists' calibration-script values; every one is a tree parameter. The
-#: two-tone measurement's own defaults come from the shared spine.
-_DEFAULTS = {
+#: Defaults are the experimentalists' calibration-script values (the node's ``defaults``); every one is a
+#: tree parameter. The two-tone measurement's own defaults come from the shared spine.
+RESET_POINT_SEARCH_DEFAULTS: Mapping[str, Any] = {
     # Fit acceptance and span widening.
     "min_r2": 0.8,
     "retry_spans": (30e6, 60e6),
@@ -137,13 +139,11 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
 
     experiment: ClassVar[str] = "reset_point_search"
     analyses: ClassVar[tuple[str, ...]] = (LORENTZIAN_PEAK,)
+    defaults = RESET_POINT_SEARCH_DEFAULTS
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self._search: dict[Target, _SearchOutcome] = {}
-
-    def _param(self, target: Target, key: str):
-        return self.parameters[target].get(key, _DEFAULTS[key])
 
     def execute_node(self, targets: list[Target]) -> dict[Target, list[int]]:
         """Run the find-the-line / move-into-the-window loop per target; return every measurement id."""

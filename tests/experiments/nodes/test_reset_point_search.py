@@ -24,7 +24,7 @@ from seqtante_open.experiments.nodes import ResetPointSearchNode
 from seqtante_open.experiments.nodes import reset_point_search as reset_module
 from seqtante_open.experiments.nodes.reset_point_search import next_flux_z_step
 from seqtante_open.targets import ExperimentTarget
-from tests.experiments.nodes.fakes import FakePlatform, identity_crosstalk
+from tests.experiments.nodes.harness import FakePlatform, identity_crosstalk
 
 Q1 = ExperimentTarget.from_str("q1")
 
