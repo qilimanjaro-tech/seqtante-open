@@ -26,12 +26,21 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
+from qililab.typings.enums import Parameter
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from qililab import Platform
     from qililab.typings import ParameterValue
-    from qililab.typings.enums import Parameter
+
+#: Parameters whose read-back value cannot be set back as-is, mapped to the scalar parameters it splits
+#: into. A Qblox sequencer reads ``GAIN`` back as the tuple ``(gain_i, gain_q)`` but only sets it from one
+#: float, so the prior gain is restored through ``GAIN_I`` and ``GAIN_Q``. A qililab workaround: drop the
+#: entry once qililab's ``GAIN`` round-trips.
+_RESTORED_AS_PARTS: dict[Parameter, tuple[Parameter, ...]] = {
+    Parameter.GAIN: (Parameter.GAIN_I, Parameter.GAIN_Q),
+}
 
 
 class ParameterRestore:
@@ -45,13 +54,21 @@ class ParameterRestore:
 
     def __init__(self, platform: Platform) -> None:
         self._platform = platform
+        self._touched: set[tuple[str, Parameter]] = set()
         self._prior: dict[tuple[str, Parameter], ParameterValue] = {}
 
     def set(self, alias: str, parameter: Parameter, value: ParameterValue) -> None:
-        """Set ``parameter`` on bus ``alias`` to ``value``, recording its prior value on first touch."""
+        """Set ``parameter`` on bus ``alias`` to ``value``, recording its prior value on first touch.
+
+        A prior value that reads back as one value per part (a Qblox ``GAIN`` as ``(gain_i, gain_q)``) is
+        recorded per part, so :meth:`restore` sets each scalar back instead of the tuple.
+        """
         key = (alias, parameter)
-        if key not in self._prior:
-            self._prior[key] = self._platform.get_parameter(alias=alias, parameter=parameter)
+        if key not in self._touched:
+            self._touched.add(key)
+            prior = self._platform.get_parameter(alias=alias, parameter=parameter)
+            for restore_key, restore_value in _restore_entries(alias, parameter, prior):
+                self._prior.setdefault(restore_key, restore_value)
         self._platform.set_parameter(alias=alias, parameter=parameter, value=value)
 
     def restore(self) -> None:
@@ -68,8 +85,23 @@ class ParameterRestore:
             except Exception as error:  # ruff: ignore[blind-except] -- every parameter must be attempted
                 errors.append(error)
         self._prior.clear()
+        self._touched.clear()
         if errors:
             raise ExceptionGroup("restoring parameters failed", errors)
+
+
+def _restore_entries(
+    alias: str, parameter: Parameter, prior: ParameterValue
+) -> list[tuple[tuple[str, Parameter], ParameterValue]]:
+    """The ``(alias, parameter)`` keys and values that put ``parameter`` back to ``prior``.
+
+    One entry, unless ``parameter`` reads back as a tuple of its parts (see ``_RESTORED_AS_PARTS``): then
+    one entry per part. The earliest value of a part wins, as for any parameter.
+    """
+    parts = _RESTORED_AS_PARTS.get(parameter)
+    if parts is not None and isinstance(prior, tuple) and len(prior) == len(parts):
+        return [((alias, part), value) for part, value in zip(parts, prior, strict=True)]
+    return [((alias, parameter), prior)]
 
 
 @contextmanager

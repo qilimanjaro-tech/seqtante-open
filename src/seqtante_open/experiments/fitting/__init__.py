@@ -15,6 +15,7 @@
 from .fit_base import FittingClass
 from .single_tone_fit import FluxoniumSingleToneModel
 from .single_tone_vs_flux_fit import FluxoniumSingleToneFluxModel
+from .t1_fit import T1Fit
 from .t2_fit import T2Fit
 from .two_tone_fit import FluxoniumTwoToneModel
 from .two_tone_vs_flux_fit import FluxoniumTwoToneFluxModel
@@ -26,6 +27,7 @@ __all__ = [
     "FluxoniumSingleToneModel",
     "FluxoniumTwoToneFluxModel",
     "FluxoniumTwoToneModel",
+    "T1Fit",
     "T2Fit",
     "cosfunc",
 ]
