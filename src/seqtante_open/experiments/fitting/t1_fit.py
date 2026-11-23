@@ -78,7 +78,8 @@ class T1Fit(FittingClass):
         model = self.exponential(self.wait_values, *self.results)
         ss_res = float(np.sum((self.arr - model) ** 2))
         ss_tot = float(np.sum((self.arr - np.mean(self.arr)) ** 2))
-        self.r_squared = 1.0 - ss_res / ss_tot
+        # A flat trace (drive off, readout saturated) has no variance to explain: R² is undefined, not a crash.
+        self.r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
 
     @property
     def is_physical_decay(self) -> bool:

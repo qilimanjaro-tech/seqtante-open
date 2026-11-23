@@ -98,3 +98,19 @@ class TestT1Fit(FittingTestCase):
         assert np.isnan(fit_obj.T1)
         assert np.isnan(fit_obj.t1_uncertainty)
         assert np.isnan(fit_obj.relative_uncertainty)
+
+    def test_flat_trace_leaves_r_squared_undefined(self, fit_obj, monkeypatch):
+        """A flat trace (drive off, readout saturated) has no variance: R² is ``nan``, not a ZeroDivisionError.
+
+        The node rejects a ``nan`` R² (its check is ``not r_squared >= min_r2``). The trace and ``curve_fit``
+        are stubbed so the branch is tested without depending on the optimiser.
+        """
+        from seqtante_open.experiments.fitting import t1_fit as t1_fit_module
+
+        monkeypatch.setattr(fit_obj, "arr", np.ones(len(fit_obj.arr)))
+        monkeypatch.setattr(
+            t1_fit_module.sp, "curve_fit", lambda *args, **kwargs: (np.array([0.0, -1.0e-4, 1.0]), np.eye(3))
+        )
+        fit_obj.fit()
+
+        assert np.isnan(fit_obj.r_squared)

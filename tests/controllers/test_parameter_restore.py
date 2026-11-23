@@ -3,7 +3,7 @@
 import pytest
 from qililab.typings.enums import Parameter
 
-from seqtante_open.controllers.parameter_restore import ParameterRestore, restoring_parameters, restoring_platform
+from seqtante_open.controllers.parameter_restore import ParameterRestore, restoring_parameters
 
 
 class FakePlatform:
@@ -108,30 +108,3 @@ def test_prior_value_is_read_once_per_parameter():
 
     assert gets == [("flux_z_q1", Parameter.FLUX)]
     assert platform.values["flux_z_q1", Parameter.FLUX] == pytest.approx(0.1)
-
-
-def test_restoring_platform_routes_set_through_the_handle():
-    # A driver that calls platform.set_parameter directly has its writes recorded and undone, so a value
-    # it sets (LO, IF, power) does not leak into the next node (ADR-0006).
-    platform = FakePlatform({("drive_q1", Parameter.LO_FREQUENCY): 5e9})
-    with restoring_parameters(platform) as restore:
-        proxy = restoring_platform(platform, restore)
-        proxy.set_parameter(alias="drive_q1", parameter=Parameter.LO_FREQUENCY, value=6e9)
-        assert platform.values["drive_q1", Parameter.LO_FREQUENCY] == pytest.approx(6e9)
-    assert platform.values["drive_q1", Parameter.LO_FREQUENCY] == pytest.approx(5e9)
-
-
-def test_restoring_platform_delegates_everything_else():
-    platform = FakePlatform({("readout_q1", Parameter.IF): 1e8})
-    proxy = restoring_platform(platform, ParameterRestore(platform))
-    # Anything that is not set_parameter (get_parameter, attributes a StreamArray reads) goes straight
-    # through to the wrapped platform.
-    assert proxy.get_parameter(alias="readout_q1", parameter=Parameter.IF) == pytest.approx(1e8)
-    assert proxy.values is platform.values
-
-
-def test_restoring_platform_rejects_channel_scoped_set():
-    platform = FakePlatform()
-    proxy = restoring_platform(platform, ParameterRestore(platform))
-    with pytest.raises(NotImplementedError):
-        proxy.set_parameter("drive_q1", Parameter.LO_FREQUENCY, 6e9, 0)  # extra positional arg (e.g. channel id)

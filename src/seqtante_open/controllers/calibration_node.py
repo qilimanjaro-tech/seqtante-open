@@ -38,16 +38,22 @@ import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, ClassVar, Generic, Protocol, TypeVar, runtime_checkable
+from warnings import warn
 
 from loguru import logger
-from qililab import Platform
+from qililab import Parameter, Platform
 from qililab.qprogram.calibration import Calibration
 
+from seqtante_open.calibration.bus_alias import Role, bus_alias
 from seqtante_open.calibration.io import read_calibration_file, save_calibration, write_calibration_file
 from seqtante_open.calibration.model import CalibrationFile
 from seqtante_open.controllers.crosstalk_session import CrosstalkSession, crosstalk_session
 from seqtante_open.controllers.node_registry import BenchmarkSpec, Parallel, experiment_spec, register_node
-from seqtante_open.controllers.operating_point import apply_operating_point, operating_point_flux_writes
+from seqtante_open.controllers.operating_point import (
+    apply_operating_point,
+    operating_point_flux_writes,
+    operating_point_for,
+)
 from seqtante_open.controllers.parameter_restore import ParameterRestore, restoring_parameters
 from seqtante_open.controllers.verdicts import AnalysisError, BenchmarkResult, BenchmarkThresholds, verdict_for
 from seqtante_open.targets import Target
@@ -55,6 +61,9 @@ from seqtante_open.targets import Target
 #: The node-specific fitted payload an ``analyze`` hands its ``apply`` (a frequency, a pi amplitude,
 #: readout levels...). The base passes it through untouched; each node fixes its own concrete type.
 ResultT = TypeVar("ResultT")
+
+#: Warned when a drive bus has no instrument whose power or gain a node knows how to set.
+NO_DRIVE_INSTRUMENT_MSG = "No instrument to set power to."
 
 
 @dataclass(frozen=True)
@@ -515,6 +524,57 @@ class FixedFluxNode(CalibrationNode[ResultT]):
     """
 
     applies_operating_point: ClassVar[bool] = True
+
+    def _set_operating_point_hardware(
+        self, target: Target, *, drive_power: float | None = None, drive_gain: float | None = None
+    ) -> None:
+        """Set ``target``'s drive/readout line from its operating point, through the restore handle (ADR-0006).
+
+        The QProgram sets the IFs and plays the pulses; this sets what it does not: the drive and readout
+        LOs, the readout attenuation and the drive source. Every write goes through :attr:`restore`, so
+        ``run`` puts the line back as it was after each target and nothing leaks into the next node.
+
+        The drive source depends on the bus's drive instrument:
+
+        - Rohde & Schwarz: ``drive_power`` is its ``POWER`` in dBm; IQ modulation is switched on (else
+          it plays a bare carrier instead of the IQ drive) and its RF output too.
+        - QCM-RF: ``drive_gain`` is the sequencer ``GAIN`` in [-1, 1]; hardware modulation is switched on.
+        - Anything else: warns, and sets no power.
+
+        Raises:
+            TypeError: if called on a node that sets no ``experiment`` (a spine, not a leaf).
+            ValueError: if the readout attenuation is not a whole number of dB, or the drive instrument
+                needs ``drive_power``/``drive_gain`` and it was not given.
+        """
+        experiment = self.experiment
+        if experiment is None:
+            raise TypeError(f"{type(self).__name__} sets no experiment; only a leaf node can set its hardware")
+        point = operating_point_for(self.calibration_file, experiment, target)
+        attenuation = point.readout.attenuation
+        if not float(attenuation).is_integer():
+            raise ValueError(f"{target}: readout attenuation {attenuation} dB is not a whole number of dB")
+        drive_bus = bus_alias(target, Role.drive)
+        readout_bus = bus_alias(target, Role.readout)
+
+        restore = self.restore
+        restore.set(drive_bus, Parameter.LO_FREQUENCY, round(point.drive.lo))
+        restore.set(readout_bus, Parameter.LO_FREQUENCY, round(point.readout.lo))
+        restore.set(readout_bus, Parameter.OUT0_ATT, int(attenuation))
+
+        instruments = [instrument.name.name for instrument in self.context.platform.get_element(drive_bus).instruments]
+        if "ROHDE_SCHWARZ" in instruments:
+            if drive_power is None:
+                raise ValueError(f"{target}: a Rohde & Schwarz drive source needs drive_power (dBm)")
+            restore.set(drive_bus, Parameter.IQ_MODULATION, True)
+            restore.set(drive_bus, Parameter.POWER, drive_power)
+            restore.set(drive_bus, Parameter.RF_ON, True)
+        elif "QCMRF" in instruments:
+            if drive_gain is None:
+                raise ValueError(f"{target}: a QCM-RF drive needs drive_gain (sequencer gain in [-1, 1])")
+            restore.set(drive_bus, Parameter.HARDWARE_MODULATION, True)
+            restore.set(drive_bus, Parameter.GAIN, drive_gain)
+        else:
+            warn(NO_DRIVE_INSTRUMENT_MSG, stacklevel=2)
 
 
 class FluxSweepNode(CalibrationNode[ResultT]):

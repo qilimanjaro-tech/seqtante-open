@@ -13,6 +13,7 @@ here.
 """
 
 from types import SimpleNamespace
+from typing import ClassVar
 
 import numpy as np
 import pytest
@@ -81,20 +82,25 @@ class FakeT1Fit:
     physical = True
     rel_unc = 0.03
     save_calls = 0
+    #: What the node did with the fit, in order (fit, save, plot), and the plot path it was built with.
+    events: ClassVar[list[str]] = []
+    path_seen: str | None = None
 
     def __init__(self, target=None, measurement_id=None, path=None):
         self.target = target
         self.id = measurement_id
         self.path = path
+        type(self).path_seen = path
 
     def fit(self):
-        return None
+        type(self).events.append("fit")
 
     def plot(self):
-        return None
+        type(self).events.append("plot")
 
     def save_fitting(self):
         type(self).save_calls += 1
+        type(self).events.append("save")
 
     @property
     def r_squared(self):
@@ -190,10 +196,15 @@ class FakeT1Platform(FakePlatform):
         return SimpleNamespace(results={READOUT_BUS: points})
 
 
-def _make(calibration: Calibration, thresholds, platform=None) -> T1Node:
+def _make(calibration: Calibration, thresholds, platform=None, **params) -> T1Node:
     context = build_context(calibration, platform if platform is not None else FakeT1Platform())
     return T1Node(
-        name="t1_sweet_spot", idx=0, targets=[Q1], parameters={Q1: dict(PARAMS)}, context=context, thresholds=thresholds
+        name="t1_sweet_spot",
+        idx=0,
+        targets=[Q1],
+        parameters={Q1: {**PARAMS, **params}},
+        context=context,
+        thresholds=thresholds,
     )
 
 
@@ -214,6 +225,8 @@ def _patch(monkeypatch):
     monkeypatch.setattr(FakeT1Fit, "physical", True)
     monkeypatch.setattr(FakeT1Fit, "rel_unc", 0.03)
     monkeypatch.setattr(FakeT1Fit, "save_calls", 0)
+    monkeypatch.setattr(FakeT1Fit, "events", [])
+    monkeypatch.setattr(FakeT1Fit, "path_seen", None)
     return calls
 
 
@@ -233,6 +246,11 @@ def test_runs_the_saturation_sweep_at_the_point_and_scores_the_benchmark(monkeyp
     assert build["operating_point"] == "sweet_spot"
     assert build["calibration"] is calibration
     np.testing.assert_array_equal(build["idle_duration_sweep"], np.linspace(*IDLE_SWEEP).astype(int))
+    # Unset optional keys fall back to _DEFAULTS, named like the t1_saturation arguments.
+    assert build["drive_ringup_time"] == 200
+    assert build["drive_ringdown_time"] == 200
+    assert build["drive_n_sigmas"] == 4
+    assert build["readout_ringup_time"] == 0
     # The node set the operating point's hardware itself (snapshotted before the run restored it):
     # drive/readout LOs, readout attenuation, drive power, and the R&S IQ modulation and RF output.
     snap = platform.values_at_execute
@@ -249,6 +267,7 @@ def test_runs_the_saturation_sweep_at_the_point_and_scores_the_benchmark(monkeyp
     assert result.uncertainty == pytest.approx(T1_SIGMA_US)
     assert result.verdict is Verdict.passed
     assert FakeT1Fit.save_calls == 1  # the accepted fit was saved once
+    assert FakeT1Fit.events == ["fit", "save", "plot"]  # fit -> checks -> save -> plot
 
 
 def test_low_r2_fails_the_target_and_records_no_benchmark(monkeypatch):
@@ -300,3 +319,33 @@ def test_infinite_uncertainty_fails_the_target(monkeypatch):
 
     assert failed == ["q1"]
     assert FakeT1Fit.save_calls == 0
+
+
+def test_idle_durations_are_rounded_not_truncated(monkeypatch):
+    calls = _patch(monkeypatch)
+    node = _make(_calibration(), THRESHOLDS, idle_sweep=(0, 1000, 7))
+
+    node.run({})
+
+    # 166.67 and 666.67 round to what t1_saturation plays (167, 667), not truncate to 166/666.
+    np.testing.assert_array_equal(calls["build"]["idle_duration_sweep"], [0, 167, 333, 500, 667, 833, 1000])
+
+
+def test_an_undefined_r2_fails_the_target(monkeypatch):
+    _patch(monkeypatch)
+    monkeypatch.setattr(FakeT1Fit, "r2", float("nan"))  # a flat trace: no variance to explain
+    node = _make(_calibration(), THRESHOLDS)
+
+    failed = node.run({})
+
+    assert failed == ["q1"]
+    assert FakeT1Fit.save_calls == 0
+
+
+def test_the_fit_plots_into_the_step_data_folder(monkeypatch, tmp_path):
+    _patch(monkeypatch)
+    node = _make(_calibration(), THRESHOLDS, data_folder=str(tmp_path))  # the graph sets <data_root>/<step>/<target>
+
+    node.run({})
+
+    assert FakeT1Fit.path_seen == str(tmp_path)
