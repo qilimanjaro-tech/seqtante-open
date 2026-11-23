@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from qili_qprograms.experiments import two_tone_vs_flux_saturation
@@ -102,8 +102,8 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
     while the QDAC ramps the swept loop.
     """
 
-    experiment: ClassVar[str] = "two_tone_vs_flux"
-    analyses: ClassVar[tuple[str, ...]] = (PARABOLA_VERTEX,)
+    experiment = "two_tone_vs_flux"
+    analyses = (PARABOLA_VERTEX,)
     defaults = TWO_TONE_VS_FLUX_DEFAULTS
 
     def execute_node(self, targets: list[Target]) -> dict[Target, list[int]]:
@@ -133,9 +133,10 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
                 "and the shared experiment has no readout-qubit mapping"
             )
         loop = self._loop(target)
-        point = operating_point_for(self.calibration_file, self.experiment, target)
-        fluxes = self._absolute_sweep(target, "flux_sweep", self._stored_flux(target, point, loop))
-        drive_ifs = self._absolute_sweep(target, "drive_if_sweep", point.drive.if_)
+        section = self.calibration_file.experiments[self.experiment][str(target)]
+        operating_point = operating_point_for(self.calibration_file, self.experiment, target)
+        fluxes = self._absolute_sweep(target, "flux_sweep", self._stored_flux(target, operating_point, loop))
+        drive_ifs = self._absolute_sweep(target, "drive_if_sweep", operating_point.drive.if_)
 
         platform = self.context.platform
         readout_bus = bus_alias(target, Role.readout)
@@ -147,7 +148,7 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
         qprogram = two_tone_vs_flux_saturation(
             calibration=self.context.calibration,
             target=str(target),
-            operating_point=self.calibration_file.experiments[self.experiment][str(target)].operating_point,
+            operating_point=section.operating_point,
             flux_sweep=fluxes,
             drive_if_sweep=drive_ifs,
             averages=self._param(target, "averages"),
@@ -171,8 +172,8 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
         self._set_operating_point_hardware(target)
         return self._stream(target, qprogram, fluxes, drive_ifs, loop)
 
-    def _stored_flux(self, target: Target, point: OperatingPoint, loop: Loop) -> float:
-        flux = point.flux.z if loop == "z" else point.flux.x
+    def _stored_flux(self, target: Target, operating_point: OperatingPoint, loop: Loop) -> float:
+        flux = operating_point.flux.z if loop == "z" else operating_point.flux.x
         if flux is None:
             raise ValueError(f"{target}: operating point stores no '{loop}' flux to sweep around")
         return flux
@@ -228,13 +229,13 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
                 fails the step.
         """
         loop = self._loop(target)
-        point = operating_point_for(self.calibration_file, self.experiment, target)
+        operating_point = operating_point_for(self.calibration_file, self.experiment, target)
         model = FluxoniumTwoToneFluxModel(
             measurements[-1],
             target=str(target),
             # The graph sets data_folder to <data_root>/<step>/<target>; None shows the plot instead.
             path=self.parameters[target].get("data_folder"),
-            lo=point.drive.lo,
+            lo=operating_point.drive.lo,
             flux_bus=bus_alias(target, Role.flux, loop),
         )
         model.fit()
@@ -258,8 +259,8 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
         # analyze returns a vertex or raises, so apply always has one; the guard is a type narrow.
         if result.fitted is None:
             return
-        point = operating_point_for(self.calibration_file, self.experiment, target)
+        operating_point = operating_point_for(self.calibration_file, self.experiment, target)
         if result.fitted.loop == "z":
-            point.flux.z = result.fitted.flux
+            operating_point.flux.z = result.fitted.flux
         else:
-            point.flux.x = result.fitted.flux
+            operating_point.flux.x = result.fitted.flux

@@ -23,12 +23,14 @@ test module.
 The shape mirrors :mod:`tests.experiments.fitting.harness`: shared fakes and helpers in one place, so a
 new node's test is the node-specific stubs plus a few calls here. As more nodes land this can grow a
 declarative ``NodeTestCase`` (scripted driver + fit + EXPECTED verdict) in the same vein; for now it is
-the toolkit the one real node (``T1Node``, QHC-1803) needs.
+the toolkit the real nodes (``T1Node``, QHC-1803; ``TwoToneVsFluxNode``, QHC-1804) share: the platform
+fakes, the stream array and the output/save stubbing.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from seqtante_open.controllers import calibration_node as node_module
 from seqtante_open.controllers.calibration_node import RunContext
@@ -67,6 +69,63 @@ class FakePlatform:
     def set_parameter(self, *, alias: str, parameter: Any, value: Any) -> None:
         self.values[alias, parameter] = value
         self.calls.append(f"set:{alias}")
+
+
+class ExecutingPlatform(FakePlatform):
+    """A :class:`FakePlatform` that also answers what a node running its own QProgram calls.
+
+    ``get_element`` reports a Rohde & Schwarz drive instrument, so the drive-source writes (IQ
+    modulation, power, RF on) run. ``execute_qprogram`` counts the executions and snapshots the parameters
+    set so far into :attr:`values_at_execute`, before the run restores them, then returns
+    ``SimpleNamespace(results=self.results())``. A node test subclasses it and overrides :meth:`results`
+    with the readout shape its QProgram produces.
+    """
+
+    def __init__(self, values: dict | None = None) -> None:
+        super().__init__(values)
+        self.values_at_execute: dict = {}
+        self.executions = 0
+
+    def get_element(self, alias: str) -> Any:
+        self.calls.append(f"get_element:{alias}")
+        return SimpleNamespace(instruments=[SimpleNamespace(name=SimpleNamespace(name="ROHDE_SCHWARZ"))])
+
+    def execute_qprogram(self, qprogram: Any, **kwargs: Any) -> Any:
+        self.calls.append("execute_qprogram")
+        self.executions += 1
+        self.values_at_execute = dict(self.values)
+        return SimpleNamespace(results=self.results())
+
+    def results(self) -> dict:
+        """The ``{readout bus: acquisitions}`` one execution returns; the node test sets the shape."""
+        raise NotImplementedError("override results() with the readout shape the node's QProgram produces")
+
+
+class FakeStreamArray:
+    """Stand-in for ``StreamArray``: records how it was built and every write, and carries a measurement id.
+
+    The node module's ``StreamArray`` is patched with this class. :attr:`last` is the most recent instance,
+    so a test can read the loops and shape the node declared and the data it streamed. Reset
+    :attr:`last` (and set :attr:`measurement_id`) per test with ``monkeypatch``.
+    """
+
+    measurement_id: ClassVar[int] = 100
+    last: ClassVar[FakeStreamArray | None] = None
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.kwargs = kwargs
+        self.writes: list[tuple[Any, Any]] = []
+        self.measurement = SimpleNamespace(measurement_id=type(self).measurement_id)
+        type(self).last = self
+
+    def __enter__(self) -> FakeStreamArray:
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        self.writes.append((key, value))
 
 
 def build_context(

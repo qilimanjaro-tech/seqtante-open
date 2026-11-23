@@ -41,7 +41,7 @@ from seqtante_open.calibration.model import (
 from seqtante_open.experiments.nodes import TwoToneVsFluxNode
 from seqtante_open.experiments.nodes import two_tone_vs_flux as node_module
 from seqtante_open.targets import ExperimentTarget
-from tests.experiments.nodes.harness import FakePlatform, build_context, stub_output_and_save
+from tests.experiments.nodes.harness import ExecutingPlatform, FakeStreamArray, build_context, stub_output_and_save
 
 Q1 = ExperimentTarget.from_str("q1")
 C1_2 = ExperimentTarget.from_str("c1_2")
@@ -117,47 +117,17 @@ class FakeFluxFit:
         return "plot.html"
 
 
-class FakeStreamArray:
-    """Stand-in for ``StreamArray``: records its construction and every map streamed into it."""
+class FakeFluxPlatform(ExecutingPlatform):
+    """An :class:`ExecutingPlatform` whose execution ``n`` (from 1) returns an (IQ, flux, IF) map filled with ``n``.
 
-    last: ClassVar["FakeStreamArray | None"] = None
-
-    def __init__(self, **kwargs):
-        self.kwargs = kwargs
-        self.writes: list[np.ndarray] = []
-        self.measurement = SimpleNamespace(measurement_id=MEAS_ID)
-        type(self).last = self
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def __setitem__(self, key, value):
-        self.writes.append(np.array(value))
-
-
-class FakeFluxPlatform(FakePlatform):
-    """A platform with a Rohde & Schwarz drive that returns one (IQ, flux, IF) map per execution.
-
-    Execution ``n`` (from 1) returns a map filled with ``n``, so the running average is checkable. It
-    snapshots the parameters set so far into :attr:`values_at_execute`, before the run restores them.
+    Filling each map with its execution number makes the running average over repetitions checkable.
     """
 
     def __init__(self) -> None:
         super().__init__({(READOUT_BUS, Parameter.TIME_OF_FLIGHT): TIME_OF_FLIGHT})
-        self.values_at_execute: dict = {}
-        self.executions = 0
 
-    def get_element(self, alias):
-        return SimpleNamespace(instruments=[SimpleNamespace(name=SimpleNamespace(name="ROHDE_SCHWARZ"))])
-
-    def execute_qprogram(self, qprogram, **kwargs):
-        self.executions += 1
-        self.values_at_execute = dict(self.values)
-        acquisition = SimpleNamespace(array=np.full((2, N_FLUX, N_IF), float(self.executions)))
-        return SimpleNamespace(results={READOUT_BUS: [acquisition]})
+    def results(self) -> dict:
+        return {READOUT_BUS: [SimpleNamespace(array=np.full((2, N_FLUX, N_IF), float(self.executions)))]}
 
 
 def _calibration(flux: Flux | None = None) -> Calibration:
@@ -225,6 +195,7 @@ def calls(monkeypatch):
     monkeypatch.setattr(FakeFluxFit, "events", [])
     monkeypatch.setattr(FakeFluxFit, "saved_loops", [])
     monkeypatch.setattr(FakeFluxFit, "init", {})
+    monkeypatch.setattr(FakeStreamArray, "measurement_id", MEAS_ID)
     monkeypatch.setattr(FakeStreamArray, "last", None)
     return recorded
 
@@ -308,9 +279,10 @@ def test_repetitions_stream_the_running_average(calls):
 
     assert platform.executions == 3
     # Executions return maps of 1, 2, 3: the stream holds the mean after each one.
-    means = [float(write.mean()) for write in FakeStreamArray.last.writes]
-    assert means == pytest.approx([1.0, 1.5, 2.0])
-    assert FakeStreamArray.last.writes[-1].shape == (N_FLUX, N_IF, 2)
+    # Executions return maps of 1, 2, 3: the stream holds the mean after each one.
+    writes = [np.asarray(value) for _, value in FakeStreamArray.last.writes]
+    assert [float(write.mean()) for write in writes] == pytest.approx([1.0, 1.5, 2.0])
+    assert writes[-1].shape == (N_FLUX, N_IF, 2)
 
 
 def test_qdac_timing_overrides_are_passed_through(calls):

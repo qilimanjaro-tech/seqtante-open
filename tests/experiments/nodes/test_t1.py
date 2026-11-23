@@ -7,9 +7,9 @@ hardware (LOs, readout attenuation, drive power/RF), reports its value in micros
 score the benchmark. The rejection paths check that a bad fit (low R², non-physical decay, ill-determined
 lifetime) fails the target, records no benchmark result, and never reaches the DB.
 
-The platform fake and the output/save stubbing come from :mod:`tests.experiments.nodes.harness`; the
-T1-specific execution fakes (QProgram builder, stream array, ``execute_qprogram``) and the fit stub live
-here.
+The platform and stream-array fakes and the output/save stubbing come from
+:mod:`tests.experiments.nodes.harness`; the readout shape the T1 QProgram returns, the QProgram builder
+stub and the fit stub live here.
 """
 
 from types import SimpleNamespace
@@ -34,7 +34,7 @@ from seqtante_open.controllers.verdicts import BenchmarkDirection, BenchmarkThre
 from seqtante_open.experiments.nodes import T1Node
 from seqtante_open.experiments.nodes import t1 as t1_module
 from seqtante_open.targets import ExperimentTarget
-from tests.experiments.nodes.harness import FakePlatform, build_context, stub_output_and_save
+from tests.experiments.nodes.harness import ExecutingPlatform, FakeStreamArray, build_context, stub_output_and_save
 
 Q1 = ExperimentTarget.from_str("q1")
 CROSSTALK_BUSES = ("flux_z_q1", "flux_x_q1")
@@ -156,44 +156,11 @@ def _calibration() -> Calibration:
     return calibration
 
 
-class FakeStreamArray:
-    """Stand-in for ``StreamArray``: a context manager that swallows the per-idle writes and carries MEAS_ID."""
+class FakeT1Platform(ExecutingPlatform):
+    """An :class:`ExecutingPlatform` whose execution returns one readout point per idle duration."""
 
-    def __init__(self, **kwargs):
-        self.kwargs = kwargs
-        self.measurement = SimpleNamespace(measurement_id=MEAS_ID)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def __setitem__(self, key, value):
-        return None
-
-
-class FakeT1Platform(FakePlatform):
-    """A :class:`FakePlatform` that also answers the execution calls the inlined node makes.
-
-    ``get_element`` reports a Rohde & Schwarz drive instrument (so the POWER/RF branch runs) and
-    ``execute_qprogram`` returns a readout result of the right length. On execute it snapshots the
-    parameters set so far into :attr:`values_at_execute`, before the node's run restores them.
-    """
-
-    def __init__(self, values: dict | None = None) -> None:
-        super().__init__(values)
-        self.values_at_execute: dict = {}
-
-    def get_element(self, alias):
-        self.calls.append(f"get_element:{alias}")
-        return SimpleNamespace(instruments=[SimpleNamespace(name=SimpleNamespace(name="ROHDE_SCHWARZ"))])
-
-    def execute_qprogram(self, qprogram, **kwargs):
-        self.calls.append("execute_qprogram")
-        self.values_at_execute = dict(self.values)
-        points = [SimpleNamespace(array=np.zeros((2, 1))) for _ in range(N_IDLE)]
-        return SimpleNamespace(results={READOUT_BUS: points})
+    def results(self) -> dict:
+        return {READOUT_BUS: [SimpleNamespace(array=np.zeros((2, 1))) for _ in range(N_IDLE)]}
 
 
 def _make(calibration: Calibration, thresholds, platform=None, **params) -> T1Node:
@@ -218,6 +185,8 @@ def _patch(monkeypatch):
 
     monkeypatch.setattr(t1_module, "t1_saturation", fake_build)
     monkeypatch.setattr(t1_module, "StreamArray", FakeStreamArray)
+    monkeypatch.setattr(FakeStreamArray, "measurement_id", MEAS_ID)
+    monkeypatch.setattr(FakeStreamArray, "last", None)
     monkeypatch.setattr(t1_module, "T1Fit", FakeT1Fit)
     stub_output_and_save(monkeypatch)
     # Reset the fit knobs to an accepted decay; each test flips the one it exercises.
