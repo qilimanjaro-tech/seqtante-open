@@ -3,9 +3,9 @@ revision = 5
 requires-python = ">=3.11, <3.14"
 resolution-markers = [
     "python_full_version >= '3.12' and platform_python_implementation == 'PyPy' and sys_platform == 'win32'",
-    "(python_full_version >= '3.12' and platform_python_implementation != 'PyPy') or (python_full_version >= '3.12' and sys_platform != 'win32')",
+    "python_full_version >= '3.12' and (platform_python_implementation != 'PyPy' or sys_platform != 'win32')",
     "python_full_version < '3.12' and platform_python_implementation == 'PyPy' and sys_platform == 'win32'",
-    "(python_full_version < '3.12' and platform_python_implementation != 'PyPy') or (python_full_version < '3.12' and sys_platform != 'win32')",
+    "python_full_version < '3.12' and (platform_python_implementation != 'PyPy' or sys_platform != 'win32')",
 ]
 
 [[package]]
@@ -151,7 +151,7 @@ version = "0.14.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version < '3.12' and platform_python_implementation == 'PyPy' and sys_platform == 'win32'",
-    "(python_full_version < '3.12' and platform_python_implementation != 'PyPy') or (python_full_version < '3.12' and sys_platform != 'win32')",
+    "python_full_version < '3.12' and (platform_python_implementation != 'PyPy' or sys_platform != 'win32')",
 ]
 dependencies = [
     { name = "matplotlib" },
@@ -170,7 +170,7 @@ version = "0.15.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.12' and platform_python_implementation == 'PyPy' and sys_platform == 'win32'",
-    "(python_full_version >= '3.12' and platform_python_implementation != 'PyPy') or (python_full_version >= '3.12' and sys_platform != 'win32')",
+    "python_full_version >= '3.12' and (platform_python_implementation != 'PyPy' or sys_platform != 'win32')",
 ]
 dependencies = [
     { name = "matplotlib" },
@@ -1539,7 +1539,7 @@ version = "2.4.6"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version < '3.12' and platform_python_implementation == 'PyPy' and sys_platform == 'win32'",
-    "(python_full_version < '3.12' and platform_python_implementation != 'PyPy') or (python_full_version < '3.12' and sys_platform != 'win32')",
+    "python_full_version < '3.12' and (platform_python_implementation != 'PyPy' or sys_platform != 'win32')",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d0/ad/fed0499ce6a338d2a03ebae59cd15093910c8875328855781952abf6c2fe/numpy-2.4.6.tar.gz", hash = "sha256:f3a3570c4a2a16746ac2c31a7c7c7b0c186b95ce902e33db6f28094ed7387dda", size = 20735807, upload-time = "2026-05-18T23:37:14.07Z" }
 wheels = [
@@ -1601,7 +1601,7 @@ version = "2.5.2"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.12' and platform_python_implementation == 'PyPy' and sys_platform == 'win32'",
-    "(python_full_version >= '3.12' and platform_python_implementation != 'PyPy') or (python_full_version >= '3.12' and sys_platform != 'win32')",
+    "python_full_version >= '3.12' and (platform_python_implementation != 'PyPy' or sys_platform != 'win32')",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9a/80/db0b4559e57ec36362bedbb05530a87fafbcb6067708c946967a41d449e7/numpy-2.5.2.tar.gz", hash = "sha256:d482d171c406ae88c5b19cad3b6a1c4c5209f886ab74bc44c2c865c23f52d860", size = 20773161, upload-time = "2026-08-09T13:48:27.962Z" }
 wheels = [
@@ -2390,7 +2390,7 @@ version = "0.24.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version < '3.12' and platform_python_implementation == 'PyPy' and sys_platform == 'win32'",
-    "(python_full_version < '3.12' and platform_python_implementation != 'PyPy') or (python_full_version < '3.12' and sys_platform != 'win32')",
+    "python_full_version < '3.12' and (platform_python_implementation != 'PyPy' or sys_platform != 'win32')",
 ]
 dependencies = [
     { name = "autobahn" },
@@ -2412,7 +2412,7 @@ version = "0.25.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.12' and platform_python_implementation == 'PyPy' and sys_platform == 'win32'",
-    "(python_full_version >= '3.12' and platform_python_implementation != 'PyPy') or (python_full_version >= '3.12' and sys_platform != 'win32')",
+    "python_full_version >= '3.12' and (platform_python_implementation != 'PyPy' or sys_platform != 'win32')",
 ]
 dependencies = [
     { name = "autobahn" },
@@ -2426,6 +2426,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b8/e1/559811ce77916f7974a6fe58af5a76867046e4c4d2a37c2bd9338169a095/qcodes_contrib_drivers-0.25.0.tar.gz", hash = "sha256:f597185ea7148fac0640bfbc3af8e37e39c6942e9f897d8875f6cd5eebe106e9", size = 469563, upload-time = "2026-05-11T09:24:28.626Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/0d/4e5bc9cd7dc3bfcb0e076decec5d59ab5b2d8410c02ebe8c1e32a00e0df2/qcodes_contrib_drivers-0.25.0-py3-none-any.whl", hash = "sha256:ad2fbbdd7cefd475e0a6777371c9ba77a510bc975407da787dd04ff0ceb6ab63", size = 554702, upload-time = "2026-05-11T09:24:26.561Z" },
+]
+
+[[package]]
+name = "qili-qprograms"
+version = "0.0.2.dev11+ga6a5d4a"
+source = { registry = "https://qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.com/pypi/qilimanjaro/simple" }
+dependencies = [
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "pydantic" },
+]
+sdist = { url = "https://qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.com/pypi/qilimanjaro/simple/qili-qprograms/0.0.2.dev11+ga6a5d4a/qili_qprograms-0.0.2.dev11+ga6a5d4a.tar.gz", hash = "sha512:9f1a73d8ba951c2e27e4a3afaf6c4f64b65377fae9d23b182fb2ddb43da2e05a36d464303d30dd0dbb188785605631b70a765f1369d80527e3739447a26c3cb7", size = 218593, upload-time = "2026-11-23T08:00:00.337Z" }
+wheels = [
+    { url = "https://qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.com/pypi/qilimanjaro/simple/qili-qprograms/0.0.2.dev11+ga6a5d4a/qili_qprograms-0.0.2.dev11+ga6a5d4a-py3-none-any.whl", hash = "sha512:5bf924ef5f23157f477b1773170cc3a5eb267d53478d81199093764c1681519ef9753490224b3999e692aeb29fbb75929ad05ed0e64e841efc0a3a480506258d", size = 42801, upload-time = "2026-11-23T07:59:59.874Z" },
 ]
 
 [[package]]
@@ -2654,7 +2668,7 @@ version = "1.17.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version < '3.12' and platform_python_implementation == 'PyPy' and sys_platform == 'win32'",
-    "(python_full_version < '3.12' and platform_python_implementation != 'PyPy') or (python_full_version < '3.12' and sys_platform != 'win32')",
+    "python_full_version < '3.12' and (platform_python_implementation != 'PyPy' or sys_platform != 'win32')",
 ]
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" } },
@@ -2709,7 +2723,7 @@ version = "1.18.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.12' and platform_python_implementation == 'PyPy' and sys_platform == 'win32'",
-    "(python_full_version >= '3.12' and platform_python_implementation != 'PyPy') or (python_full_version >= '3.12' and sys_platform != 'win32')",
+    "python_full_version >= '3.12' and (platform_python_implementation != 'PyPy' or sys_platform != 'win32')",
 ]
 dependencies = [
     { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" } },
@@ -2752,6 +2766,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "qcodes" },
+    { name = "qili-qprograms" },
     { name = "qililab" },
     { name = "ruamel-yaml" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -2793,6 +2808,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "qcodes" },
+    { name = "qili-qprograms", index = "https://qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.com/pypi/qilimanjaro/simple" },
     { name = "qililab", specifier = ">=0.36.0,<0.37", index = "https://qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.com/pypi/qilimanjaro/simple" },
     { name = "ruamel-yaml", specifier = ">=0.18.10" },
     { name = "scipy", specifier = ">=1.15" },
@@ -2905,7 +2921,7 @@ version = "9.0.4"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version < '3.12' and platform_python_implementation == 'PyPy' and sys_platform == 'win32'",
-    "(python_full_version < '3.12' and platform_python_implementation != 'PyPy') or (python_full_version < '3.12' and sys_platform != 'win32')",
+    "python_full_version < '3.12' and (platform_python_implementation != 'PyPy' or sys_platform != 'win32')",
 ]
 dependencies = [
     { name = "alabaster" },
@@ -2937,7 +2953,7 @@ version = "9.1.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.12' and platform_python_implementation == 'PyPy' and sys_platform == 'win32'",
-    "(python_full_version >= '3.12' and platform_python_implementation != 'PyPy') or (python_full_version >= '3.12' and sys_platform != 'win32')",
+    "python_full_version >= '3.12' and (platform_python_implementation != 'PyPy' or sys_platform != 'win32')",
 ]
 dependencies = [
     { name = "alabaster" },
