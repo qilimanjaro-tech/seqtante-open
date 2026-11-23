@@ -12,7 +12,6 @@ import numpy as np
 import pytest
 from qililab import Parameter
 from qililab.qprogram.calibration import Calibration
-from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 
 from seqtante_open.calibration.io import write_calibration_file
 from seqtante_open.calibration.model import (
@@ -30,59 +29,12 @@ from seqtante_open.experiments.nodes import two_tone_saturation as spine_module
 from seqtante_open.experiments.nodes.two_tone_saturation import TwoToneSaturationNode
 from seqtante_open.outputs import output_controller
 from seqtante_open.targets import ExperimentTarget
+from tests.experiments.nodes.fakes import FakePlatform, FakeStreamArray, identity_crosstalk
 
 Q1 = ExperimentTarget.from_str("q1")
-CROSSTALK_BUSES = ("flux_z_q1", "flux_x_q1")
 EXPERIMENT = "example_two_tone_saturation"
 DRIVE_LO = 2.9e9
-MEAS_ID = 321
 SWEEP = np.linspace(-0.11e9, -0.09e9, 51)
-
-
-class FakePlatform:
-    def __init__(self):
-        self.values: dict = {}
-        self.values_at_execute: dict = {}
-
-    def set_crosstalk(self, *, crosstalk):
-        return None
-
-    def set_flux_to_zero(self):
-        return None
-
-    def set_bias_to_zero(self):
-        return None
-
-    def get_parameter(self, *, alias, parameter):
-        return self.values.get((alias, parameter), 0.0)
-
-    def set_parameter(self, *, alias, parameter, value):
-        self.values[alias, parameter] = value
-
-    def get_element(self, alias):
-        """A Rohde & Schwarz drive instrument, so the IQ-modulation/POWER/RF branch runs."""
-        return SimpleNamespace(instruments=[SimpleNamespace(name=SimpleNamespace(name="ROHDE_SCHWARZ"))])
-
-    def execute_qprogram(self, qprogram, **kwargs):
-        """Snapshot the parameters set so far (before the run restores them) and return a readout result."""
-        self.values_at_execute = dict(self.values)
-        return SimpleNamespace(results={"readout_q1": [SimpleNamespace(array=np.zeros((2, 2)))]})
-
-
-class FakeStreamArray:
-    """Stand-in for ``StreamArray``: a context manager that swallows the write and carries a measurement id."""
-
-    def __init__(self, **kwargs):
-        self.measurement = SimpleNamespace(measurement_id=MEAS_ID)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def __setitem__(self, key, value):
-        return None
 
 
 @pytest.fixture
@@ -108,9 +60,7 @@ def example_node_cls(monkeypatch):
 
 def _calibration() -> Calibration:
     calibration = Calibration()
-    calibration.crosstalk_matrix = CrosstalkMatrix.from_buses(
-        {b: {bb: (1.0 if b == bb else 0.0) for bb in CROSSTALK_BUSES} for b in CROSSTALK_BUSES}
-    )
+    calibration.crosstalk_matrix = identity_crosstalk()
     file = CalibrationFile(
         operating_points_version=1,
         operating_points={
