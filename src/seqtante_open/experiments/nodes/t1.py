@@ -38,6 +38,8 @@ from seqtante_open.experiments.results import measurement_id
 from seqtante_open.outputs import output_controller
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from seqtante_open.targets import Target
 
 EXPONENTIAL_DECAY = "exponential_decay"
@@ -45,11 +47,12 @@ EXPONENTIAL_DECAY = "exponential_decay"
 #: Stream/experiment name the T1 measurement is stored under.
 _EXPERIMENT_NAME = "t1_pulsed_saturation"
 
-#: Defaults for the optional step parameters; every one is overridable in the tree. The measurement keys
-#: are named like the ``t1_saturation`` arguments. ``idle_sweep``, ``averages``, ``relax_duration``,
-#: ``drive_duration`` and ``drive_amplitude`` have no default, and the drive instrument decides which of
-#: ``drive_power`` (Rohde & Schwarz, dBm) or ``drive_gain`` (QCM-RF, [-1, 1]) the step must set.
-_DEFAULTS: dict[str, Any] = {
+#: Defaults for the optional step parameters (the node's ``defaults``); every one is overridable in the
+#: tree. The measurement keys are named like the ``t1_saturation`` arguments. ``idle_sweep``, ``averages``,
+#: ``relax_duration``, ``drive_duration`` and ``drive_amplitude`` have no default, and the drive instrument
+#: decides which of ``drive_power`` (Rohde & Schwarz, dBm) or ``drive_gain`` (QCM-RF, [-1, 1]) the step
+#: must set.
+T1_DEFAULTS: Mapping[str, Any] = {
     "drive_ringup_time": 200,
     "drive_ringdown_time": 200,
     "drive_n_sigmas": 4,
@@ -72,9 +75,7 @@ class T1Node(FixedFluxNode[None]):
 
     experiment = "t1"
     analyses = (EXPONENTIAL_DECAY,)
-
-    def _param(self, target: Target, key: str) -> Any:
-        return self.parameters[target].get(key, _DEFAULTS[key])
+    defaults = T1_DEFAULTS
 
     def execute_node(self, targets: list[Target]) -> dict[Target, list[int]]:
         """Run the T1 saturation sweep on each target at its operating point; return its measurement id."""
@@ -86,23 +87,22 @@ class T1Node(FixedFluxNode[None]):
         The QProgram is the shared ``qili_qprograms`` experiment: it reads the readout pulse, its weights
         and the drive/readout IFs for the operating point from the calibration file, and plays the
         saturation drive on the target's buses. The LOs, readout attenuation and drive source are set by
-        the shared :meth:`FixedFluxNode._set_operating_point_hardware`, through the restore handle.
+        the shared :meth:`CalibrationNode._set_operating_point_hardware`, through the restore handle.
         """
-        params = self.parameters[target]
         section = self.calibration_file.experiments[self.experiment][str(target)]
         readout_bus = bus_alias(target, Role.readout)
         # Round, not truncate, so the stored time axis is the one t1_saturation plays.
-        durations_idle = np.rint(np.linspace(*params["idle_sweep"])).astype(int)
+        durations_idle = np.rint(np.linspace(*self._param(target, "idle_sweep"))).astype(int)
 
         qprogram = t1_saturation(
             calibration=self.context.calibration,
             target=str(target),
             operating_point=section.operating_point,
             idle_duration_sweep=durations_idle,
-            averages=params["averages"],
-            relax_duration=params["relax_duration"],
-            drive_duration=params["drive_duration"],
-            drive_amplitude=params["drive_amplitude"],
+            averages=self._param(target, "averages"),
+            relax_duration=self._param(target, "relax_duration"),
+            drive_duration=self._param(target, "drive_duration"),
+            drive_amplitude=self._param(target, "drive_amplitude"),
             drive_ringup_time=self._param(target, "drive_ringup_time"),
             drive_ringdown_time=self._param(target, "drive_ringdown_time"),
             drive_n_sigmas=self._param(target, "drive_n_sigmas"),
@@ -110,9 +110,7 @@ class T1Node(FixedFluxNode[None]):
             readout_ringup_time=self._param(target, "readout_ringup_time"),
         )
 
-        self._set_operating_point_hardware(
-            target, drive_power=params.get("drive_power"), drive_gain=params.get("drive_gain")
-        )
+        self._set_operating_point_hardware(target)
 
         platform = self.context.platform
         stream_array = StreamArray(

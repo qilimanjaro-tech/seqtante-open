@@ -36,6 +36,7 @@ are not registered; they hold the code the two experiment shapes share as the no
 import copy
 import math
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar, Generic, Protocol, TypeVar, runtime_checkable
 from warnings import warn
@@ -145,6 +146,8 @@ class CalibrationNode(ABC, Generic[ResultT]):
             ADR-0002), or ``None`` for a recalibration. Registered into the experiment's
             :class:`~seqtante_open.controllers.node_registry.ExperimentSpec` and consumed by the
             threshold parsing and the verdict logic.
+        defaults (Mapping[str, Any]): The values :meth:`_param` falls back to for a step parameter the
+            tree leaves unset; a key with no default is required. Default: none.
     """
 
     experiment: ClassVar[str | None] = None
@@ -152,6 +155,7 @@ class CalibrationNode(ABC, Generic[ResultT]):
     applies_operating_point: ClassVar[bool] = True
     parallel: ClassVar[Parallel] = Parallel.forbidden
     benchmark: ClassVar[BenchmarkSpec | None] = None
+    defaults: ClassVar[Mapping[str, Any]] = {}
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -230,6 +234,72 @@ class CalibrationNode(ABC, Generic[ResultT]):
         if self._crosstalk is None:
             raise RuntimeError("the crosstalk session is only available while the node is running")
         return self._crosstalk
+
+    def _param(self, target: Target, key: str) -> Any:
+        """The step's ``key`` for ``target``, else the node's :attr:`defaults` entry for it.
+
+        Raises:
+            KeyError: if the step sets no ``key`` for ``target`` and the node has no default for it.
+        """
+        params = self.parameters[target]
+        if key in params:
+            return params[key]
+        if key in self.defaults:
+            return self.defaults[key]
+        raise KeyError(f"step '{self.name}': {target} sets no '{key}' and {type(self).__name__} has no default for it")
+
+    def _set_operating_point_hardware(self, target: Target) -> None:
+        """Set ``target``'s drive/readout line from its operating point, through the restore handle (ADR-0006).
+
+        The QProgram sets the IFs and plays the pulses; this sets what it does not: the drive and readout
+        LOs, the readout attenuation and the drive source. Every write goes through :attr:`restore`, so
+        ``run`` puts the line back as it was after each target and nothing leaks into the next node.
+
+        The drive source depends on the bus's drive instrument, and its level is a step parameter (or a
+        node default) read through :meth:`_param`:
+
+        - Rohde & Schwarz: ``drive_power`` is its ``POWER`` in dBm; IQ modulation is switched on (else
+          it plays a bare carrier instead of the IQ drive) and its RF output too.
+        - QCM-RF: ``drive_gain`` is the sequencer ``GAIN`` in [-1, 1]; hardware modulation is switched on.
+        - Anything else: warns, and sets no power.
+
+        It lives on the base, not on a spine: a flux-sweep node does not place the flux, but it still runs
+        at its operating point's LOs, attenuation and drive.
+
+        Raises:
+            TypeError: if called on a node that sets no ``experiment`` (a spine, not a leaf).
+            ValueError: if the readout attenuation is not a whole number of dB.
+            KeyError: if the drive instrument's ``drive_power``/``drive_gain`` is neither set nor defaulted.
+        """
+        experiment = self.experiment
+        if experiment is None:
+            raise TypeError(f"{type(self).__name__} sets no experiment; only a leaf node can set its hardware")
+        point = operating_point_for(self.calibration_file, experiment, target)
+        attenuation = point.readout.attenuation
+        if not float(attenuation).is_integer():
+            raise ValueError(f"{target}: readout attenuation {attenuation} dB is not a whole number of dB")
+        drive_bus = bus_alias(target, Role.drive)
+        readout_bus = bus_alias(target, Role.readout)
+        # Read the drive level before the first write, so a missing one leaves the line untouched.
+        instruments = [instrument.name.name for instrument in self.context.platform.get_element(drive_bus).instruments]
+        if "ROHDE_SCHWARZ" in instruments:
+            drive_writes = [
+                (Parameter.IQ_MODULATION, True),
+                (Parameter.POWER, self._param(target, "drive_power")),
+                (Parameter.RF_ON, True),
+            ]
+        elif "QCMRF" in instruments:
+            drive_writes = [(Parameter.HARDWARE_MODULATION, True), (Parameter.GAIN, self._param(target, "drive_gain"))]
+        else:
+            warn(NO_DRIVE_INSTRUMENT_MSG, stacklevel=2)
+            drive_writes = []
+
+        restore = self.restore
+        restore.set(drive_bus, Parameter.LO_FREQUENCY, round(point.drive.lo))
+        restore.set(readout_bus, Parameter.LO_FREQUENCY, round(point.readout.lo))
+        restore.set(readout_bus, Parameter.OUT0_ATT, int(attenuation))
+        for parameter, value in drive_writes:
+            restore.set(drive_bus, parameter, value)
 
     def run(self, dead_targets: dict[str, str]) -> list[str]:
         """Run the three phases for every live target and return the ones that failed (ADR-0006).
@@ -520,61 +590,12 @@ class FixedFluxNode(CalibrationNode[ResultT]):
     The home for the code the fixed-flux experiments share (``two_tone`` at the sweet spot, ``rabi``,
     ``t1``, ``t2``, ``landau_zener`` and the ``reset_point_search`` loop). It lands as those nodes are
     ported (tasks 6, 8-12); for now the spine fixes :attr:`applies_operating_point` and leaves the
-    three phases to the experiment.
+    three phases to the experiment. The step parameters (:meth:`CalibrationNode._param`) and the
+    drive/readout setup (:meth:`CalibrationNode._set_operating_point_hardware`) live on the base, since
+    flux-sweep nodes need them too.
     """
 
     applies_operating_point: ClassVar[bool] = True
-
-    def _set_operating_point_hardware(
-        self, target: Target, *, drive_power: float | None = None, drive_gain: float | None = None
-    ) -> None:
-        """Set ``target``'s drive/readout line from its operating point, through the restore handle (ADR-0006).
-
-        The QProgram sets the IFs and plays the pulses; this sets what it does not: the drive and readout
-        LOs, the readout attenuation and the drive source. Every write goes through :attr:`restore`, so
-        ``run`` puts the line back as it was after each target and nothing leaks into the next node.
-
-        The drive source depends on the bus's drive instrument:
-
-        - Rohde & Schwarz: ``drive_power`` is its ``POWER`` in dBm; IQ modulation is switched on (else
-          it plays a bare carrier instead of the IQ drive) and its RF output too.
-        - QCM-RF: ``drive_gain`` is the sequencer ``GAIN`` in [-1, 1]; hardware modulation is switched on.
-        - Anything else: warns, and sets no power.
-
-        Raises:
-            TypeError: if called on a node that sets no ``experiment`` (a spine, not a leaf).
-            ValueError: if the readout attenuation is not a whole number of dB, or the drive instrument
-                needs ``drive_power``/``drive_gain`` and it was not given.
-        """
-        experiment = self.experiment
-        if experiment is None:
-            raise TypeError(f"{type(self).__name__} sets no experiment; only a leaf node can set its hardware")
-        point = operating_point_for(self.calibration_file, experiment, target)
-        attenuation = point.readout.attenuation
-        if not float(attenuation).is_integer():
-            raise ValueError(f"{target}: readout attenuation {attenuation} dB is not a whole number of dB")
-        drive_bus = bus_alias(target, Role.drive)
-        readout_bus = bus_alias(target, Role.readout)
-
-        restore = self.restore
-        restore.set(drive_bus, Parameter.LO_FREQUENCY, round(point.drive.lo))
-        restore.set(readout_bus, Parameter.LO_FREQUENCY, round(point.readout.lo))
-        restore.set(readout_bus, Parameter.OUT0_ATT, int(attenuation))
-
-        instruments = [instrument.name.name for instrument in self.context.platform.get_element(drive_bus).instruments]
-        if "ROHDE_SCHWARZ" in instruments:
-            if drive_power is None:
-                raise ValueError(f"{target}: a Rohde & Schwarz drive source needs drive_power (dBm)")
-            restore.set(drive_bus, Parameter.IQ_MODULATION, True)
-            restore.set(drive_bus, Parameter.POWER, drive_power)
-            restore.set(drive_bus, Parameter.RF_ON, True)
-        elif "QCMRF" in instruments:
-            if drive_gain is None:
-                raise ValueError(f"{target}: a QCM-RF drive needs drive_gain (sequencer gain in [-1, 1])")
-            restore.set(drive_bus, Parameter.HARDWARE_MODULATION, True)
-            restore.set(drive_bus, Parameter.GAIN, drive_gain)
-        else:
-            warn(NO_DRIVE_INSTRUMENT_MSG, stacklevel=2)
 
 
 class FluxSweepNode(CalibrationNode[ResultT]):

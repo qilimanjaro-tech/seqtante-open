@@ -246,7 +246,7 @@ def test_runs_the_saturation_sweep_at_the_point_and_scores_the_benchmark(monkeyp
     assert build["operating_point"] == "sweet_spot"
     assert build["calibration"] is calibration
     np.testing.assert_array_equal(build["idle_duration_sweep"], np.linspace(*IDLE_SWEEP).astype(int))
-    # Unset optional keys fall back to _DEFAULTS, named like the t1_saturation arguments.
+    # Unset optional keys fall back to the node defaults, named like the t1_saturation arguments.
     assert build["drive_ringup_time"] == 200
     assert build["drive_ringdown_time"] == 200
     assert build["drive_n_sigmas"] == 4
