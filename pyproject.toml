@@ -87,7 +87,6 @@ name = "qilimanjaro"
 url = "https://aws@qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.com/pypi/qilimanjaro/simple"
 
 [tool.uv.sources]
-qili-qprograms = { index = "qilimanjaro" }
 qililab = { index = "qilimanjaro" }
 qpysequence = { index = "qilimanjaro" }
 # Dev builds are published to the index on every push to qili-qprograms' main; uv.lock pins the
