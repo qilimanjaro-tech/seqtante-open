@@ -2,9 +2,11 @@
 
 import pytest
 
+from seqtante_open.controllers import node_registry
 from seqtante_open.controllers.calibration_node import CalibrationNode
 from seqtante_open.controllers.node_registry import (
     BenchmarkSpec,
+    ExperimentSpec,
     Parallel,
     experiment_spec,
     known_experiments,
@@ -140,19 +142,21 @@ def test_reregistering_the_same_class_is_allowed():
     assert experiment_spec("reloaded").node_cls is Reloaded
 
 
-def test_a_node_class_keeps_the_seeded_benchmark():
-    # "t2" is seeded with a benchmark; a node class that does not re-declare one keeps it. (Uses t2
-    # rather than t1, which now has a real node class that claims it, T1Node, QHC-1803.)
-    assert experiment_spec("t2").benchmark == BenchmarkSpec(unit="ns", direction=HIGHER)
+def test_a_node_class_keeps_the_seeded_benchmark(monkeypatch):
+    # A made-up seeded experiment no real node will claim, so a node landing on t1/t2 never breaks this.
+    seeded = BenchmarkSpec(unit="ns", direction=HIGHER)
+    registry = dict(node_registry.NODE_REGISTRY)
+    registry["seeded_benchmark_probe"] = ExperimentSpec(analyses=("a",), benchmark=seeded)
+    monkeypatch.setattr(node_registry, "NODE_REGISTRY", registry)
 
-    class T2(CalibrationNode):
-        experiment = "t2"
-        analyses = ("decaying_oscillation",)
+    class SeededProbe(CalibrationNode):
+        experiment = "seeded_benchmark_probe"
+        analyses = ("a",)
 
         def run(self, dead_targets):  # pragma: no cover
             return []
 
-    assert experiment_spec("t2").benchmark == BenchmarkSpec(unit="ns", direction=HIGHER)
+    assert experiment_spec("seeded_benchmark_probe").benchmark == seeded
 
 
 def test_a_node_class_declares_its_own_benchmark():

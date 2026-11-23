@@ -29,12 +29,10 @@ the restore handle (ADR-0006).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar
-from warnings import warn
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from qili_qprograms.experiments import t2_ramsey
-from qililab import Parameter
 from qililab.result import StreamArray
 
 from seqtante_open.calibration.bus_alias import Role, bus_alias
@@ -45,7 +43,8 @@ from seqtante_open.experiments.results import measurement_id
 from seqtante_open.outputs import output_controller
 
 if TYPE_CHECKING:
-    from seqtante_open.controllers.parameter_restore import ParameterRestore
+    from collections.abc import Mapping
+
     from seqtante_open.targets import Target
 
 DECAYING_OSCILLATION = "decaying_oscillation"
@@ -53,11 +52,13 @@ DECAYING_OSCILLATION = "decaying_oscillation"
 #: Stream/experiment name the T2 measurement is stored under.
 _EXPERIMENT_NAME = "t2_drag"
 
-#: Warned when the drive bus has no instrument whose power this node knows how to set.
-_NO_DRIVE_INSTRUMENT_MSG = "No instrument to set power to."
-
 #: Default minimum R² a T2 fit must reach to pass the step (overridable per step).
 DEFAULT_MIN_R2 = 0.8
+
+#: The node's ``defaults``; every one is overridable in the tree. ``elapsed_sweep``, ``averages`` and
+#: ``relax_duration`` have no default, and the drive instrument decides which of ``drive_power``
+#: (Rohde & Schwarz, dBm) or ``drive_gain`` (QCM-RF, [-1, 1]) the step must set.
+T2_DEFAULTS: Mapping[str, Any] = {"readout_ringup_time": 0, "min_r2": DEFAULT_MIN_R2}
 
 
 class T2Node(FixedFluxNode[None]):
@@ -69,6 +70,7 @@ class T2Node(FixedFluxNode[None]):
 
     experiment: ClassVar[str | None] = "t2"
     analyses: ClassVar[tuple[str, ...]] = (DECAYING_OSCILLATION,)
+    defaults = T2_DEFAULTS
 
     def execute_node(self, targets: list[Target]) -> dict[Target, list[int]]:
         """Run the T2 (Ramsey) DRAG sweep on each target at its operating point; return its measurement id."""
@@ -79,37 +81,32 @@ class T2Node(FixedFluxNode[None]):
 
         The QProgram is the shared ``qili_qprograms`` experiment: it plays the calibrated ``pi_half-<op>``
         pulse (or ``pi-<op>`` at half amplitude) twice around an idle wait and reads the ``readout-<op>``
-        pulse, its weights and the drive/readout IFs from the calibration file. This node sets what the
-        QProgram does not -- the drive/readout LOs, the readout attenuation and the drive power/RF -- from
-        the operating point, through the restore handle so the run undoes them (ADR-0006).
+        pulse, its weights and the drive/readout IFs from the calibration file. What it does not set -- the
+        drive/readout LOs, the readout attenuation and the drive source -- the shared
+        :meth:`~seqtante_open.controllers.calibration_node.CalibrationNode._set_operating_point_hardware`
+        sets from the operating point, through the restore handle so the run undoes it (ADR-0006).
         """
         experiment = self.experiment
         # A registered leaf node always sets experiment (enforced in __init_subclass__); narrow for the type checker.
         if experiment is None:
             raise RuntimeError(f"{type(self).__name__} declares no experiment")
-        params = self.parameters[target]
         section = self.calibration_file.experiments[experiment][str(target)]
         operating_point_name = section.operating_point
-        point = self.calibration_file.operating_points[str(target)][operating_point_name]
         drive_bus = bus_alias(target, Role.drive)
         readout_bus = bus_alias(target, Role.readout)
-        idle_sweep = np.linspace(*params["elapsed_sweep"]).astype(int)
+        idle_sweep = np.linspace(*self._param(target, "elapsed_sweep")).astype(int)
 
         qprogram = t2_ramsey(
             calibration=self.context.calibration,
             target=str(target),
             operating_point=operating_point_name,
             idle_duration_sweep=idle_sweep,
-            averages=params["averages"],
-            relax_duration=params["relax_duration"],
-            readout_ringup_time=params.get("ringup_time", 0),
+            averages=self._param(target, "averages"),
+            relax_duration=self._param(target, "relax_duration"),
+            readout_ringup_time=self._param(target, "readout_ringup_time"),
         )
 
-        restore = self.restore
-        restore.set(drive_bus, Parameter.LO_FREQUENCY, int(point.drive.lo))
-        restore.set(readout_bus, Parameter.LO_FREQUENCY, int(point.readout.lo))
-        restore.set(readout_bus, Parameter.OUT0_ATT, int(point.readout.attenuation))
-        self._set_drive_source(restore, drive_bus, params["drive_power"])
+        self._set_operating_point_hardware(target)
 
         platform = self.context.platform
         stream_array = StreamArray(
@@ -135,39 +132,20 @@ class T2Node(FixedFluxNode[None]):
                 stream_array[idx,] = results[readout_bus][idx].array.T
         return measurement_id(stream_array)
 
-    def _set_drive_source(self, restore: ParameterRestore, drive_bus: str, drive_power: float) -> None:
-        """Set the drive power, and arm a Rohde & Schwarz source to play the IQ drive.
-
-        The power goes through the parameter the bus's drive instrument uses (R&S ``POWER``, QCMRF
-        ``GAIN``). A Rohde & Schwarz source also needs IQ modulation switched on -- otherwise it emits a
-        bare carrier instead of the pi-half pulses' IQ waveform -- and its RF output switched on. Both,
-        like the power, go through the restore handle, so the node's run turns them back off at the end.
-        """
-        drive_instruments = [
-            instrument.name.name for instrument in self.context.platform.get_element(drive_bus).instruments
-        ]
-        if "ROHDE_SCHWARZ" in drive_instruments:
-            restore.set(drive_bus, Parameter.IQ_MODULATION, True)
-            restore.set(drive_bus, Parameter.POWER, drive_power)
-            restore.set(drive_bus, Parameter.RF_ON, True)
-        elif "QCMRF" in drive_instruments:
-            restore.set(drive_bus, Parameter.GAIN, drive_power)
-        else:
-            warn(_NO_DRIVE_INSTRUMENT_MSG, stacklevel=2)
-
     def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[None]:
         """Fit the oscillation, save ``t2``/``fit_r2`` to the DB, and report T2 and its uncertainty in us; read-only.
 
         Raises:
             AnalysisError: when the fit's R² is below the step's minimum (the target fails the step).
         """
-        params = self.parameters[target]
-        model = T2Fit(target=str(target), measurement_id=measurements[-1], path=params.get("data_folder"))
+        model = T2Fit(
+            target=str(target), measurement_id=measurements[-1], path=self.parameters[target].get("data_folder")
+        )
         model.fit()
         plot = model.plot()
         model.save_fitting()
 
-        min_r2 = params.get("min_r2", DEFAULT_MIN_R2)
+        min_r2 = self._param(target, "min_r2")
         if model.r_squared < min_r2:
             raise AnalysisError(f"{target} T2 fit R² {model.r_squared:.3f} is below the minimum {min_r2}")
 
