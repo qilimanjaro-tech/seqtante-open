@@ -15,8 +15,8 @@ HIGHER = BenchmarkDirection.higher_is_better
 LOWER = BenchmarkDirection.lower_is_better
 
 
-def _thresholds(passed, warning, direction):
-    return BenchmarkThresholds(passed=passed, warning=warning, direction=direction)
+def _thresholds(passed, warning, direction, unit=None):
+    return BenchmarkThresholds(passed=passed, warning=warning, unit=unit, direction=direction)
 
 
 @pytest.mark.parametrize(

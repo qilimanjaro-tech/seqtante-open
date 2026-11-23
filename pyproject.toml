@@ -89,7 +89,8 @@ url = "https://aws@qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.c
 [tool.uv.sources]
 qililab = { index = "qilimanjaro" }
 qpysequence = { index = "qilimanjaro" }
-# Shared production QPrograms; dev builds are published to the index on every push to its main.
+# Dev builds are published to the index on every push to qili-qprograms' main; uv.lock pins the
+# current main-head build. Switch to a version range here once it cuts a tagged release.
 qili-qprograms = { index = "qilimanjaro" }
 
 [tool.ruff]

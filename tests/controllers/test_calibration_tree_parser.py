@@ -21,8 +21,12 @@ from typing import Any
 import pytest
 from ruamel.yaml import YAML
 
-from seqtante_open.controllers import CalibrationParser, Pipeline, Step, Thresholds, TreeParseError
+from seqtante_open.controllers import BenchmarkThresholds, CalibrationParser, Pipeline, Step, TreeParseError
+from seqtante_open.controllers.verdicts import BenchmarkDirection
 from seqtante_open.targets import CouplerTarget, QubitTarget
+
+HIGHER = BenchmarkDirection.higher_is_better
+LOWER = BenchmarkDirection.lower_is_better
 
 
 @pytest.fixture
@@ -198,15 +202,17 @@ class TestAdrExample:
             "operating_point": "reset",
         }
 
-    def test_pulses_and_thresholds_are_per_target_parameters(self, pipelines):
+    def test_pulses_are_per_target_parameters_and_thresholds_are_on_the_step(self, pipelines):
         steps = by_name(pipelines)
         assert steps["rabi_sweet_spot"].parameters["q1"]["pulses"] == {"drive": "pi-sweet_spot"}
-        assert steps["t1_sweet_spot"].parameters["q2"]["thresholds"] == Thresholds(
-            passed=50_000.0, warning=20_000.0, unit="ns", direction="higher"
+        # Thresholds are acceptance policy, kept on the step apart from the experiment parameters.
+        assert "thresholds" not in steps["t1_sweet_spot"].parameters["q2"]
+        assert steps["t1_sweet_spot"].thresholds["q2"] == BenchmarkThresholds(
+            passed=50.0, warning=20.0, unit="us", direction=HIGHER
         )
 
     def test_a_benchmark_without_thresholds_has_none(self, pipelines):
-        assert "thresholds" not in by_name(pipelines)["t2_sweet_spot"].parameters["q1"]
+        assert by_name(pipelines)["t2_sweet_spot"].thresholds == {}
 
 
 # ------------------------- Pipelines -------------------------
@@ -769,23 +775,23 @@ class TestThresholds:
     )
     def test_time_is_converted_to_the_benchmark_unit(self, platform, passed):
         step = only_step(single_step_tree(t1_step(thresholds=t1_thresholds(passed=passed))), platform)
-        assert step.parameters["q1"]["thresholds"] == Thresholds(
-            passed=50_000.0, warning=20_000.0, unit="ns", direction="higher"
-        )
+        assert step.thresholds["q1"] == BenchmarkThresholds(passed=50.0, warning=20.0, unit="us", direction=HIGHER)
 
     @pytest.mark.parametrize("passed", [1, 1.5])
     def test_dimensionless_takes_a_plain_number(self, platform, passed):
         step = only_step(single_step_tree(lz_step(thresholds={"passed": passed, "warning": 3})), platform)
-        assert step.parameters["q1"]["thresholds"] == Thresholds(
-            passed=float(passed), warning=3.0, unit=None, direction="lower"
+        assert step.thresholds["q1"] == BenchmarkThresholds(
+            passed=float(passed), warning=3.0, unit=None, direction=LOWER
         )
 
     def test_zero_is_accepted(self, platform):
         step = only_step(single_step_tree(t1_step(thresholds=t1_thresholds(warning="0 us"))), platform)
-        assert step.parameters["q1"]["thresholds"] == Thresholds(50_000.0, 0.0, "ns", "higher")
+        assert step.thresholds["q1"] == BenchmarkThresholds(50.0, 0.0, "us", HIGHER)
 
     def test_a_benchmark_without_thresholds_has_none(self, platform):
-        assert only_step(single_step_tree(t1_step()), platform).parameters == {"q1": {}, "q2": {}}
+        step = only_step(single_step_tree(t1_step()), platform)
+        assert step.parameters == {"q1": {}, "q2": {}}
+        assert step.thresholds == {}
 
     def test_resolve_per_target(self, platform):
         step = t1_step(
@@ -793,15 +799,13 @@ class TestThresholds:
             overrides=[{"targets": ["q2"], "thresholds": t1_thresholds("60 us", "30 us")}],
         )
         tree = single_step_tree(step, defaults={"t1": {"thresholds": t1_thresholds()}})
-        parameters = only_step(tree, platform).parameters
-        assert parameters["q1"]["thresholds"] == Thresholds(40_000.0, 10_000.0, "ns", "higher")
-        assert parameters["q2"]["thresholds"] == Thresholds(60_000.0, 30_000.0, "ns", "higher")
+        thresholds = only_step(tree, platform).thresholds
+        assert thresholds["q1"] == BenchmarkThresholds(40.0, 10.0, "us", HIGHER)
+        assert thresholds["q2"] == BenchmarkThresholds(60.0, 30.0, "us", HIGHER)
 
     def test_from_defaults(self, platform):
         tree = single_step_tree(t1_step(), defaults={"t1": {"thresholds": t1_thresholds()}})
-        assert only_step(tree, platform).parameters["q2"]["thresholds"] == Thresholds(
-            50_000.0, 20_000.0, "ns", "higher"
-        )
+        assert only_step(tree, platform).thresholds["q2"] == BenchmarkThresholds(50.0, 20.0, "us", HIGHER)
 
     def test_defaults_of_an_unknown_experiment_are_not_checked(self, platform):
         tree = make_tree(defaults={"not_yet_an_experiment": {"thresholds": "anything"}})
@@ -822,9 +826,7 @@ class TestThresholds:
                 "      s: {experiment: t1, operating_point: sweet_spot, thresholds: {passed: 50 \u00b5s, warning: 20 us}}\n"
             )
         )
-        assert only_step(tree, platform).parameters["q1"]["thresholds"] == Thresholds(
-            50_000.0, 20_000.0, "ns", "higher"
-        )
+        assert only_step(tree, platform).thresholds["q1"] == BenchmarkThresholds(50.0, 20.0, "us", HIGHER)
 
     @pytest.mark.parametrize(
         ("tree", "match"),

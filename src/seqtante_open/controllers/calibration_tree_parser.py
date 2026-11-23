@@ -18,7 +18,7 @@ import copy
 import math
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 
 from loguru import logger
@@ -26,11 +26,11 @@ from qililab import Platform
 
 from seqtante_open.controllers.node_registry import (
     BenchmarkSpec,
-    Direction,
     ExperimentSpec,
     experiment_spec,
     known_experiments,
 )
+from seqtante_open.controllers.verdicts import BenchmarkDirection, BenchmarkThresholds
 from seqtante_open.targets import CouplerTarget, ExperimentTarget, QubitTarget, Target
 
 _STEP_KEYS = frozenset({"experiment", "analysis", "targets", "overrides"})
@@ -61,23 +61,6 @@ class TreeParseError(ValueError):
 
 
 @dataclass(frozen=True)
-class Thresholds:
-    """Benchmark thresholds, converted to the unit the benchmark reports.
-
-    Args:
-        passed (float): A value at least this good is Passed.
-        warning (float): A value at least this good, but not Passed, is Warning. Anything worse is Failed.
-        unit (str | None): Unit of ``passed`` and ``warning``, ``None`` when dimensionless.
-        direction (Direction): Whether a higher or a lower value is better.
-    """
-
-    passed: float
-    warning: float
-    unit: str | None
-    direction: Direction
-
-
-@dataclass(frozen=True)
 class Step:
     """One named step of a pipeline.
 
@@ -88,6 +71,10 @@ class Step:
         analysis (str): Analysis the step runs, the experiment's default when the tree names none.
         targets (list[Target]): Targets the step runs on.
         parameters (dict[Target, dict[str, Any]]): Resolved parameters per target.
+        thresholds (dict[Target, BenchmarkThresholds]): The benchmark's Passed/Warning thresholds per
+            target, parsed into the benchmark's unit. Empty for a recalibration, or a benchmark target
+            the tree sets no thresholds for. Kept apart from ``parameters`` so acceptance policy is not
+            mixed into the experiment parameters.
     """
 
     name: str
@@ -96,6 +83,7 @@ class Step:
     analysis: str
     targets: list[Target]
     parameters: dict[Target, dict[str, Any]]
+    thresholds: dict[Target, BenchmarkThresholds] = field(default_factory=dict)
 
 
 class _Override(NamedTuple):
@@ -242,12 +230,19 @@ class CalibrationParser:
 
         base = {**defaults.get(experiment, {}), **own}
         parameters: dict[Target, dict[str, Any]] = {}
+        thresholds: dict[Target, BenchmarkThresholds] = {}
         for target in targets:
             resolved = base
             for override in overrides:
                 if target in override.targets:
                     resolved = resolved | override.values
-            parameters[target] = copy.deepcopy(resolved)
+            resolved = copy.deepcopy(resolved)
+            # Thresholds are acceptance policy, not an experiment parameter: lift them out of the
+            # per-target parameters onto the step's own typed field (QHC-1848).
+            threshold = resolved.pop("thresholds", None)
+            if threshold is not None:
+                thresholds[target] = threshold
+            parameters[target] = resolved
 
         return Step(
             name=name,
@@ -256,6 +251,7 @@ class CalibrationParser:
             analysis=analysis,
             targets=targets,
             parameters=parameters,
+            thresholds=thresholds,
         )
 
     def _overrides(
@@ -384,7 +380,7 @@ def _with_thresholds(values: Mapping[str, Any], experiment: str, spec: Experimen
     return parsed
 
 
-def _thresholds(raw: object, experiment: str, benchmark: BenchmarkSpec | None, path: str) -> Thresholds:
+def _thresholds(raw: object, experiment: str, benchmark: BenchmarkSpec | None, path: str) -> BenchmarkThresholds:
     """Parses ``passed`` and ``warning`` into the benchmark's unit and checks they leave a Warning band."""
     if benchmark is None:
         raise TreeParseError(f"{path}: '{experiment}' is not a benchmark, so it takes no thresholds.")
@@ -394,13 +390,14 @@ def _thresholds(raw: object, experiment: str, benchmark: BenchmarkSpec | None, p
     warning = _threshold_value(raw["warning"], benchmark, f"{path}.warning")
     if passed == warning:
         raise TreeParseError(f"{path}: passed and warning are equal, so no value can be Warning.")
-    higher = benchmark.direction == "higher"
+    higher = benchmark.direction is BenchmarkDirection.higher_is_better
     if (passed > warning) != higher:
+        better = "higher" if higher else "lower"
         raise TreeParseError(
             f"{path}: passed ({raw['passed']}) must be {'above' if higher else 'below'} warning ({raw['warning']}), "
-            f"since {benchmark.direction} is better for '{experiment}'."
+            f"since {better} is better for '{experiment}'."
         )
-    return Thresholds(passed=passed, warning=warning, unit=benchmark.unit, direction=benchmark.direction)
+    return BenchmarkThresholds(passed=passed, warning=warning, unit=benchmark.unit, direction=benchmark.direction)
 
 
 def _threshold_value(raw: object, benchmark: BenchmarkSpec, path: str) -> float:

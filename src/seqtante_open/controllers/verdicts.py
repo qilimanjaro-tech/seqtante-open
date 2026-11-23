@@ -16,8 +16,9 @@
 
 A step's ``analyze`` is read-only (ADR-0006). It raises :class:`AnalysisError` when it cannot produce
 a result -- the fit does not converge, or its quality is below the threshold set in the tree -- and
-that target fails the step (D17). A benchmark additionally scores its value against the tree's
-Passed/Warning/Failed thresholds and reports a :class:`BenchmarkResult`; a ``Failed`` verdict is a
+that target fails the step (D17). For a benchmark, ``analyze`` reports the measured value and never
+the verdict; the run scores that value against the tree's Passed/Warning/Failed thresholds with
+:func:`verdict_for` and reports a :class:`BenchmarkResult` (QHC-1848). A ``Failed`` verdict is a
 result, not a step failure, so it skips nothing that comes after (ADR-0002, D17).
 
 The tree holds the thresholds and the parser converts their units; the node declares the direction
@@ -58,13 +59,21 @@ class AnalysisError(Exception):
 class BenchmarkThresholds:
     """The tree's Passed/Warning thresholds for a benchmark, in the benchmark's unit (ADR-0002).
 
+    The one threshold type the parser produces and :func:`verdict_for` scores against (QHC-1848).
     ``passed`` is the stricter bound and ``warning`` the looser one; which is numerically larger
     depends on ``direction``. The parser converts the tree's units to the node's and rejects a pair
     ordered against the direction (an unreachable band), so a value only ever scores one verdict.
+
+    Args:
+        passed (float): A value at least this good is Passed, in ``unit``.
+        warning (float): A value at least this good, but not Passed, is Warning; anything worse is Failed.
+        unit (str | None): Unit of ``passed`` and ``warning``, ``None`` when the value is dimensionless.
+        direction (BenchmarkDirection): Whether a higher or a lower value is better.
     """
 
     passed: float
     warning: float
+    unit: str | None
     direction: BenchmarkDirection
 
 

@@ -1,9 +1,14 @@
 """Tests for the parameter-restore handle and context manager (ADR-0006)."""
 
+from pathlib import Path
+
 import pytest
 from qililab.typings.enums import Parameter
 
 from seqtante_open.controllers.parameter_restore import ParameterRestore, restoring_parameters
+
+#: The offline runcard the ``platform`` fixture builds a real qililab platform from (QCM-RF ``drive_q1``).
+RUNCARD_PATH = Path(__file__).resolve().parents[1] / "runcards" / "test_AQPU_runcard.yml"
 
 
 class FakePlatform:
@@ -108,3 +113,21 @@ def test_prior_value_is_read_once_per_parameter():
 
     assert gets == [("flux_z_q1", Parameter.FLUX)]
     assert platform.values["flux_z_q1", Parameter.FLUX] == pytest.approx(0.1)
+
+
+def test_a_qblox_gain_is_restored_through_its_i_and_q_parts(platform):
+    # A Qblox sequencer reads GAIN back as (gain_i, gain_q) but sets it only from one float, so
+    # restoring the tuple as GAIN raises; the handle restores GAIN_I and GAIN_Q instead.
+    before = platform.get_parameter(alias="drive_q1", parameter=Parameter.GAIN)
+    with restoring_parameters(platform) as restore:
+        restore.set("drive_q1", Parameter.GAIN, 0.4)
+        restore.set("drive_q1", Parameter.GAIN, 0.3)
+        assert platform.get_parameter(alias="drive_q1", parameter=Parameter.GAIN) == pytest.approx((0.3, 0.3))
+    assert platform.get_parameter(alias="drive_q1", parameter=Parameter.GAIN) == pytest.approx(before)
+
+
+def test_a_scalar_gain_is_restored_as_gain():
+    platform = FakePlatform({("drive_q1", Parameter.GAIN): 0.8})
+    with restoring_parameters(platform) as restore:
+        restore.set("drive_q1", Parameter.GAIN, 0.4)
+    assert platform.values["drive_q1", Parameter.GAIN] == pytest.approx(0.8)

@@ -29,7 +29,7 @@ from seqtante_open.experiments.nodes import two_tone_saturation as spine_module
 from seqtante_open.experiments.nodes.two_tone_saturation import TwoToneSaturationNode
 from seqtante_open.outputs import output_controller
 from seqtante_open.targets import ExperimentTarget
-from tests.experiments.nodes.fakes import FakePlatform, FakeStreamArray, identity_crosstalk
+from tests.experiments.nodes.harness import FakePlatform, FakeStreamArray, identity_crosstalk
 
 Q1 = ExperimentTarget.from_str("q1")
 EXPERIMENT = "example_two_tone_saturation"
