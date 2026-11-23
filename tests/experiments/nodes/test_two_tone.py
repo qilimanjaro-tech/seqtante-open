@@ -40,9 +40,14 @@ PARAMS = {"sweep_start": 2.79e9, "sweep_stop": 2.81e9, "sweep_step": 0.4e6}
 
 
 class FakeLorentzian:
-    """Scripted stand-in for ``LorentzianPeakModel``: no DB load, an accepted fit at ``FITTED_IF``."""
+    """Scripted stand-in for ``LorentzianPeakModel``: no DB load, an accepted fit at ``FITTED_IF``.
+
+    ``events`` records what the node did with the fit, in order (fit, save, plot), so a test can assert
+    the T1 order and that a rejected fit is never saved or plotted.
+    """
 
     saved: list = []
+    events: list = []
     accepted_result = True
 
     def __init__(self, measurement_id, target=None, path=None, r2_min=0.8, title="Two tone"):
@@ -50,16 +55,17 @@ class FakeLorentzian:
         self.results = {"quality": "fake"}
 
     def fit(self):
+        type(self).events.append("fit")
         return self.results
 
     def plot(self):
-        return None
+        type(self).events.append("plot")
 
     def add_fitted_parameter(self, parameter, value):
         type(self).saved.append((parameter, value))
 
     def save_fitting(self):
-        return None
+        type(self).events.append("save")
 
     @property
     def accepted(self):
@@ -124,6 +130,7 @@ def _patch(monkeypatch):
     monkeypatch.setattr(two_tone_module, "LorentzianPeakModel", FakeLorentzian)
     monkeypatch.setattr(node_module, "save_calibration", lambda calibration, path: None)
     monkeypatch.setattr(FakeLorentzian, "saved", [])
+    monkeypatch.setattr(FakeLorentzian, "events", [])
     monkeypatch.setattr(FakeLorentzian, "accepted_result", True)
     return calls
 
@@ -143,6 +150,7 @@ def test_accepted_fit_writes_the_drive_if_and_keeps_the_lo(monkeypatch):
     assert point.drive.lo == pytest.approx(DRIVE_LO)  # the LO is left untouched
     # drive_if/fit_r2 come from the shared fit's save_fitting; the node records drive_lo alongside them.
     assert (FittedParameter.DRIVE_LO, DRIVE_LO) in FakeLorentzian.saved
+    assert FakeLorentzian.events == ["fit", "save", "plot"]  # fit -> check -> save -> plot
 
 
 def test_rejected_fit_fails_the_target_and_leaves_the_point(monkeypatch):
@@ -156,6 +164,7 @@ def test_rejected_fit_fails_the_target_and_leaves_the_point(monkeypatch):
     assert failed == ["q1"]  # the fit is rejected: the target fails the step, not the run
     point = read_calibration_file(calibration).operating_points["q1"]["sweet_spot"]
     assert point.drive.if_ == pytest.approx(STORED_IF)  # unchanged
+    assert FakeLorentzian.events == ["fit"]  # a rejected fit is never saved or plotted
 
 
 def test_drive_if_sweep_is_centred_on_the_window_minus_the_lo(monkeypatch):

@@ -90,7 +90,10 @@ class TwoToneNode(TwoToneSaturationNode[TwoToneSweetSpot]):
         return np.linspace(start, stop, num=npoints, endpoint=True) - drive_lo
 
     def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[TwoToneSweetSpot]:
-        """Fit the sweep, save ``drive_if``/``drive_lo``/``fit_r2`` to the DB, return the drive IF; read-only.
+        """Fit the sweep, check it, save ``drive_if``/``drive_lo``/``fit_r2``, plot, and return the drive IF; read-only.
+
+        Fit, then the acceptance check, then save, then plot: a rejected fit never reaches the DB (a reader
+        would otherwise see a plausible ``drive_if`` for a step the run marked failed), as for T1 (QHC-1803).
 
         Raises:
             AnalysisError: when the Lorentzian fit is rejected (the step fails for this target).
@@ -104,12 +107,12 @@ class TwoToneNode(TwoToneSaturationNode[TwoToneSweetSpot]):
             title="Two tone (sweet spot)",
         )
         model.fit()
-        plot = model.plot()
+        if not model.accepted or model.fitted_if is None:
+            raise AnalysisError(f"{target}: two-tone fit rejected: {model.results['quality']}")
         # The shared fit writes drive_if and fit_r2; the placed LO is recorded alongside them (QHC-1497).
         model.add_fitted_parameter(FittedParameter.DRIVE_LO, point.drive.lo)
         model.save_fitting()
-        if not model.accepted or model.fitted_if is None:
-            raise AnalysisError(f"{target}: two-tone fit rejected: {model.results['quality']}")
+        plot = model.plot()
         return AnalysisResult(fitted=TwoToneSweetSpot(drive_if=model.fitted_if), plots=(plot,) if plot else ())
 
     def apply(self, target: Target, result: AnalysisResult[TwoToneSweetSpot]) -> None:
