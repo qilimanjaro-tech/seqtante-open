@@ -29,6 +29,7 @@ the restore handle (ADR-0006).
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
@@ -58,7 +59,13 @@ DEFAULT_MIN_R2 = 0.8
 #: The node's ``defaults``; every one is overridable in the tree. ``elapsed_sweep``, ``averages`` and
 #: ``relax_duration`` have no default, and the drive instrument decides which of ``drive_power``
 #: (Rohde & Schwarz, dBm) or ``drive_gain`` (QCM-RF, [-1, 1]) the step must set.
-T2_DEFAULTS: Mapping[str, Any] = {"readout_ringup_time": 0, "min_r2": DEFAULT_MIN_R2}
+T2_DEFAULTS: Mapping[str, Any] = {
+    "readout_ringup_time": 0,
+    "min_r2": DEFAULT_MIN_R2,
+    # Maximum relative uncertainty (sigma_T2 / T2): catches a fit that clears R² but whose dephasing time
+    # is ill-determined, and the ``inf`` uncertainty ``curve_fit`` returns when it cannot estimate the covariance.
+    "max_rel_uncertainty": 0.5,
+}
 
 
 class T2Node(FixedFluxNode[None]):
@@ -94,7 +101,7 @@ class T2Node(FixedFluxNode[None]):
         operating_point_name = section.operating_point
         drive_bus = bus_alias(target, Role.drive)
         readout_bus = bus_alias(target, Role.readout)
-        idle_sweep = np.linspace(*self._param(target, "elapsed_sweep")).astype(int)
+        idle_sweep = np.rint(np.linspace(*self._param(target, "elapsed_sweep"))).astype(int)
 
         qprogram = t2_ramsey(
             calibration=self.context.calibration,
@@ -133,22 +140,39 @@ class T2Node(FixedFluxNode[None]):
         return measurement_id(stream_array)
 
     def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[None]:
-        """Fit the oscillation, save ``t2``/``fit_r2`` to the DB, and report T2 and its uncertainty in us; read-only.
+        """Fit the oscillation, check it, save ``t2``/``fit_r2``, plot, and report T2 and its uncertainty in us; read-only.
+
+        Fit, then every acceptance check, then save, then plot: a rejected fit never reaches the DB (a
+        reader would otherwise see a plausible ``t2`` for a step the run marked failed), as for T1.
 
         Raises:
-            AnalysisError: when the fit's R² is below the step's minimum (the target fails the step).
+            AnalysisError: when the fit is not a physical decay (``d <= 0``), its R² is below the step's
+                minimum or undefined (a flat trace), or its relative uncertainty exceeds the step's
+                maximum. The target then fails the step.
         """
+        # The graph sets data_folder to <data_root>/<step>/<target>; None shows the plot instead of saving it.
         model = T2Fit(
             target=str(target), measurement_id=measurements[-1], path=self.parameters[target].get("data_folder")
         )
         model.fit()
-        plot = model.plot()
-        model.save_fitting()
+
+        if not model.is_physical_decay:
+            raise AnalysisError(f"{target} T2 fit is not a decay (d {model.decay:.3e} <= 0); T2 is not physical")
 
         min_r2 = self._param(target, "min_r2")
-        if model.r_squared < min_r2:
+        # A flat trace leaves R² NaN; reject it explicitly, since every comparison with NaN is False.
+        if math.isnan(model.r_squared) or model.r_squared < min_r2:
             raise AnalysisError(f"{target} T2 fit R² {model.r_squared:.3f} is below the minimum {min_r2}")
 
+        max_rel_uncertainty = self._param(target, "max_rel_uncertainty")
+        relative_uncertainty = model.relative_uncertainty
+        if not math.isfinite(relative_uncertainty) or relative_uncertainty > max_rel_uncertainty:
+            raise AnalysisError(
+                f"{target} T2 relative uncertainty {relative_uncertainty:.3f} exceeds the maximum {max_rel_uncertainty}"
+            )
+
+        model.save_fitting()
+        plot = model.plot()
         return AnalysisResult(value=model.t2_us, uncertainty=model.t2_uncertainty_us, plots=(plot,) if plot else ())
 
     def apply(self, target: Target, result: AnalysisResult[None]) -> None:

@@ -39,6 +39,7 @@ class T2Fit(FittingClass):
 
     results: np.ndarray | None
     #: Set by :meth:`fit`; left unset until then so a missing fit is an error, not a silent default.
+    decay: float
     T2: float
     t2_uncertainty: float
     r_squared: float
@@ -69,7 +70,13 @@ class T2Fit(FittingClass):
         return amplitude, frequency, 0.0, decay, offset
 
     def fit(self):
-        """Fit the damped cosine, then record T2 (ns), its uncertainty (ns) and the fit R²."""
+        """Fit the damped cosine, then record the decay, T2 (ns), its uncertainty (ns) and the fit R².
+
+        ``T2 = d`` is physical only for a decaying envelope (``d > 0``). The raw ``d`` is always recorded,
+        but T2 and its uncertainty are left non-finite when ``d <= 0`` (a growing or flat envelope):
+        :attr:`is_physical_decay` then reports the failure so ``analyze`` fails the target instead of
+        scoring a non-physical value, as for T1 (QHC-1803).
+        """
         self.results, pcov = sp.curve_fit(
             self.sinus_exp,
             self.wait_values,
@@ -77,12 +84,36 @@ class T2Fit(FittingClass):
             p0=self._initial_guess(),
             maxfev=10_000,
         )
-        self.T2 = abs(float(self.results[3]))
-        self.t2_uncertainty = float(np.sqrt(pcov[3, 3]))
+        decay = float(self.results[3])
+        self.decay = decay
+        if decay > 0.0:
+            self.T2 = decay
+            self.t2_uncertainty = float(np.sqrt(pcov[3, 3]))
+        else:
+            # A growing or flat envelope has no physical T2; flag it rather than reporting |d|.
+            self.T2 = float("nan")
+            self.t2_uncertainty = float("nan")
         model = self.sinus_exp(self.wait_values, *self.results)
         ss_res = float(np.sum((self.arr - model) ** 2))
         ss_tot = float(np.sum((self.arr - np.mean(self.arr)) ** 2))
-        self.r_squared = 1.0 - ss_res / ss_tot
+        # A flat trace (drive off, readout saturated) has no variance to explain: R² is undefined, not a crash.
+        self.r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+
+    @property
+    def is_physical_decay(self) -> bool:
+        """Whether the envelope decays (``d > 0``), so ``T2 = d`` is positive and finite."""
+        self._require_fit()
+        return self.decay > 0.0
+
+    @property
+    def relative_uncertainty(self) -> float:
+        """The standard uncertainty on T2 as a fraction of T2 (unit-independent, so us or ns give the same).
+
+        Non-finite when ``curve_fit`` could not estimate the covariance (``inf``) or the fit is
+        non-physical (``nan``); ``analyze`` rejects both.
+        """
+        self._require_fit()
+        return abs(self.t2_uncertainty / self.T2)
 
     @property
     def t2_us(self) -> float:

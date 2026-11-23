@@ -9,6 +9,7 @@ benchmark result.
 """
 
 from types import SimpleNamespace
+from typing import ClassVar
 
 import numpy as np
 import pytest
@@ -63,26 +64,52 @@ THRESHOLDS = {
 
 
 class FakeT2Fit:
-    """Scripted stand-in for ``T2Fit``: no DB load, an accepted fit at ``T2_US`` ± ``T2_SIGMA_US``."""
+    """Scripted stand-in for ``T2Fit``: no DB load, an accepted decay at ``T2_US`` ± ``T2_SIGMA_US``.
+
+    The class-level knobs (``r2``, ``physical``, ``rel_unc``) let a test script an accepted or a rejected
+    fit, and ``save_calls`` counts how often ``save_fitting`` ran, so a test can assert a rejected fit is
+    never saved.
+    """
 
     r2 = 0.99
+    physical = True
+    rel_unc = 0.03
+    save_calls = 0
+    #: What the node did with the fit, in order (fit, save, plot), and the plot path it was built with.
+    events: ClassVar[list[str]] = []
+    path_seen: str | None = None
 
     def __init__(self, target=None, measurement_id=None, path=None):
         self.target = target
         self.id = measurement_id
+        type(self).path_seen = path
 
     def fit(self):
-        return None
+        type(self).events.append("fit")
 
     def plot(self):
-        return None
+        type(self).events.append("plot")
 
     def save_fitting(self):
-        return None
+        type(self).save_calls += 1
+        type(self).events.append("save")
 
     @property
     def r_squared(self):
         return type(self).r2
+
+    @property
+    def is_physical_decay(self):
+        return type(self).physical
+
+    @property
+    def decay(self):
+        # Positive for a decaying envelope; a negative one is the non-physical case the node must reject.
+        return 18_000.0 if type(self).physical else -18_000.0
+
+    @property
+    def relative_uncertainty(self):
+        return type(self).rel_unc
 
     @property
     def t2_us(self):
@@ -115,12 +142,13 @@ def _calibration() -> Calibration:
     return calibration
 
 
-def _make(calibration: Calibration, thresholds) -> tuple[T2Node, FakePlatform]:
+def _make(calibration: Calibration, thresholds, **params) -> tuple[T2Node, FakePlatform]:
+    parameters = {**PARAMS, **params}
     # One readout result per unrolled idle point.
-    platform = FakePlatform(readout_points=len(np.linspace(*ELAPSED_SWEEP)))
+    platform = FakePlatform(readout_points=len(np.linspace(*parameters["elapsed_sweep"])))
     context = build_context(calibration, platform)
     node = T2Node(
-        name="t2_sweet_spot", idx=0, targets=[Q1], parameters={Q1: dict(PARAMS)}, context=context, thresholds=thresholds
+        name="t2_sweet_spot", idx=0, targets=[Q1], parameters={Q1: parameters}, context=context, thresholds=thresholds
     )
     return node, platform
 
@@ -138,7 +166,13 @@ def _patch(monkeypatch) -> dict:
     monkeypatch.setattr(FakeStreamArray, "measurement_id", MEAS_ID)
     monkeypatch.setattr(t2_module, "T2Fit", FakeT2Fit)
     stub_output_and_save(monkeypatch)
+    # Reset the fit knobs to an accepted decay; each test flips the one it exercises.
     monkeypatch.setattr(FakeT2Fit, "r2", 0.99)
+    monkeypatch.setattr(FakeT2Fit, "physical", True)
+    monkeypatch.setattr(FakeT2Fit, "rel_unc", 0.03)
+    monkeypatch.setattr(FakeT2Fit, "save_calls", 0)
+    monkeypatch.setattr(FakeT2Fit, "events", [])
+    monkeypatch.setattr(FakeT2Fit, "path_seen", None)
     return built
 
 
@@ -156,7 +190,7 @@ def test_builds_the_qili_sweep_at_the_point_sets_the_hardware_and_scores_the_ben
     assert built["calibration"] is calibration
     assert built["averages"] == 1000
     assert built["relax_duration"] == 50_000
-    np.testing.assert_array_equal(built["idle_duration_sweep"], np.linspace(*ELAPSED_SWEEP).astype(int))
+    np.testing.assert_array_equal(built["idle_duration_sweep"], np.rint(np.linspace(*ELAPSED_SWEEP)).astype(int))
     # The node set the operating point's hardware itself (snapshotted before the run restored it):
     # drive/readout LOs, readout attenuation, drive power, and the R&S IQ modulation and RF output.
     snap = platform.values_at_execute
@@ -172,6 +206,8 @@ def test_builds_the_qili_sweep_at_the_point_sets_the_hardware_and_scores_the_ben
     assert result.value == pytest.approx(T2_US)
     assert result.uncertainty == pytest.approx(T2_SIGMA_US)
     assert result.verdict is Verdict.passed
+    # Fit, then the checks, then save, then plot: only an accepted fit reaches the DB.
+    assert FakeT2Fit.events == ["fit", "save", "plot"]
 
 
 def test_low_r2_fails_the_target_and_records_no_benchmark(monkeypatch):
@@ -184,3 +220,45 @@ def test_low_r2_fails_the_target_and_records_no_benchmark(monkeypatch):
 
     assert failed == ["q1"]  # the fit is rejected: the target fails the step
     assert node.benchmark_results == ()
+    assert FakeT2Fit.save_calls == 0  # a rejected fit is never written to the DB
+
+
+@pytest.mark.parametrize(
+    ("knob", "value"),
+    [
+        ("physical", False),  # d <= 0: a growing envelope has no T2
+        ("r2", float("nan")),  # a flat trace: no variance to explain
+        ("rel_unc", 2.0),  # sigma_T2 twice T2: above the default maximum
+        ("rel_unc", float("inf")),  # curve_fit could not estimate the covariance
+    ],
+)
+def test_a_rejected_fit_fails_the_target_and_is_not_saved(monkeypatch, knob, value):
+    _patch(monkeypatch)
+    monkeypatch.setattr(FakeT2Fit, knob, value)
+    node, _ = _make(_calibration(), THRESHOLDS)
+
+    failed = node.run({})
+
+    assert failed == ["q1"]
+    assert node.benchmark_results == ()
+    assert FakeT2Fit.save_calls == 0
+    assert FakeT2Fit.events == ["fit"]  # nothing is saved or plotted for a rejected fit
+
+
+def test_idle_durations_are_rounded_not_truncated(monkeypatch):
+    built = _patch(monkeypatch)
+    node, _ = _make(_calibration(), THRESHOLDS, elapsed_sweep=(0, 1000, 7))
+
+    node.run({})
+
+    # 166.67 and 666.67 round to what t2_ramsey plays (167, 667), not truncate to 166/666.
+    np.testing.assert_array_equal(built["idle_duration_sweep"], [0, 167, 333, 500, 667, 833, 1000])
+
+
+def test_the_fit_plots_into_the_step_data_folder(monkeypatch, tmp_path):
+    _patch(monkeypatch)
+    node, _ = _make(_calibration(), THRESHOLDS, data_folder=str(tmp_path))  # the graph sets <data_root>/<step>/<target>
+
+    node.run({})
+
+    assert FakeT2Fit.path_seen == str(tmp_path)

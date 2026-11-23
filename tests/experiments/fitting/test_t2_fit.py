@@ -71,3 +71,32 @@ class TestT2Fit(FittingTestCase):
         assert recorded[FittedParameter.T2] == pytest.approx(T2_NS / 1000, rel=0.05)
         assert recorded[FittedParameter.FIT_R2] == pytest.approx(1.0, abs=0.05)
         assert recorded["saved"] is True
+
+    def test_flat_trace_leaves_r_squared_undefined(self, fit_obj, monkeypatch):
+        """A flat trace (drive off, readout saturated) has no variance: R² is ``nan``, not a ZeroDivisionError.
+
+        The node rejects a ``nan`` R². The trace and ``curve_fit`` are stubbed so the branch is tested
+        without depending on the optimiser.
+        """
+        from seqtante_open.experiments.fitting import t2_fit as t2_fit_module
+
+        monkeypatch.setattr(fit_obj, "arr", np.ones(len(fit_obj.arr)))
+        monkeypatch.setattr(
+            t2_fit_module.sp, "curve_fit", lambda *args, **kwargs: (np.array([0.0, 1e-4, 0.0, 1e4, 1.0]), np.eye(5))
+        )
+        fit_obj.fit()
+
+        assert np.isnan(fit_obj.r_squared)
+
+    def test_a_growing_envelope_is_not_a_physical_decay(self, fit_obj, monkeypatch):
+        """``d <= 0`` is a growing envelope: T2 and its uncertainty are left ``nan`` instead of reporting ``|d|``."""
+        from seqtante_open.experiments.fitting import t2_fit as t2_fit_module
+
+        monkeypatch.setattr(
+            t2_fit_module.sp, "curve_fit", lambda *args, **kwargs: (np.array([0.1, 1e-4, 0.0, -1e4, 0.0]), np.eye(5))
+        )
+        fit_obj.fit()
+
+        assert not fit_obj.is_physical_decay
+        assert np.isnan(fit_obj.T2)
+        assert np.isnan(fit_obj.relative_uncertainty)

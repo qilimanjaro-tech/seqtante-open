@@ -34,6 +34,11 @@ defaults:
     drive_power: -20  # dBm, for a Rohde & Schwarz drive source; a QCM-RF drive takes drive_gain in [-1, 1]
     relax_duration: 500000
     averages: 2000
+  t2:
+    elapsed_sweep: [0, 60000, 61]
+    drive_power: -20  # dBm, for a Rohde & Schwarz drive source; a QCM-RF drive takes drive_gain in [-1, 1]
+    relax_duration: 500000
+    averages: 2000
 
 pipelines:
   sweet_spot:
