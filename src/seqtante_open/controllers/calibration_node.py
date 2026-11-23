@@ -605,10 +605,11 @@ class FixedFluxNode(CalibrationNode[ResultT]):
 class FluxSweepNode(CalibrationNode[ResultT]):
     """A node that sweeps a flux loop across the operating point (ADR-0004).
 
-    The home for the code the per-loop flux-sweep experiments share (``two_tone_vs_flux``, and
-    ``offset_calibration`` after December), including the coupler-to-readout-qubit mapping. It lands
-    with task 7; the node moves flux itself rather than being pinned to one operating point, so the
-    spine opts out of the automatic placement.
+    The home for the code the per-loop flux-sweep experiments share (``two_tone_vs_flux``, QHC-1804,
+    and ``offset_calibration`` after December). The node moves flux itself rather than being pinned to
+    one operating point, so the spine opts out of the automatic placement; ``two_tone_vs_flux`` places
+    the point right before its sweep, so the unswept loop and the parked neighbours hold their biases.
+    The coupler-to-readout-qubit mapping lands with the first node that measures a coupler.
     """
 
     applies_operating_point: ClassVar[bool] = False

@@ -74,7 +74,6 @@ class TestFluxoniumTwoToneFluxModel(FittingTestCase):
     INIT = {"measurement_id": 1, "target": "q1"}
     EXPECTED = {
         "center": pytest.approx(SWEET_SPOT, abs=CENTER_TOLERANCE),
-        "offset": pytest.approx(-SWEET_SPOT, abs=CENTER_TOLERANCE),
         "r_squared": lambda r_squared: r_squared > 0.99,
     }
 
@@ -88,3 +87,26 @@ class TestFluxoniumTwoToneFluxModel(FittingTestCase):
         """Each row's fitted IF lands on the qubit peak that row was built around."""
         expected = -5.0e6 + CURVATURE * (fitted.fluxes - SWEET_SPOT) ** 2
         np.testing.assert_allclose(fitted.fitted_if, expected, atol=2 * FREQUENCY_STEP)
+
+    @pytest.mark.parametrize("loop", ["z", "x"])
+    def test_save_fitting(self, fit_obj, monkeypatch, loop):
+        """``save_fitting`` records the vertex as ``sweet_spot_flux_<loop>`` and ``fit_r2``, then writes them."""
+        from seqtante_open.outputs import FittedParameter
+
+        fit_obj.fit()
+        recorded: dict = {}
+        monkeypatch.setattr(
+            fit_obj, "add_fitted_parameter", lambda parameter, value: recorded.__setitem__(parameter, value)
+        )
+        monkeypatch.setattr(fit_obj, "save_fitting_to_database", lambda: recorded.__setitem__("saved", True))
+
+        fit_obj.save_fitting(loop)
+
+        assert recorded[FittedParameter(f"sweet_spot_flux_{loop}")] == pytest.approx(SWEET_SPOT, abs=CENTER_TOLERANCE)
+        assert recorded[FittedParameter.FIT_R2] > 0.99
+        assert recorded["saved"] is True
+
+    def test_save_fitting_refuses_an_unfitted_model(self, fit_obj):
+        """With no sweet spot found there is nothing to store, so it raises instead of writing a stale value."""
+        with pytest.raises(RuntimeError, match="No sweet spot fitted"):
+            fit_obj.save_fitting("z")

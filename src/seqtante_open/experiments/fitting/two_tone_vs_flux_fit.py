@@ -29,13 +29,13 @@ class FluxoniumTwoToneFluxModel(FittingClass):
 
     Rotates the IQ plane of every flux row onto its signal quadrature, fits a Lorentzian to
     each to get the qubit IF at that flux, then fits a parabola through those IFs. The
-    parabola's vertex is the flux sweet spot (:attr:`center`); :attr:`offset` is ``-center``,
-    the bias correction that moves the sweet spot to zero flux. :meth:`plot` renders the
-    rotated map with the per-flux fits, the parabola and the sweet spot.
+    parabola's vertex is the flux sweet spot (:attr:`center`), in the units of the swept flux:
+    the measured bias the sweet-spot operating point stores (ADR-0011). :meth:`plot` renders
+    the rotated map with the per-flux fits, the parabola and the sweet spot.
 
     Rows whose Lorentzian never reaches ``r² >= 0.9`` are dropped, and the parabola is only
     fitted when at least three rows survive and its vertex falls inside the swept range;
-    otherwise :attr:`fitted` stays ``False`` and callers must not use :attr:`offset`.
+    otherwise :attr:`fitted` stays ``False`` and callers must not use :attr:`center`.
 
     Args:
         measurement_id: Autocalibration database id of the sweep to load.
@@ -48,7 +48,6 @@ class FluxoniumTwoToneFluxModel(FittingClass):
     """
 
     center: float
-    offset: float
     r_squared: float
     coefficients: np.ndarray
 
@@ -104,11 +103,27 @@ class FluxoniumTwoToneFluxModel(FittingClass):
         self.coefficients = coefficients
         self.r_squared = float(1 - residuals @ residuals / (spread @ spread)) if spread.any() else 0.0
         self.center = float(center)
-        self.offset = -self.center
         self.fitted = True
 
-    def plot(self):
-        """Plot the rotated map with the per-flux fits, the parabola and the sweet spot."""
+    def save_fitting(self, loop: str) -> None:
+        """Write the sweet-spot bias on ``loop`` and the parabola R² to the measurement entry (QHC-1497).
+
+        Args:
+            loop (str): The swept flux loop, ``"z"`` or ``"x"``; it names the stored parameter.
+
+        Raises:
+            RuntimeError: if the fit found no sweet spot (:attr:`fitted` is ``False``).
+        """
+        from seqtante_open.outputs import FittedParameter
+
+        if not self.fitted:
+            raise RuntimeError("No sweet spot fitted; call fit() and check `fitted` first.")
+        self.add_fitted_parameter(FittedParameter(f"sweet_spot_flux_{loop}"), self.center)
+        self.add_fitted_parameter(FittedParameter.FIT_R2, self.r_squared)
+        self.save_fitting_to_database()
+
+    def plot(self) -> str | None:
+        """Plot the rotated map with the per-flux fits, the parabola and the sweet spot; return the file path."""
         title = f"Two Tone vs Flux \n {self.target} {self.flux_bus}"
         lo = self.lo if self.lo is not None else self._drive_lo()
         frequencies_ghz = (self.frequencies + lo) * 1e-9
@@ -141,7 +156,7 @@ class FluxoniumTwoToneFluxModel(FittingClass):
             fig.add_hline(
                 y=self.center,
                 line={"color": "darkorange", "dash": "dot", "width": 3},
-                annotation_text=f"Sweet spot = {self.center:.4f}, offset = {self.offset:.4f}",
+                annotation_text=f"Sweet spot = {self.center:.4f}",
             )
 
         fig.update_xaxes(title_text="Qubit Frequency (GHz)")
@@ -159,4 +174,4 @@ class FluxoniumTwoToneFluxModel(FittingClass):
             showlegend=True,
         )
 
-        self.save_plot(fig, title)
+        return self.save_plot(fig, title)
