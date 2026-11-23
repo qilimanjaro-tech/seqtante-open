@@ -32,7 +32,7 @@ calibration file (ADR-0001). The Lorentzian fit is shared with ``reset_point_sea
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
