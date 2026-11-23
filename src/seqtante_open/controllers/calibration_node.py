@@ -34,21 +34,30 @@ are not registered; they hold the code the two experiment shapes share as the no
 """
 
 import copy
+import math
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar, Generic, Protocol, TypeVar, runtime_checkable
 
 from loguru import logger
-from qililab import Platform
+from qililab import Parameter, Platform
 from qililab.qprogram.calibration import Calibration
+from qililab.typings import ParameterValue
 
+from seqtante_open.calibration.bus_alias import Role, bus_alias
 from seqtante_open.calibration.io import read_calibration_file, save_calibration, write_calibration_file
 from seqtante_open.calibration.model import CalibrationFile
 from seqtante_open.controllers.crosstalk_session import CrosstalkSession, crosstalk_session
+from seqtante_open.controllers.drive_source import drive_source_writes
 from seqtante_open.controllers.node_registry import BenchmarkSpec, Parallel, experiment_spec, register_node
-from seqtante_open.controllers.operating_point import apply_operating_point, operating_point_flux_writes
+from seqtante_open.controllers.operating_point import (
+    apply_operating_point,
+    operating_point_flux_writes,
+    operating_point_for,
+)
 from seqtante_open.controllers.parameter_restore import ParameterRestore, restoring_parameters
-from seqtante_open.controllers.verdicts import BenchmarkResult
+from seqtante_open.controllers.verdicts import AnalysisError, BenchmarkResult, BenchmarkThresholds, verdict_for
 from seqtante_open.targets import Target
 
 #: The node-specific fitted payload an ``analyze`` hands its ``apply`` (a frequency, a pi amplitude,
@@ -85,13 +94,16 @@ class AnalysisResult(Generic[ResultT]):
         fitted (ResultT | None): The values ``apply`` writes into the calibration file -- a fitted
             frequency, a pi amplitude, a reset flux, readout levels. Its shape is the node's own; the
             base passes it from ``analyze`` to ``apply`` untouched. A pure benchmark leaves it ``None``.
-        benchmark (BenchmarkResult | None): The scored result a benchmark reports to the run and the
-            report (ADR-0002); ``None`` for a recalibration.
+        value (float | None): A benchmark's measured value, in the benchmark's unit. The run scores it
+            against the tree's thresholds with :func:`~seqtante_open.controllers.verdicts.verdict_for`
+            (QHC-1848), so ``analyze`` reports the value and never the verdict. ``None`` for a recalibration.
+        uncertainty (float | None): The standard uncertainty on ``value`` where the analysis gives one.
         plots (tuple[str, ...]): Paths to the fit plots the report shows per target (ADR-0002).
     """
 
     fitted: ResultT | None = None
-    benchmark: BenchmarkResult | None = None
+    value: float | None = None
+    uncertainty: float | None = None
     plots: tuple[str, ...] = ()
 
 
@@ -132,6 +144,8 @@ class CalibrationNode(ABC, Generic[ResultT]):
             ADR-0002), or ``None`` for a recalibration. Registered into the experiment's
             :class:`~seqtante_open.controllers.node_registry.ExperimentSpec` and consumed by the
             threshold parsing and the verdict logic.
+        defaults (Mapping[str, Any]): The values :meth:`_param` falls back to for a step parameter the
+            tree leaves unset; a key with no default is required. Default: none.
     """
 
     experiment: ClassVar[str | None] = None
@@ -139,6 +153,7 @@ class CalibrationNode(ABC, Generic[ResultT]):
     applies_operating_point: ClassVar[bool] = True
     parallel: ClassVar[Parallel] = Parallel.forbidden
     benchmark: ClassVar[BenchmarkSpec | None] = None
+    defaults: ClassVar[Mapping[str, Any]] = {}
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -158,6 +173,7 @@ class CalibrationNode(ABC, Generic[ResultT]):
         targets: list[Target],
         parameters: dict[Target, dict[str, Any]],
         context: RunContext,
+        thresholds: dict[Target, BenchmarkThresholds] | None = None,
     ) -> None:
         """Build one runnable step.
 
@@ -167,12 +183,17 @@ class CalibrationNode(ABC, Generic[ResultT]):
             targets (list[Target]): The targets the step runs on.
             parameters (dict[Target, dict[str, Any]]): Resolved parameters per target (ADR-0005).
             context (RunContext): The run's platform and calibration file.
+            thresholds (dict[Target, BenchmarkThresholds] | None): The benchmark's Passed/Warning
+                thresholds per target, parsed into the node's unit (QHC-1848). ``None`` or empty for a
+                recalibration, or a benchmark target the tree sets no thresholds for. Kept apart from
+                ``parameters`` so acceptance policy is not mixed into the experiment parameters.
         """
         self.name = name
         self.idx = idx
         self.targets = targets
         self.parameters = parameters
         self.context = context
+        self._thresholds: dict[Target, BenchmarkThresholds] = thresholds or {}
         self.benchmark_results: tuple[BenchmarkResult, ...] = ()
         self._file: CalibrationFile | None = None
         self._restore: ParameterRestore | None = None
@@ -211,6 +232,78 @@ class CalibrationNode(ABC, Generic[ResultT]):
         if self._crosstalk is None:
             raise RuntimeError("the crosstalk session is only available while the node is running")
         return self._crosstalk
+
+    def _param(self, target: Target, key: str) -> Any:
+        """The step's ``key`` for ``target``, else the node's :attr:`defaults` entry for it.
+
+        Raises:
+            KeyError: if the step sets no ``key`` for ``target`` and the node has no default for it.
+        """
+        params = self.parameters[target]
+        if key in params:
+            return params[key]
+        if key in self.defaults:
+            return self.defaults[key]
+        raise KeyError(f"step '{self.name}': {target} sets no '{key}' and {type(self).__name__} has no default for it")
+
+    def _drive_source_writes(self, target: Target) -> list[tuple[Parameter, ParameterValue]]:
+        """The writes that arm ``target``'s drive source, its level read from the step or :attr:`defaults`.
+
+        ``drive_power`` (Rohde & Schwarz, dBm) or ``drive_gain`` (QCM-RF, [-1, 1]), whichever the drive
+        bus's instrument takes (:func:`~seqtante_open.controllers.drive_source.drive_source_writes`).
+
+        Raises:
+            ValueError: if the drive instrument's level is neither set in the step nor defaulted.
+        """
+        params = self.parameters[target]
+        return drive_source_writes(
+            self.context.platform,
+            bus_alias(target, Role.drive),
+            drive_power=params.get("drive_power", self.defaults.get("drive_power")),
+            drive_gain=params.get("drive_gain", self.defaults.get("drive_gain")),
+        )
+
+    def _set_drive_source(self, target: Target) -> None:
+        """Arm ``target``'s drive source through the restore handle; any node can, with no operating point.
+
+        Raises:
+            ValueError: if the drive instrument's level is neither set in the step nor defaulted.
+        """
+        drive_bus = bus_alias(target, Role.drive)
+        for parameter, value in self._drive_source_writes(target):
+            self.restore.set(drive_bus, parameter, value)
+
+    def _set_operating_point_hardware(self, target: Target) -> None:
+        """Set ``target``'s line at its operating point, then arm its drive, through the restore handle (ADR-0006).
+
+        The QProgram sets the IFs and plays the pulses; this sets what it does not: the drive and readout
+        LOs and the readout attenuation from the operating point, then the drive source
+        (:meth:`_set_drive_source`). Every write goes through :attr:`restore`, so ``run`` puts the line
+        back as it was after each target and nothing leaks into the next node. The drive level is
+        checked before the first write, so a missing one leaves the line untouched.
+
+        Raises:
+            TypeError: if called on a node that sets no ``experiment`` (a spine, not a leaf).
+            ValueError: if the readout attenuation is not a whole number of dB, or the drive instrument's
+                level is neither set in the step nor defaulted.
+        """
+        experiment = self.experiment
+        if experiment is None:
+            raise TypeError(f"{type(self).__name__} sets no experiment; only a leaf node can set its hardware")
+        point = operating_point_for(self.calibration_file, experiment, target)
+        attenuation = point.readout.attenuation
+        if not float(attenuation).is_integer():
+            raise ValueError(f"{target}: readout attenuation {attenuation} dB is not a whole number of dB")
+        drive_writes = self._drive_source_writes(target)
+        drive_bus = bus_alias(target, Role.drive)
+        readout_bus = bus_alias(target, Role.readout)
+
+        restore = self.restore
+        restore.set(drive_bus, Parameter.LO_FREQUENCY, round(point.drive.lo))
+        restore.set(readout_bus, Parameter.LO_FREQUENCY, round(point.readout.lo))
+        restore.set(readout_bus, Parameter.OUT0_ATT, int(attenuation))
+        for parameter, value in drive_writes:
+            restore.set(drive_bus, parameter, value)
 
     def run(self, dead_targets: dict[str, str]) -> list[str]:
         """Run the three phases for every live target and return the ones that failed (ADR-0006).
@@ -388,9 +481,72 @@ class CalibrationNode(ABC, Generic[ResultT]):
             failed.append(str(target))
             return False
 
-        if result.benchmark is not None:
-            benchmarks.append(result.benchmark)
+        if self.is_benchmark:
+            # Scoring runs inside this per-target guard so a non-finite value or a scoring error
+            # fails only this target (D17), rather than escaping to the group-level handler.
+            try:
+                scored = self._score(target, result)
+            except Exception:  # ruff: ignore[blind-except] -- a bad benchmark value fails only this target (D17)
+                logger.opt(exception=True).warning(
+                    "Node <i>{node}</i>: scoring <r>{target}</r> failed", node=self.name, target=str(target)
+                )
+                failed.append(str(target))
+                return False
+            if scored is not None:
+                benchmarks.append(scored)
         return True
+
+    def _score(self, target: Target, result: AnalysisResult[ResultT]) -> BenchmarkResult | None:
+        """Score one benchmark target's measured value against its thresholds (QHC-1848, ADR-0002, D17).
+
+        Returns the :class:`~seqtante_open.controllers.verdicts.BenchmarkResult`, or ``None`` when the
+        benchmark cannot be scored -- no measured value or no thresholds -- which is logged and left
+        unscored (a proper "not evaluated" verdict is a QHC-1848 follow-up). Raises
+        :class:`~seqtante_open.controllers.verdicts.AnalysisError` when the value is non-finite or the
+        thresholds do not match the benchmark's unit/direction, so the target fails the step.
+        """
+        thresholds = self._thresholds_for(target)
+        if result.value is None or thresholds is None:
+            logger.warning(
+                "Node <i>{node}</i>: <r>{target}</r> has no {missing}; benchmark left unscored",
+                node=self.name,
+                target=str(target),
+                missing="measured value" if result.value is None else "thresholds",
+            )
+            return None
+        if not math.isfinite(result.value):
+            raise AnalysisError(f"{target}: benchmark value {result.value} is not finite")
+        self._check_scoring_units(thresholds)
+        return BenchmarkResult(
+            target=str(target),
+            value=result.value,
+            uncertainty=result.uncertainty,
+            verdict=verdict_for(result.value, thresholds),
+            thresholds=thresholds,
+        )
+
+    def _check_scoring_units(self, thresholds: BenchmarkThresholds) -> None:
+        """Guard that ``thresholds`` were parsed in the benchmark's own unit and direction (QHC-1848).
+
+        The parser converts the tree's thresholds with whichever :class:`BenchmarkSpec` the experiment
+        declared then; this checks that spec still matches at scoring time, so a value in one unit is
+        never scored against thresholds in another (which would score a good qubit Failed silently).
+        """
+        spec = experiment_spec(self.experiment) if self.experiment is not None else None
+        benchmark = spec.benchmark if spec is not None else None
+        if benchmark is not None and (thresholds.unit != benchmark.unit or thresholds.direction != benchmark.direction):
+            raise AnalysisError(
+                f"thresholds unit/direction ({thresholds.unit}, {thresholds.direction}) do not match "
+                f"the '{self.experiment}' benchmark spec ({benchmark.unit}, {benchmark.direction})"
+            )
+
+    def _thresholds_for(self, target: Target) -> BenchmarkThresholds | None:
+        """The parsed Passed/Warning thresholds for ``target`` (ADR-0002).
+
+        The parser converts the tree's thresholds to the benchmark's unit and the node holds them per
+        target, apart from ``parameters``; :meth:`_score` scores the measured value against them (QHC-1848).
+        """
+        return self._thresholds.get(target)
 
     def _place_operating_point(self, target: Target) -> None:
         experiment = self.experiment
@@ -438,7 +594,9 @@ class FixedFluxNode(CalibrationNode[ResultT]):
     The home for the code the fixed-flux experiments share (``two_tone`` at the sweet spot, ``rabi``,
     ``t1``, ``t2``, ``landau_zener`` and the ``reset_point_search`` loop). It lands as those nodes are
     ported (tasks 6, 8-12); for now the spine fixes :attr:`applies_operating_point` and leaves the
-    three phases to the experiment.
+    three phases to the experiment. The step parameters (:meth:`CalibrationNode._param`), the drive
+    source (:meth:`CalibrationNode._set_drive_source`) and the operating point's LOs and attenuation
+    (:meth:`CalibrationNode._set_operating_point_hardware`) live on the base, since every node uses them.
     """
 
     applies_operating_point: ClassVar[bool] = True
