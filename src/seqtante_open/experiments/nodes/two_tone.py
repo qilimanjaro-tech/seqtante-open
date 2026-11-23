@@ -68,8 +68,8 @@ class TwoToneSweetSpot:
 class TwoToneNode(TwoToneSaturationNode[TwoToneSweetSpot]):
     """One two-tone pulsed-saturation sweep at the sweet spot, fit to a Lorentzian peak (QHC-1805)."""
 
-    experiment: ClassVar[str] = "two_tone"
-    analyses: ClassVar[tuple[str, ...]] = (LORENTZIAN_PEAK,)
+    experiment = "two_tone"
+    analyses = (LORENTZIAN_PEAK,)
     defaults = TWO_TONE_DEFAULTS
 
     def execute_node(self, targets: list[Target]) -> dict[Target, list[int]]:
@@ -78,8 +78,8 @@ class TwoToneNode(TwoToneSaturationNode[TwoToneSweetSpot]):
 
     def _measure(self, target: Target) -> int:
         """Run one two-tone pulsed-saturation sweep at the target's operating point; return its id."""
-        point = operating_point_for(self.calibration_file, self.experiment, target)
-        return self._measure_two_tone_saturation(target, self._drive_if_sweep(target, point.drive.lo))
+        operating_point = operating_point_for(self.calibration_file, self.experiment, target)
+        return self._measure_two_tone_saturation(target, self._drive_if_sweep(target, operating_point.drive.lo))
 
     def _drive_if_sweep(self, target: Target, drive_lo: float) -> np.ndarray:
         """Build the drive-IF sweep (Hz) from the step's absolute-frequency window and the placed LO."""
@@ -98,7 +98,7 @@ class TwoToneNode(TwoToneSaturationNode[TwoToneSweetSpot]):
         Raises:
             AnalysisError: when the Lorentzian fit is rejected (the step fails for this target).
         """
-        point = operating_point_for(self.calibration_file, self.experiment, target)
+        operating_point = operating_point_for(self.calibration_file, self.experiment, target)
         model = LorentzianPeakModel(
             measurements[-1],
             target=str(target),
@@ -110,7 +110,7 @@ class TwoToneNode(TwoToneSaturationNode[TwoToneSweetSpot]):
         if not model.accepted or model.fitted_if is None:
             raise AnalysisError(f"{target}: two-tone fit rejected: {model.results['quality']}")
         # The shared fit writes drive_if and fit_r2; the placed LO is recorded alongside them (QHC-1497).
-        model.add_fitted_parameter(FittedParameter.DRIVE_LO, point.drive.lo)
+        model.add_fitted_parameter(FittedParameter.DRIVE_LO, operating_point.drive.lo)
         model.save_fitting()
         plot = model.plot()
         return AnalysisResult(fitted=TwoToneSweetSpot(drive_if=model.fitted_if), plots=(plot,) if plot else ())
@@ -119,5 +119,5 @@ class TwoToneNode(TwoToneSaturationNode[TwoToneSweetSpot]):
         """Write the fitted drive IF onto the sweet-spot operating point; the only writer (the LO is untouched)."""
         # analyze returns a fitted point or raises, so apply always has one; the guard is just a type narrow.
         if result.fitted is not None:
-            point = operating_point_for(self.calibration_file, self.experiment, target)
-            point.drive.if_ = result.fitted.drive_if
+            operating_point = operating_point_for(self.calibration_file, self.experiment, target)
+            operating_point.drive.if_ = result.fitted.drive_if
