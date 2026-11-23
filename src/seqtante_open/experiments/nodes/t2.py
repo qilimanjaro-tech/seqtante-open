@@ -30,7 +30,7 @@ the restore handle (ADR-0006).
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from qili_qprograms.experiments import t2_ramsey
@@ -75,8 +75,8 @@ class T2Node(FixedFluxNode[None]):
     ``NODE_REGISTRY``; the run reads them to score the reported value against the tree's thresholds.
     """
 
-    experiment: ClassVar[str | None] = "t2"
-    analyses: ClassVar[tuple[str, ...]] = (DECAYING_OSCILLATION,)
+    experiment = "t2"
+    analyses = (DECAYING_OSCILLATION,)
     defaults = T2_DEFAULTS
 
     def execute_node(self, targets: list[Target]) -> dict[Target, list[int]]:
