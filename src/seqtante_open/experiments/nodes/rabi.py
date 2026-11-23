@@ -30,12 +30,11 @@ lives in :class:`~seqtante_open.experiments.fitting.RabiAmplitudeModel` and the 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar
-from warnings import warn
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from qili_qprograms.experiments import rabi_amplitude
-from qililab import IQDrag, Parameter
+from qililab import IQDrag
 from qililab.result import StreamArray
 
 from seqtante_open.calibration.bus_alias import Role, bus_alias
@@ -48,14 +47,12 @@ from seqtante_open.experiments.results import measurement_id
 from seqtante_open.outputs import output_controller
 
 if TYPE_CHECKING:
-    from seqtante_open.controllers.parameter_restore import ParameterRestore
+    from collections.abc import Mapping
+
     from seqtante_open.targets import Target
 
 #: Stream/experiment name the measurement is stored under.
 _EXPERIMENT_NAME = "rabi_amplitude_drag"
-
-#: Warned when the drive bus has no instrument whose power this node knows how to set.
-_NO_DRIVE_INSTRUMENT_MSG = "No instrument to set power to."
 
 #: Analysis names (ADR-0003). The first is the default when a step names none.
 READOUT_LEVELS = "readout_levels"
@@ -64,12 +61,20 @@ PI_AMPLITUDE = "pi_amplitude"
 #: Default minimum R² a ``readout_levels`` fit must reach to pass its step (overridable per step).
 DEFAULT_MIN_R2 = 0.9
 
-#: Default pulse names when a section does not override the role (ADR-0008).
-_DEFAULT_DRIVE_PULSE = "drag"
-_DEFAULT_READOUT_PULSE = "readout"
-
-#: DRAG-shape defaults the pi pulse is built with when no drive waveform exists yet to inherit from.
-_DRIVE_SHAPE_DEFAULTS = {"drive_duration": 40, "drive_sigmas": 4.0, "drive_drag": 0.0}
+#: The node's ``defaults``; every one is overridable in the tree. ``drive_amplitude_sweep``, ``averages``
+#: and ``relax_duration`` have no default, and the drive instrument decides which of ``drive_power``
+#: (Rohde & Schwarz, dBm) or ``drive_gain`` (QCM-RF, [-1, 1]) the step must set.
+RABI_DEFAULTS: Mapping[str, Any] = {
+    "readout_ringup_time": 0,
+    "min_r2": DEFAULT_MIN_R2,
+    # Pulse names when a section does not override the role (ADR-0008).
+    "drive_pulse": "drag",
+    "readout_pulse": "readout",
+    # DRAG shape the pi pulse is built with when no drive waveform exists yet to inherit from.
+    "drive_duration": 40,
+    "drive_n_sigmas": 4.0,
+    "drive_drag": 0.0,
+}
 
 
 @dataclass(frozen=True)
@@ -88,6 +93,7 @@ class RabiNode(FixedFluxNode[RabiFitted]):
 
     experiment: ClassVar[str] = "rabi"
     analyses: ClassVar[tuple[str, ...]] = (PI_AMPLITUDE, READOUT_LEVELS)
+    defaults = RABI_DEFAULTS
 
     def execute_node(self, targets: list[Target]) -> dict[Target, list[int]]:
         """Run the amplitude sweep on each target at its operating point and return its measurement id."""
@@ -98,17 +104,16 @@ class RabiNode(FixedFluxNode[RabiFitted]):
 
         The QProgram is the shared ``qili_qprograms`` experiment: it plays the calibrated ``pi-<op>``
         pulse (normalised to unit amplitude) through a gain sweep and reads the ``readout-<op>`` pulse,
-        all from the calibration file. This node sets what the QProgram does not -- the drive/readout
-        LOs, the readout attenuation and the drive power/RF -- from the operating point, through the
-        restore handle so the run undoes them (ADR-0006).
+        all from the calibration file. What it does not set -- the drive/readout LOs, the readout
+        attenuation and the drive source -- the shared
+        :meth:`~seqtante_open.controllers.calibration_node.CalibrationNode._set_operating_point_hardware`
+        sets from the operating point, through the restore handle so the run undoes it (ADR-0006).
         """
-        params = self.parameters[target]
         section = self.calibration_file.experiments[self.experiment][str(target)]
         operating_point_name = section.operating_point
-        point = self.calibration_file.operating_points[str(target)][operating_point_name]
         drive_bus = bus_alias(target, Role.drive)
         readout_bus = bus_alias(target, Role.readout)
-        sweep = np.linspace(*params["drive_amplitude_sweep"])
+        sweep = np.linspace(*self._param(target, "drive_amplitude_sweep"))
         if len(sweep) < 2:
             raise ValueError(f"{target}: drive_amplitude_sweep must have at least 2 points, got {len(sweep)}")
 
@@ -117,16 +122,12 @@ class RabiNode(FixedFluxNode[RabiFitted]):
             target=str(target),
             operating_point=operating_point_name,
             drive_amplitude_sweep=sweep,
-            averages=params["averages"],
-            relax_duration=params["relax_duration"],
-            readout_ringup_time=params.get("ringup_time", 0),
+            averages=self._param(target, "averages"),
+            relax_duration=self._param(target, "relax_duration"),
+            readout_ringup_time=self._param(target, "readout_ringup_time"),
         )
 
-        restore = self.restore
-        restore.set(drive_bus, Parameter.LO_FREQUENCY, int(point.drive.lo))
-        restore.set(readout_bus, Parameter.LO_FREQUENCY, int(point.readout.lo))
-        restore.set(readout_bus, Parameter.OUT0_ATT, int(point.readout.attenuation))
-        self._set_drive_source(restore, drive_bus, params["drive_power"])
+        self._set_operating_point_hardware(target)
 
         platform = self.context.platform
         stream_array = StreamArray(
@@ -146,40 +147,21 @@ class RabiNode(FixedFluxNode[RabiFitted]):
             stream_array[()] = results[readout_bus][0].array.T
         return measurement_id(stream_array)
 
-    def _set_drive_source(self, restore: ParameterRestore, drive_bus: str, drive_power: float) -> None:
-        """Set the drive power, and arm a Rohde & Schwarz source to play the IQ drive.
-
-        The power goes through the parameter the bus's drive instrument uses (R&S ``POWER``, QCMRF
-        ``GAIN``). A Rohde & Schwarz source also needs IQ modulation switched on -- otherwise it emits a
-        bare carrier instead of the DRAG pulse's IQ waveform -- and its RF output switched on. Both, like
-        the power, go through the restore handle, so the node's run turns them back off at the end.
-        """
-        drive_instruments = [
-            instrument.name.name for instrument in self.context.platform.get_element(drive_bus).instruments
-        ]
-        if "ROHDE_SCHWARZ" in drive_instruments:
-            restore.set(drive_bus, Parameter.IQ_MODULATION, True)
-            restore.set(drive_bus, Parameter.POWER, drive_power)
-            restore.set(drive_bus, Parameter.RF_ON, True)
-        elif "QCMRF" in drive_instruments:
-            restore.set(drive_bus, Parameter.GAIN, drive_power)
-        else:
-            warn(_NO_DRIVE_INSTRUMENT_MSG, stacklevel=2)
-
     def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[RabiFitted]:
         """Fit the sweep, save the fit to the DB, and return the pi amplitude and readout levels.
 
         Read-only. Both analyses fail (``AnalysisError``) when the fit's R² is below the step's minimum;
         a ``pi_amplitude`` step also fails when the fit shows no oscillation (no pi pulse exists).
         """
-        params = self.parameters[target]
-        model = RabiAmplitudeModel(measurements[-1], target=str(target), path=params.get("data_folder"))
+        model = RabiAmplitudeModel(
+            measurements[-1], target=str(target), path=self.parameters[target].get("data_folder")
+        )
         model.fit()
         plot = model.plot()
         model.save_fitting()
 
         level_0, level_0_std, level_1, level_1_std = model.readout_levels
-        min_r2 = params.get("min_r2", DEFAULT_MIN_R2)
+        min_r2 = self._param(target, "min_r2")
         if model.r_squared < min_r2:
             raise AnalysisError(f"{target} rabi fit R² {model.r_squared:.3f} is below the minimum {min_r2}")
         if self.analysis == PI_AMPLITUDE and model.results["angular_frequency"] <= 0:
@@ -230,19 +212,18 @@ class RabiNode(FixedFluxNode[RabiFitted]):
                 drag_coefficient=existing.drag_coefficient,
             )
         else:
-            params = self.parameters[target]
             pulse = IQDrag(
                 amplitude=fitted.pi_amplitude,
-                duration=params.get("drive_duration", _DRIVE_SHAPE_DEFAULTS["drive_duration"]),
-                num_sigmas=params.get("drive_sigmas", _DRIVE_SHAPE_DEFAULTS["drive_sigmas"]),
-                drag_coefficient=params.get("drive_drag", _DRIVE_SHAPE_DEFAULTS["drive_drag"]),
+                duration=self._param(target, "drive_duration"),
+                num_sigmas=self._param(target, "drive_n_sigmas"),
+                drag_coefficient=self._param(target, "drive_drag"),
             )
         self.context.calibration.add_waveform(bus=drive_bus, name=drive_pulse, waveform=pulse)
 
     def _readout_pulse(self, target: Target) -> str:
         section = self.calibration_file.experiments[self.experiment][str(target)]
-        return section.pulses.get(Role.readout, self.parameters[target].get("readout_pulse", _DEFAULT_READOUT_PULSE))
+        return section.pulses.get(Role.readout, self._param(target, "readout_pulse"))
 
     def _drive_pulse(self, target: Target) -> str:
         section = self.calibration_file.experiments[self.experiment][str(target)]
-        return section.pulses.get(Role.drive, self.parameters[target].get("drive_pulse", _DEFAULT_DRIVE_PULSE))
+        return section.pulses.get(Role.drive, self._param(target, "drive_pulse"))
