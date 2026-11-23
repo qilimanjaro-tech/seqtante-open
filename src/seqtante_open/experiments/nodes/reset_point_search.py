@@ -19,7 +19,8 @@ experiment, so Landau-Zener through QiliSDK matches the script's quality instead
 A read-only ``analyze`` that runs once cannot re-measure until the qubit is in the window, so the search
 lives in ``execute_node``:
 
-1. **Find the line.** Two-tone pulsed-saturation sweep at the current reset flux; if the Lorentzian fit
+1. **Find the line.** Two-tone pulsed-saturation sweep (the qili ``two_tone_saturation`` QProgram, run by
+   :class:`~seqtante_open.experiments.nodes.two_tone_saturation.TwoToneSaturationNode`) at the current reset flux; if the Lorentzian fit
    is below its minimum R², widen the span and retry (the script's 30 MHz, then 60 MHz).
 2. **Move into the window.** While the qubit is outside the target frequency window, move ``flux.z``
    along the measured slope — a small probe first, then secant steps clipped to a maximum step — waiting
@@ -41,19 +42,19 @@ import numpy as np
 from qililab.typings.enums import Parameter
 
 from seqtante_open.calibration.bus_alias import Role, bus_alias
-from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode
+from seqtante_open.controllers.calibration_node import AnalysisResult
 from seqtante_open.controllers.operating_point import operating_point_for
 from seqtante_open.controllers.verdicts import AnalysisError
-from seqtante_open.experiments.experiment_classes import two_tone_pulsed_saturation_experiment
 from seqtante_open.experiments.fitting import LorentzianPeakModel
-from seqtante_open.outputs import output_controller
+from seqtante_open.experiments.nodes.two_tone_saturation import TWO_TONE_SATURATION_DEFAULTS, TwoToneSaturationNode
 
 if TYPE_CHECKING:
     from seqtante_open.targets import Target
 
 LORENTZIAN_PEAK = "lorentzian_peak"
 
-#: Defaults are the experimentalists' calibration-script values; every one is a tree parameter.
+#: Defaults are the experimentalists' calibration-script values; every one is a tree parameter. The
+#: two-tone measurement's own defaults come from the shared spine.
 _DEFAULTS = {
     # Fit acceptance and span widening.
     "min_r2": 0.8,
@@ -71,17 +72,7 @@ _DEFAULTS = {
     "flux_z_max_moves": 6,
     "flux_settle_s": 5.0,
     # Two-tone measurement.
-    "averages": 5000,
-    "relax_duration": 50_000,
-    "readout_amplitude": 0.7,
-    "readout_duration": 1000,
-    "ringup_time": 600,
-    "drive_duration": 30_000,
-    "drive_amplitude": 0.8,
-    "drive_power": -40,
-    "overlap_time": 0,
-    "drive_sigmas": 4,
-    "duration_ringup_drive": 200,
+    **TWO_TONE_SATURATION_DEFAULTS,
 }
 
 #: A tolerance so a move that lands exactly on the shift limit is not rejected by floating-point noise.
@@ -141,7 +132,7 @@ class _SearchOutcome:
     plot_path: str | None
 
 
-class ResetPointSearchNode(FixedFluxNode[ResetPoint]):
+class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
     """Closed-loop reset-flux search ported from the experimentalists' calibration script (QHC-1807)."""
 
     experiment: ClassVar[str] = "reset_point_search"
@@ -253,29 +244,7 @@ class ResetPointSearchNode(FixedFluxNode[ResetPoint]):
         step = self._param(target, "sweep_step")
         npoints = round((freq_stop - freq_start) / step) + 1
         drive_if_sweep = np.linspace(freq_start, freq_stop, num=npoints, endpoint=True) - drive_lo
-        return two_tone_pulsed_saturation_experiment(
-            platform=self.context.platform,
-            db_manager=output_controller.db_manager,
-            readout_bus=bus_alias(target, Role.readout),
-            drive_bus=bus_alias(target, Role.drive),
-            readout_if_freq=int(point.readout.if_),
-            averages=self._param(target, "averages"),
-            readout_duration=self._param(target, "readout_duration"),
-            readout_amplitude=self._param(target, "readout_amplitude"),
-            drive_duration=self._param(target, "drive_duration"),
-            drive_amplitude=self._param(target, "drive_amplitude"),
-            relax_duration=self._param(target, "relax_duration"),
-            overlap_time=self._param(target, "overlap_time"),
-            ringup_time=self._param(target, "ringup_time"),
-            drive_if_sweep=drive_if_sweep,
-            drive_gain=self._param(target, "drive_power"),
-            drive_sigmas=self._param(target, "drive_sigmas"),
-            duration_ringup_drive=self._param(target, "duration_ringup_drive"),
-            drive_LO=drive_lo,
-            readout_LO=point.readout.lo,
-            target=str(target),
-            calibration=self.context.calibration,
-        )
+        return self._measure_two_tone_saturation(target, drive_if_sweep)
 
     def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[ResetPoint]:
         """Check the final fit and return the reset point's flux_z and drive IF; read-only.

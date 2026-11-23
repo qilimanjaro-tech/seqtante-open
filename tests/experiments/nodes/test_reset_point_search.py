@@ -1,7 +1,7 @@
 """Call-assertion test for the ``reset_point_search`` loop, and a unit test of its flux step (QHC-1807).
 
 The loop test drives the full three-phase run with the two-tone measurement and the Lorentzian fit
-scripted (a fake :class:`LorentzianPeakModel`, a stubbed two-tone driver, no ``time.sleep``), so the
+scripted (a fake :class:`LorentzianPeakModel`, a stubbed two-tone measurement, no ``time.sleep``), so the
 search loop — measure, move ``flux.z`` through the restore handle, re-measure, then write the point — is
 asserted without hardware, a database or a disk write.
 """
@@ -24,7 +24,6 @@ from seqtante_open.controllers.calibration_node import RunContext
 from seqtante_open.experiments.nodes import ResetPointSearchNode
 from seqtante_open.experiments.nodes import reset_point_search as reset_module
 from seqtante_open.experiments.nodes.reset_point_search import next_flux_z_step
-from seqtante_open.outputs import output_controller
 from seqtante_open.targets import ExperimentTarget
 
 Q1 = ExperimentTarget.from_str("q1")
@@ -128,21 +127,18 @@ def _make(calibration: Calibration) -> ResetPointSearchNode:
 
 
 def _patch(monkeypatch):
-    """No hardware, no disk, no sleep: stub the two-tone driver, the fit and the save."""
+    """No hardware, no disk, no sleep: stub the shared two-tone measurement, the fit and the save."""
     counter = {"next": FIRST_ID}
 
-    def fake_two_tone(**kwargs):
+    def fake_two_tone(self, target, drive_if_sweep):
         measurement_id = counter["next"]
         counter["next"] += 1
         return measurement_id
 
-    monkeypatch.setattr(reset_module, "two_tone_pulsed_saturation_experiment", fake_two_tone)
+    monkeypatch.setattr(ResetPointSearchNode, "_measure_two_tone_saturation", fake_two_tone)
     monkeypatch.setattr(reset_module, "LorentzianPeakModel", FakeLorentzian)
     monkeypatch.setattr(reset_module.time, "sleep", lambda *_: None)
     monkeypatch.setattr(node_module, "save_calibration", lambda calibration, path: None)
-    # db_manager is read (to pass to the driver) but the fake driver ignores it; just make it available.
-    monkeypatch.setattr(output_controller, "_initialized", True)
-    monkeypatch.setattr(output_controller, "_db_manager", object())
 
 
 def test_loop_moves_flux_into_the_window_and_writes_the_point(monkeypatch):
