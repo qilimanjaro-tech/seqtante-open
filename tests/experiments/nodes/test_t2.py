@@ -14,7 +14,6 @@ import numpy as np
 import pytest
 from qililab import Parameter
 from qililab.qprogram.calibration import Calibration
-from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 
 from seqtante_open.calibration.io import write_calibration_file
 from seqtante_open.calibration.model import (
@@ -25,16 +24,19 @@ from seqtante_open.calibration.model import (
     OperatingPoint,
     ReadoutFreqs,
 )
-from seqtante_open.controllers import calibration_node as node_module
-from seqtante_open.controllers.calibration_node import RunContext
 from seqtante_open.controllers.verdicts import BenchmarkDirection, BenchmarkThresholds, Verdict
 from seqtante_open.experiments.nodes import T2Node
 from seqtante_open.experiments.nodes import t2 as t2_module
-from seqtante_open.outputs import output_controller
 from seqtante_open.targets import ExperimentTarget
+from tests.experiments.nodes.harness import (
+    FakePlatform,
+    FakeStreamArray,
+    build_context,
+    identity_crosstalk,
+    stub_output_and_save,
+)
 
 Q1 = ExperimentTarget.from_str("q1")
-CROSSTALK_BUSES = ("flux_z_q1", "flux_x_q1")
 
 DRIVE_LO = 2.9e9
 DRIVE_IF = -0.1e9
@@ -58,73 +60,6 @@ PARAMS = {
 THRESHOLDS = {
     Q1: BenchmarkThresholds(passed=10.0, warning=5.0, unit="us", direction=BenchmarkDirection.higher_is_better)
 }
-
-
-class FakePlatform:
-    def __init__(self):
-        self.values: dict = {}
-        self.calls: list = []
-
-    def set_crosstalk(self, *, crosstalk):
-        self.calls.append("set_crosstalk")
-
-    def set_flux_to_zero(self):
-        self.calls.append("set_flux_to_zero")
-
-    def set_bias_to_zero(self):
-        self.calls.append("set_bias_to_zero")
-
-    def get_parameter(self, *, alias, parameter):
-        return self.values.get((alias, parameter), 0.0)
-
-    def set_parameter(self, *, alias, parameter, value):
-        self.values[alias, parameter] = value
-        self.calls.append(f"set:{alias}")
-
-
-class _ReadoutResults:
-    """One readout result per unrolled idle point: a zero array for any index the node reads."""
-
-    def __getitem__(self, idx):
-        return SimpleNamespace(array=np.zeros((2, 2)))
-
-
-class FakeT2Platform(FakePlatform):
-    """A :class:`FakePlatform` that also answers the execution calls the inlined node makes.
-
-    ``get_element`` reports a Rohde & Schwarz drive instrument (so the IQ-modulation/POWER/RF branch
-    runs) and ``execute_qprogram`` returns a readout result. On execute it snapshots the parameters set
-    so far into :attr:`values_at_execute`, before the node's run restores them.
-    """
-
-    def __init__(self):
-        super().__init__()
-        self.values_at_execute: dict = {}
-
-    def get_element(self, alias):
-        self.calls.append(f"get_element:{alias}")
-        return SimpleNamespace(instruments=[SimpleNamespace(name=SimpleNamespace(name="ROHDE_SCHWARZ"))])
-
-    def execute_qprogram(self, qprogram, **kwargs):
-        self.calls.append("execute_qprogram")
-        self.values_at_execute = dict(self.values)
-        return SimpleNamespace(results={"readout_q1": _ReadoutResults()})
-
-
-class FakeStreamArray:
-    """Stand-in for ``StreamArray``: a context manager that swallows the write and carries a measurement id."""
-
-    def __init__(self, **kwargs):
-        self.measurement = SimpleNamespace(measurement_id=MEAS_ID)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def __setitem__(self, key, value):
-        return None
 
 
 class FakeT2Fit:
@@ -158,15 +93,9 @@ class FakeT2Fit:
         return T2_SIGMA_US
 
 
-def _crosstalk() -> CrosstalkMatrix:
-    return CrosstalkMatrix.from_buses(
-        {b: {bb: (1.0 if b == bb else 0.0) for bb in CROSSTALK_BUSES} for b in CROSSTALK_BUSES}
-    )
-
-
 def _calibration() -> Calibration:
     calibration = Calibration()
-    calibration.crosstalk_matrix = _crosstalk()
+    calibration.crosstalk_matrix = identity_crosstalk()
     write_calibration_file(
         calibration,
         CalibrationFile(
@@ -186,14 +115,10 @@ def _calibration() -> Calibration:
     return calibration
 
 
-def _make(calibration: Calibration, thresholds) -> tuple[T2Node, FakeT2Platform]:
-    platform = FakeT2Platform()
-    context = RunContext(
-        platform=platform,
-        platform_path="runcard.yml",
-        calibration=calibration,
-        calibration_path="calibration.yml",
-    )
+def _make(calibration: Calibration, thresholds) -> tuple[T2Node, FakePlatform]:
+    # One readout result per unrolled idle point.
+    platform = FakePlatform(readout_points=len(np.linspace(*ELAPSED_SWEEP)))
+    context = build_context(calibration, platform)
     node = T2Node(
         name="t2_sweet_spot", idx=0, targets=[Q1], parameters={Q1: dict(PARAMS)}, context=context, thresholds=thresholds
     )
@@ -210,10 +135,9 @@ def _patch(monkeypatch) -> dict:
 
     monkeypatch.setattr(t2_module, "t2_ramsey", fake_t2_ramsey)
     monkeypatch.setattr(t2_module, "StreamArray", FakeStreamArray)
+    monkeypatch.setattr(FakeStreamArray, "measurement_id", MEAS_ID)
     monkeypatch.setattr(t2_module, "T2Fit", FakeT2Fit)
-    monkeypatch.setattr(node_module, "save_calibration", lambda calibration, path: None)
-    monkeypatch.setattr(output_controller, "_initialized", True)
-    monkeypatch.setattr(output_controller, "_db_manager", object())
+    stub_output_and_save(monkeypatch)
     monkeypatch.setattr(FakeT2Fit, "r2", 0.99)
     return built
 
