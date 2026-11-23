@@ -136,10 +136,14 @@ class CalibrationGraph:
 
         A registered experiment with a ``node_cls`` and a run context runs as a real ``CalibrationNode``;
         an experiment that is still a legacy function (no ``node_cls``), or a build with no context, runs
-        through :class:`LegacyNode` (ADR-0007). The legacy adapter keeps the per-target ``data_folder`` wiring.
+        through :class:`LegacyNode` (ADR-0007). Both get the per-target ``data_folder``
+        (``<data_root>/<step>/<target>``) their fits write plots into.
         """
         spec = experiment_spec(step.experiment)
         if context is not None and spec is not None and spec.node_cls is not None:
+            if data_root is not None:
+                for target in step.targets:
+                    step.parameters[target]["data_folder"] = os.path.join(data_root, step.name, str(target))
             return spec.node_cls(
                 name=step.name,
                 idx=idx,

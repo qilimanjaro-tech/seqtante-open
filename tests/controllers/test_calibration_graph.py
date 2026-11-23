@@ -14,6 +14,8 @@
 
 """Tests for CalibrationGraph: construction, selection, cycle detection and per-target skip propagation."""
 
+import os
+
 import networkx as nx
 import pytest
 
@@ -24,6 +26,7 @@ from seqtante_open.calibration.model import (
     OperatingPoint,
     ReadoutFreqs,
 )
+from seqtante_open.controllers import node_registry
 from seqtante_open.controllers.calibration_graph import CalibrationGraph, GraphBuildError
 from seqtante_open.controllers.calibration_node import AnalysisResult, CalibrationNode, RunContext
 from seqtante_open.controllers.calibration_tree_parser import Pipeline, Step
@@ -235,6 +238,35 @@ def test_graph_builds_the_registry_node_class_with_the_context():
     node = graph.graph.nodes[0]["data"]
     assert isinstance(node, MyNode)
     assert node.context is context
+
+
+def test_graph_gives_a_registry_node_its_per_target_data_folder(monkeypatch, tmp_path):
+    # A real node's fit writes its plots under <data_root>/<step>/<target>, like a legacy node's.
+    monkeypatch.setattr(node_registry, "NODE_REGISTRY", dict(node_registry.NODE_REGISTRY))
+
+    class PlottingNode(CalibrationNode):
+        experiment = "plotting_node"
+        analyses = ("a",)
+
+        def execute_node(self, targets):
+            return {}
+
+        def analyze(self, target, measurements):
+            return AnalysisResult()
+
+        def apply(self, target, result):
+            pass
+
+    context = RunContext(platform=object(), platform_path="runcard.yml", calibration=object(), calibration_path="c.yml")
+    targets = _targets(1, 2)
+    pipeline = _pipeline("p", [_step("s", "p", targets, experiment="plotting_node")])
+
+    graph = _build([pipeline], context=context, data_root=str(tmp_path))
+
+    node = graph.graph.nodes[0]["data"]
+    assert isinstance(node, PlottingNode)
+    for target in targets:
+        assert node.parameters[target]["data_folder"] == os.path.join(str(tmp_path), "s", str(target))
 
 
 def test_graph_falls_back_to_legacy_when_no_node_class():

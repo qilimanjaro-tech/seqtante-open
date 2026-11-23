@@ -101,7 +101,7 @@ NODE_REGISTRY: dict[str, ExperimentSpec] = {
     "rabi": ExperimentSpec(analyses=("pi_amplitude", "readout_levels")),
     "t1": ExperimentSpec(
         analyses=("exponential_decay",),
-        benchmark=BenchmarkSpec(unit="ns", direction=BenchmarkDirection.higher_is_better),
+        benchmark=BenchmarkSpec(unit="us", direction=BenchmarkDirection.higher_is_better),
     ),
     "t2": ExperimentSpec(
         analyses=("decaying_oscillation",),
