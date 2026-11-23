@@ -19,42 +19,57 @@ runs at the step's operating point (the base places it before ``execute_node``),
 one two-tone pulsed-saturation measurement, and fits the qubit line with
 :class:`~seqtante_open.experiments.fitting.LorentzianPeakModel`.
 
+The QProgram is the shared ``qili_qprograms`` experiment ``two_tone_saturation`` (QHC-1916): it reads the
+``readout-<op>`` pulse, its integration weights and the readout IF from the calibration file and sweeps the
+drive IF with a smooth ring-up / square / ring-down saturation drive. The node keeps the execution half --
+drive/readout LOs, readout attenuation and drive power (plus IQ modulation and RF for a Rohde & Schwarz
+source), all through the restore handle -- then runs the sweep and streams it.
+
 ``apply`` -- the only writer -- stores the fitted drive IF on the operating point (the ``two_tone_sweet_spot``
-point). The drive LO, placed outside the sweep by the base helper, is left as it was, and the legacy
-``save_platform`` call is gone: the run persists the calibration file (ADR-0001). The measurement and the
-Lorentzian fit are shared with ``reset_point_search`` (QHC-1807); the fitted ``drive_if``, ``drive_lo`` and
-``fit_r2`` are written to the measurement entry (QHC-1497, QHC-1791).
+point). The drive LO is left as it was, and the legacy ``save_platform`` call is gone: the run persists the
+calibration file (ADR-0001). The Lorentzian fit is shared with ``reset_point_search`` (QHC-1807); the fitted
+``drive_if``, ``drive_lo`` and ``fit_r2`` are written to the measurement entry (QHC-1497, QHC-1791).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
+from warnings import warn
 
 import numpy as np
+from qili_qprograms.experiments import two_tone_saturation
+from qililab import Parameter
+from qililab.result import StreamArray
 
 from seqtante_open.calibration.bus_alias import Role, bus_alias
 from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode
 from seqtante_open.controllers.operating_point import operating_point_for
 from seqtante_open.controllers.verdicts import AnalysisError
-from seqtante_open.experiments.experiment_classes import two_tone_pulsed_saturation_experiment
 from seqtante_open.experiments.fitting import LorentzianPeakModel
+from seqtante_open.experiments.results import measurement_id
 from seqtante_open.outputs import FittedParameter, output_controller
 
 if TYPE_CHECKING:
+    from seqtante_open.controllers.parameter_restore import ParameterRestore
     from seqtante_open.targets import Target
 
 LORENTZIAN_PEAK = "lorentzian_peak"
 
+#: Stream/experiment name the measurement is stored under.
+_EXPERIMENT_NAME = "two_tone_saturation"
+
+#: Warned when the drive bus has no instrument whose power this node knows how to set.
+_NO_DRIVE_INSTRUMENT_MSG = "No instrument to set power to."
+
 #: Default minimum R² a Lorentzian fit must reach to pass the step (overridable per step).
 DEFAULT_MIN_R2 = 0.8
 
-#: Two-tone pulsed-saturation measurement defaults; every one is overridable as a tree parameter.
+#: Two-tone pulsed-saturation measurement defaults; every one is overridable as a tree parameter. The
+#: readout pulse (amplitude, duration, weights) comes from the calibration file, not from parameters.
 _DEFAULTS = {
     "averages": 5000,
     "relax_duration": 50_000,
-    "readout_amplitude": 0.7,
-    "readout_duration": 1000,
     "ringup_time": 600,
     "drive_duration": 30_000,
     "drive_amplitude": 0.8,
@@ -62,6 +77,7 @@ _DEFAULTS = {
     "overlap_time": 0,
     "drive_sigmas": 4,
     "duration_ringup_drive": 200,
+    "drive_ringdown_time": 200,
 }
 
 
@@ -86,32 +102,80 @@ class TwoToneNode(FixedFluxNode[TwoToneSweetSpot]):
         return {target: [self._measure(target)] for target in targets}
 
     def _measure(self, target: Target) -> int:
-        """Run one two-tone pulsed-saturation sweep at the target's operating point; return its id."""
+        """Build the qili two-tone QProgram, set the operating point's hardware, run the sweep; return its id.
+
+        The QProgram plays the ``readout-<op>`` pulse with its weights and sets the readout IF, all from the
+        calibration file, and sweeps the drive IF itself. This node sets what the QProgram does not -- the
+        drive/readout LOs, the readout attenuation and the drive power/RF -- from the operating point,
+        through the restore handle so the run undoes them (ADR-0006).
+        """
+        section = self.calibration_file.experiments[self.experiment][str(target)]
         point = operating_point_for(self.calibration_file, self.experiment, target)
-        drive_lo = point.drive.lo
-        return two_tone_pulsed_saturation_experiment(
-            platform=self.context.platform,
-            db_manager=output_controller.db_manager,
-            readout_bus=bus_alias(target, Role.readout),
-            drive_bus=bus_alias(target, Role.drive),
-            readout_if_freq=int(point.readout.if_),
+        drive_bus = bus_alias(target, Role.drive)
+        readout_bus = bus_alias(target, Role.readout)
+        drive_if_sweep = self._drive_if_sweep(target, point.drive.lo)
+        if len(drive_if_sweep) < 2:
+            raise ValueError(f"{target}: the drive-IF sweep must have at least 2 points, got {len(drive_if_sweep)}")
+
+        qprogram = two_tone_saturation(
+            calibration=self.context.calibration,
+            target=str(target),
+            operating_point=section.operating_point,
+            drive_if_sweep=drive_if_sweep,
             averages=self._param(target, "averages"),
-            readout_duration=self._param(target, "readout_duration"),
-            readout_amplitude=self._param(target, "readout_amplitude"),
+            relax_duration=self._param(target, "relax_duration"),
             drive_duration=self._param(target, "drive_duration"),
             drive_amplitude=self._param(target, "drive_amplitude"),
-            relax_duration=self._param(target, "relax_duration"),
+            drive_ringup_time=self._param(target, "duration_ringup_drive"),
+            drive_ringdown_time=self._param(target, "drive_ringdown_time"),
+            drive_n_sigmas=self._param(target, "drive_sigmas"),
             overlap_time=self._param(target, "overlap_time"),
-            ringup_time=self._param(target, "ringup_time"),
-            drive_if_sweep=self._drive_if_sweep(target, drive_lo),
-            drive_gain=self._param(target, "drive_power"),
-            drive_sigmas=self._param(target, "drive_sigmas"),
-            duration_ringup_drive=self._param(target, "duration_ringup_drive"),
-            drive_LO=int(drive_lo),
-            readout_LO=int(point.readout.lo),
-            target=str(target),
-            calibration=self.context.calibration,
+            readout_ringup_time=self._param(target, "ringup_time"),
         )
+
+        restore = self.restore
+        restore.set(drive_bus, Parameter.LO_FREQUENCY, int(point.drive.lo))
+        restore.set(readout_bus, Parameter.LO_FREQUENCY, int(point.readout.lo))
+        restore.set(readout_bus, Parameter.OUT0_ATT, int(point.readout.attenuation))
+        self._set_drive_source(restore, drive_bus, self._param(target, "drive_power"))
+
+        platform = self.context.platform
+        stream_array = StreamArray(
+            shape=(len(drive_if_sweep), 2),
+            loops={
+                "IF_frequency": {"array": drive_if_sweep, "units": "Hz", "bus": drive_bus, "parameter": "IF_frequency"}
+            },
+            platform=platform,
+            experiment_name=_EXPERIMENT_NAME,
+            db_manager=output_controller.db_manager,
+            qprogram=qprogram,
+            calibration=self.context.calibration,
+            qubit_idx=str(target),
+        )
+        with stream_array:
+            results = platform.execute_qprogram(qprogram).results
+            stream_array[()] = results[readout_bus][0].array.T
+        return measurement_id(stream_array)
+
+    def _set_drive_source(self, restore: ParameterRestore, drive_bus: str, drive_power: float) -> None:
+        """Set the drive power, and arm a Rohde & Schwarz source to play the IQ drive.
+
+        The power goes through the parameter the bus's drive instrument uses (R&S ``POWER``, QCMRF
+        ``GAIN``). A Rohde & Schwarz source also needs IQ modulation switched on -- otherwise it emits a
+        bare carrier instead of the saturation drive's IQ waveform -- and its RF output switched on. Both,
+        like the power, go through the restore handle, so the node's run turns them back off at the end.
+        """
+        drive_instruments = [
+            instrument.name.name for instrument in self.context.platform.get_element(drive_bus).instruments
+        ]
+        if "ROHDE_SCHWARZ" in drive_instruments:
+            restore.set(drive_bus, Parameter.IQ_MODULATION, True)
+            restore.set(drive_bus, Parameter.POWER, drive_power)
+            restore.set(drive_bus, Parameter.RF_ON, True)
+        elif "QCMRF" in drive_instruments:
+            restore.set(drive_bus, Parameter.GAIN, drive_power)
+        else:
+            warn(_NO_DRIVE_INSTRUMENT_MSG, stacklevel=2)
 
     def _drive_if_sweep(self, target: Target, drive_lo: float) -> np.ndarray:
         """Build the drive-IF sweep (Hz) from the step's absolute-frequency window and the placed LO."""
