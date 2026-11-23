@@ -71,3 +71,10 @@ class TestRabiAmplitudeModel(FittingTestCase):
         parameters = kwargs["parameters"]
         assert parameters[FittedParameter.RABI_AMPLITUDE.value] == pytest.approx(PI_AMPLITUDE, abs=0.03)
         assert FittedParameter.FIT_R2.value in parameters
+
+    def test_flat_trace_leaves_r_squared_undefined(self, fitted, monkeypatch) -> None:
+        """A flat trace (drive off, readout saturated) has no variance: R² is ``nan``, which the node rejects."""
+        monkeypatch.setattr(fitted, "signal", np.ones(len(fitted.signal)))
+        fitted.fit()
+
+        assert np.isnan(fitted.r_squared)

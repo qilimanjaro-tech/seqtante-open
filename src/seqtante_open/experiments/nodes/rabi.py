@@ -29,6 +29,7 @@ lives in :class:`~seqtante_open.experiments.fitting.RabiAmplitudeModel` and the 
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -148,25 +149,28 @@ class RabiNode(FixedFluxNode[RabiFitted]):
         return measurement_id(stream_array)
 
     def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[RabiFitted]:
-        """Fit the sweep, save the fit to the DB, and return the pi amplitude and readout levels.
+        """Fit the sweep, check it, save the fit to the DB, plot, and return the pi amplitude and readout levels.
 
-        Read-only. Both analyses fail (``AnalysisError``) when the fit's R² is below the step's minimum;
-        a ``pi_amplitude`` step also fails when the fit shows no oscillation (no pi pulse exists).
+        Read-only. Fit, then every acceptance check, then save, then plot: a rejected fit never reaches the
+        DB, as for T1 (QHC-1803). Both analyses fail (``AnalysisError``) when the fit's R² is below the
+        step's minimum or undefined (a flat trace); a ``pi_amplitude`` step also fails when the fit shows
+        no oscillation (no pi pulse exists).
         """
         model = RabiAmplitudeModel(
             measurements[-1], target=str(target), path=self.parameters[target].get("data_folder")
         )
         model.fit()
-        plot = model.plot()
-        model.save_fitting()
 
-        level_0, level_0_std, level_1, level_1_std = model.readout_levels
         min_r2 = self._param(target, "min_r2")
-        if model.r_squared < min_r2:
+        # A flat trace leaves R² NaN; reject it explicitly, since every comparison with NaN is False.
+        if math.isnan(model.r_squared) or model.r_squared < min_r2:
             raise AnalysisError(f"{target} rabi fit R² {model.r_squared:.3f} is below the minimum {min_r2}")
         if self.analysis == PI_AMPLITUDE and model.results["angular_frequency"] <= 0:
             raise AnalysisError(f"{target} rabi fit shows no oscillation; there is no pi amplitude to apply")
 
+        model.save_fitting()
+        plot = model.plot()
+        level_0, level_0_std, level_1, level_1_std = model.readout_levels
         fitted = RabiFitted(
             pi_amplitude=model.pi_amplitude,
             level_0=level_0,

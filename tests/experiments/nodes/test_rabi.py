@@ -7,6 +7,7 @@ point, ``pi_amplitude`` writes the fitted amplitude into the named DRAG pulse in
 """
 
 from types import SimpleNamespace
+from typing import ClassVar
 
 import numpy as np
 import pytest
@@ -101,24 +102,31 @@ class FakeStreamArray:
 
 
 class FakeRabiModel:
-    """A scripted stand-in for ``RabiAmplitudeModel``: no DB load, no fit, fixed outputs."""
+    """A scripted stand-in for ``RabiAmplitudeModel``: no DB load, no fit, fixed outputs.
+
+    ``events`` records what the node did with the fit, in order (fit, save, plot), so a test can assert
+    the T1 order and that a rejected fit is never saved or plotted.
+    """
 
     r_squared = 0.99
+    angular_frequency = 1.0
+    events: ClassVar[list[str]] = []
 
     def __init__(self, measurement_id, target=None, path=None):
         self.id = measurement_id
         self.target = target
         self.path = path
-        self.results = {"angular_frequency": 1.0}
+        self.results = {"angular_frequency": type(self).angular_frequency}
 
     def fit(self):
+        type(self).events.append("fit")
         return self.results
 
     def plot(self):
-        return None
+        type(self).events.append("plot")
 
     def save_fitting(self):
-        return None
+        type(self).events.append("save")
 
     @property
     def pi_amplitude(self):
@@ -285,3 +293,33 @@ def test_analyze_raises_analysis_error_below_min_r2(monkeypatch):
 
     with pytest.raises(AnalysisError, match="below the minimum"):
         node.analyze(Q1, [777])
+
+
+def test_analyze_fits_checks_saves_then_plots(monkeypatch):
+    monkeypatch.setattr(rabi_module, "RabiAmplitudeModel", FakeRabiModel)
+    monkeypatch.setattr(FakeRabiModel, "events", [])
+    node = _make_rabi(analysis="readout_levels", calibration=_calibration(_rabi_file("reset")))
+
+    node.analyze(Q1, [777])
+
+    assert FakeRabiModel.events == ["fit", "save", "plot"]
+
+
+@pytest.mark.parametrize(
+    ("analysis", "knob", "value"),
+    [
+        ("readout_levels", "r_squared", float("nan")),  # a flat trace: no variance to explain
+        ("readout_levels", "r_squared", 0.5),  # below the default minimum
+        ("pi_amplitude", "angular_frequency", 0.0),  # no oscillation: there is no pi amplitude
+    ],
+)
+def test_a_rejected_fit_is_never_saved_or_plotted(monkeypatch, analysis, knob, value):
+    monkeypatch.setattr(rabi_module, "RabiAmplitudeModel", FakeRabiModel)
+    monkeypatch.setattr(FakeRabiModel, "events", [])
+    monkeypatch.setattr(FakeRabiModel, knob, value)
+    node = _make_rabi(analysis=analysis, calibration=_calibration(_rabi_file("reset")))
+
+    with pytest.raises(AnalysisError):
+        node.analyze(Q1, [777])
+
+    assert FakeRabiModel.events == ["fit"]

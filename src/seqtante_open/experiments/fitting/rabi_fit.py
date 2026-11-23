@@ -105,12 +105,17 @@ class RabiAmplitudeModel(FittingClass):
         first = _cosine(amplitudes[0], offset, amplitude, angular_frequency, phase)
         ground, excited = (top, bottom) if abs(first - top) <= abs(first - bottom) else (bottom, top)
 
+        # A flat trace (drive off, readout saturated) has no variance to explain: R² is undefined (NaN),
+        # and the node rejects it like a low R².
+        has_variance = float(np.sum((signal - np.mean(signal)) ** 2)) > 0
+        r_squared = float(fit.rsquared) if has_variance else float("nan")
+
         self.results = {
             "offset": offset,
             "amplitude": amplitude,
             "angular_frequency": angular_frequency,
             "phase": phase,
-            "r_squared": float(fit.rsquared),
+            "r_squared": r_squared,
             "pi_amplitude": self._pi_amplitude(offset, amplitude, angular_frequency, phase, excited),
             "level_0": float(ground),
             "level_0_std": level_std,
