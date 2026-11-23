@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from qililab.typings.enums import Parameter
@@ -51,6 +51,7 @@ from seqtante_open.experiments.nodes.two_tone_saturation import TWO_TONE_SATURAT
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from seqtante_open.calibration.model import OperatingPoint
     from seqtante_open.targets import Target
 
 LORENTZIAN_PEAK = "lorentzian_peak"
@@ -137,8 +138,8 @@ class _SearchOutcome:
 class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
     """Closed-loop reset-flux search ported from the experimentalists' calibration script (QHC-1807)."""
 
-    experiment: ClassVar[str] = "reset_point_search"
-    analyses: ClassVar[tuple[str, ...]] = (LORENTZIAN_PEAK,)
+    experiment = "reset_point_search"
+    analyses = (LORENTZIAN_PEAK,)
     defaults = RESET_POINT_SEARCH_DEFAULTS
 
     def __init__(self, **kwargs) -> None:
@@ -153,8 +154,8 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
         return measurements
 
     def _search_one(self, target: Target) -> list[int]:
-        point = operating_point_for(self.calibration_file, self.experiment, target)
-        drive_lo = point.drive.lo
+        operating_point = operating_point_for(self.calibration_file, self.experiment, target)
+        drive_lo = operating_point.drive.lo
         flux_z_bus = bus_alias(target, Role.flux, "z")
 
         target_freq_min = self._param(target, "target_freq_min")
@@ -163,14 +164,14 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
         max_shift = self._param(target, "flux_z_max_shift")
         max_moves = self._param(target, "flux_z_max_moves")
 
-        flux_z_initial = point.flux.z
+        flux_z_initial = operating_point.flux.z
         flux_z = flux_z_initial
         ids: list[int] = []
 
         sweep_start = self._param(target, "sweep_start")
         sweep_stop = self._param(target, "sweep_stop")
         initial_center = (sweep_start + sweep_stop) / 2
-        qubit_if, plot_path = self._find_qubit(target, point, initial_center, ids)
+        qubit_if, plot_path = self._find_qubit(target, operating_point, initial_center, ids)
         if qubit_if is None:
             raise AnalysisError(f"{target}: no qubit line found at flux_z = {flux_z:.5f} in any sweep width")
         qubit_freq_abs = qubit_if + drive_lo
@@ -205,7 +206,7 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
             flux_z = next_flux_z
             moves += 1
 
-            qubit_if, plot_path = self._find_qubit(target, point, expected_freq, ids)
+            qubit_if, plot_path = self._find_qubit(target, operating_point, expected_freq, ids)
             if qubit_if is None:
                 raise AnalysisError(f"{target}: lost the qubit line after moving flux_z to {flux_z:.5f}")
             qubit_freq_abs = qubit_if + drive_lo
@@ -214,7 +215,9 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
         self._search[target] = _SearchOutcome(flux_z=flux_z, measurement_id=ids[-1], plot_path=plot_path)
         return ids
 
-    def _find_qubit(self, target: Target, point, center: float, ids: list[int]) -> tuple[float | None, str | None]:
+    def _find_qubit(
+        self, target: Target, operating_point: OperatingPoint, center: float, ids: list[int]
+    ) -> tuple[float | None, str | None]:
         """Look for the qubit line around ``center`` (absolute Hz), widening the sweep until a fit is accepted.
 
         Every attempt is plotted (accepted or not), so a failed search still leaves its sweeps in the
@@ -224,7 +227,7 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
         sweep_span = self._param(target, "sweep_stop") - self._param(target, "sweep_start")
         spans = [sweep_span, *self._param(target, "retry_spans")]
         for span in spans:
-            measurement_id = self._measure_two_tone(target, point, center - span / 2, center + span / 2)
+            measurement_id = self._measure_two_tone(target, operating_point, center - span / 2, center + span / 2)
             ids.append(measurement_id)
             model = LorentzianPeakModel(
                 measurement_id,
@@ -238,9 +241,11 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
                 return model.fitted_if, plot
         return None, None
 
-    def _measure_two_tone(self, target: Target, point, freq_start: float, freq_stop: float) -> int:
+    def _measure_two_tone(
+        self, target: Target, operating_point: OperatingPoint, freq_start: float, freq_stop: float
+    ) -> int:
         """Run one two-tone pulsed-saturation sweep over ``[freq_start, freq_stop]`` (absolute Hz); return its id."""
-        drive_lo = point.drive.lo
+        drive_lo = operating_point.drive.lo
         step = self._param(target, "sweep_step")
         npoints = round((freq_stop - freq_start) / step) + 1
         drive_if_sweep = np.linspace(freq_start, freq_stop, num=npoints, endpoint=True) - drive_lo
@@ -275,6 +280,6 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
         """Write the reset point's absolute ``flux.z`` and drive IF (ADR-0011); the only writer."""
         # reset_point_search always fits a point, so result.fitted is set here; the guard is defensive.
         if result.fitted is not None:
-            point = operating_point_for(self.calibration_file, self.experiment, target)
-            point.flux.z = result.fitted.flux_z
-            point.drive.if_ = result.fitted.drive_if
+            operating_point = operating_point_for(self.calibration_file, self.experiment, target)
+            operating_point.flux.z = result.fitted.flux_z
+            operating_point.drive.if_ = result.fitted.drive_if
