@@ -39,16 +39,17 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar, Generic, Protocol, TypeVar, runtime_checkable
-from warnings import warn
 
 from loguru import logger
 from qililab import Parameter, Platform
 from qililab.qprogram.calibration import Calibration
+from qililab.typings import ParameterValue
 
 from seqtante_open.calibration.bus_alias import Role, bus_alias
 from seqtante_open.calibration.io import read_calibration_file, save_calibration, write_calibration_file
 from seqtante_open.calibration.model import CalibrationFile
 from seqtante_open.controllers.crosstalk_session import CrosstalkSession, crosstalk_session
+from seqtante_open.controllers.drive_source import drive_source_writes
 from seqtante_open.controllers.node_registry import BenchmarkSpec, Parallel, experiment_spec, register_node
 from seqtante_open.controllers.operating_point import (
     apply_operating_point,
@@ -62,9 +63,6 @@ from seqtante_open.targets import Target
 #: The node-specific fitted payload an ``analyze`` hands its ``apply`` (a frequency, a pi amplitude,
 #: readout levels...). The base passes it through untouched; each node fixes its own concrete type.
 ResultT = TypeVar("ResultT")
-
-#: Warned when a drive bus has no instrument whose power or gain a node knows how to set.
-NO_DRIVE_INSTRUMENT_MSG = "No instrument to set power to."
 
 
 @dataclass(frozen=True)
@@ -248,28 +246,46 @@ class CalibrationNode(ABC, Generic[ResultT]):
             return self.defaults[key]
         raise KeyError(f"step '{self.name}': {target} sets no '{key}' and {type(self).__name__} has no default for it")
 
+    def _drive_source_writes(self, target: Target) -> list[tuple[Parameter, ParameterValue]]:
+        """The writes that arm ``target``'s drive source, its level read from the step or :attr:`defaults`.
+
+        ``drive_power`` (Rohde & Schwarz, dBm) or ``drive_gain`` (QCM-RF, [-1, 1]), whichever the drive
+        bus's instrument takes (:func:`~seqtante_open.controllers.drive_source.drive_source_writes`).
+
+        Raises:
+            ValueError: if the drive instrument's level is neither set in the step nor defaulted.
+        """
+        params = self.parameters[target]
+        return drive_source_writes(
+            self.context.platform,
+            bus_alias(target, Role.drive),
+            drive_power=params.get("drive_power", self.defaults.get("drive_power")),
+            drive_gain=params.get("drive_gain", self.defaults.get("drive_gain")),
+        )
+
+    def _set_drive_source(self, target: Target) -> None:
+        """Arm ``target``'s drive source through the restore handle; any node can, with no operating point.
+
+        Raises:
+            ValueError: if the drive instrument's level is neither set in the step nor defaulted.
+        """
+        drive_bus = bus_alias(target, Role.drive)
+        for parameter, value in self._drive_source_writes(target):
+            self.restore.set(drive_bus, parameter, value)
+
     def _set_operating_point_hardware(self, target: Target) -> None:
-        """Set ``target``'s drive/readout line from its operating point, through the restore handle (ADR-0006).
+        """Set ``target``'s line at its operating point, then arm its drive, through the restore handle (ADR-0006).
 
         The QProgram sets the IFs and plays the pulses; this sets what it does not: the drive and readout
-        LOs, the readout attenuation and the drive source. Every write goes through :attr:`restore`, so
-        ``run`` puts the line back as it was after each target and nothing leaks into the next node.
-
-        The drive source depends on the bus's drive instrument, and its level is a step parameter (or a
-        node default) read through :meth:`_param`:
-
-        - Rohde & Schwarz: ``drive_power`` is its ``POWER`` in dBm; IQ modulation is switched on (else
-          it plays a bare carrier instead of the IQ drive) and its RF output too.
-        - QCM-RF: ``drive_gain`` is the sequencer ``GAIN`` in [-1, 1]; hardware modulation is switched on.
-        - Anything else: warns, and sets no power.
-
-        It lives on the base, not on a spine: a flux-sweep node does not place the flux, but it still runs
-        at its operating point's LOs, attenuation and drive.
+        LOs and the readout attenuation from the operating point, then the drive source
+        (:meth:`_set_drive_source`). Every write goes through :attr:`restore`, so ``run`` puts the line
+        back as it was after each target and nothing leaks into the next node. The drive level is
+        checked before the first write, so a missing one leaves the line untouched.
 
         Raises:
             TypeError: if called on a node that sets no ``experiment`` (a spine, not a leaf).
-            ValueError: if the readout attenuation is not a whole number of dB.
-            KeyError: if the drive instrument's ``drive_power``/``drive_gain`` is neither set nor defaulted.
+            ValueError: if the readout attenuation is not a whole number of dB, or the drive instrument's
+                level is neither set in the step nor defaulted.
         """
         experiment = self.experiment
         if experiment is None:
@@ -278,21 +294,9 @@ class CalibrationNode(ABC, Generic[ResultT]):
         attenuation = point.readout.attenuation
         if not float(attenuation).is_integer():
             raise ValueError(f"{target}: readout attenuation {attenuation} dB is not a whole number of dB")
+        drive_writes = self._drive_source_writes(target)
         drive_bus = bus_alias(target, Role.drive)
         readout_bus = bus_alias(target, Role.readout)
-        # Read the drive level before the first write, so a missing one leaves the line untouched.
-        instruments = [instrument.name.name for instrument in self.context.platform.get_element(drive_bus).instruments]
-        if "ROHDE_SCHWARZ" in instruments:
-            drive_writes = [
-                (Parameter.IQ_MODULATION, True),
-                (Parameter.POWER, self._param(target, "drive_power")),
-                (Parameter.RF_ON, True),
-            ]
-        elif "QCMRF" in instruments:
-            drive_writes = [(Parameter.HARDWARE_MODULATION, True), (Parameter.GAIN, self._param(target, "drive_gain"))]
-        else:
-            warn(NO_DRIVE_INSTRUMENT_MSG, stacklevel=2)
-            drive_writes = []
 
         restore = self.restore
         restore.set(drive_bus, Parameter.LO_FREQUENCY, round(point.drive.lo))
@@ -590,9 +594,9 @@ class FixedFluxNode(CalibrationNode[ResultT]):
     The home for the code the fixed-flux experiments share (``two_tone`` at the sweet spot, ``rabi``,
     ``t1``, ``t2``, ``landau_zener`` and the ``reset_point_search`` loop). It lands as those nodes are
     ported (tasks 6, 8-12); for now the spine fixes :attr:`applies_operating_point` and leaves the
-    three phases to the experiment. The step parameters (:meth:`CalibrationNode._param`) and the
-    drive/readout setup (:meth:`CalibrationNode._set_operating_point_hardware`) live on the base, since
-    flux-sweep nodes need them too.
+    three phases to the experiment. The step parameters (:meth:`CalibrationNode._param`), the drive
+    source (:meth:`CalibrationNode._set_drive_source`) and the operating point's LOs and attenuation
+    (:meth:`CalibrationNode._set_operating_point_hardware`) live on the base, since every node uses them.
     """
 
     applies_operating_point: ClassVar[bool] = True

@@ -1,14 +1,14 @@
-"""Tests for what every node shares on the base: step parameters and the operating point's hardware.
+"""Tests for what every node shares on the base: step parameters, the drive source, the operating point's line.
 
-``CalibrationNode._param`` reads a step parameter or the node's ``defaults``, and
-``CalibrationNode._set_operating_point_hardware`` sets a target's drive/readout line inside a real restore
-scope. A minimal leaf on each spine (registered in a scratch registry) exercises them: the Rohde & Schwarz
-branch on a fake platform, the QCM-RF branch on a real offline qililab platform (so its gain round-trips
-through the restore as on hardware), and the missing-level, attenuation and spine errors.
+``CalibrationNode._param`` reads a step parameter or the node's ``defaults``; ``_set_drive_source`` arms
+the drive with no operating point; ``_set_operating_point_hardware`` sets the LOs and attenuation, then
+the drive, inside a real restore scope. A minimal leaf on each spine (registered in a scratch registry)
+exercises them: the Rohde & Schwarz branch on a fake platform, the QCM-RF branch on a real offline qililab
+platform (so its gain round-trips through the restore as on hardware), and the missing-level, attenuation
+and spine errors. The instrument branches themselves are tested in ``test_drive_source.py``.
 """
 
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, ClassVar
 
 import pytest
@@ -25,15 +25,10 @@ from seqtante_open.calibration.model import (
     ReadoutFreqs,
 )
 from seqtante_open.controllers import node_registry
-from seqtante_open.controllers.calibration_node import (
-    NO_DRIVE_INSTRUMENT_MSG,
-    AnalysisResult,
-    FixedFluxNode,
-    FluxSweepNode,
-    RunContext,
-)
+from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode, FluxSweepNode, RunContext
 from seqtante_open.controllers.parameter_restore import restoring_parameters
 from seqtante_open.targets import ExperimentTarget
+from tests.controllers.fakes import InstrumentPlatform
 
 #: The offline runcard the ``platform`` fixture builds a real qililab platform from (QCM-RF ``drive_q1``).
 RUNCARD_PATH = Path(__file__).resolve().parents[1] / "runcards" / "test_AQPU_runcard.yml"
@@ -42,23 +37,6 @@ Q1 = ExperimentTarget.from_str("q1")
 EXPERIMENT = "example_operating_point"
 DRIVE_LO = 2.9e9
 READOUT_LO = 7e9
-
-
-class InstrumentPlatform:
-    """A platform whose drive bus reports ``instrument`` and that records parameter writes."""
-
-    def __init__(self, instrument: str):
-        self.instrument = instrument
-        self.values: dict = {}
-
-    def get_parameter(self, *, alias, parameter):
-        return self.values.get((alias, parameter), 0.0)
-
-    def set_parameter(self, *, alias, parameter, value):
-        self.values[alias, parameter] = value
-
-    def get_element(self, alias):
-        return SimpleNamespace(instruments=[SimpleNamespace(name=SimpleNamespace(name=self.instrument))])
 
 
 class _Leaf:
@@ -122,11 +100,14 @@ def _snapshot(platform, keys) -> dict:
     return {(alias, parameter): platform.get_parameter(alias=alias, parameter=parameter) for alias, parameter in keys}
 
 
-def _set_in_scope(node, platform, read_back=None) -> dict:
+def _set_in_scope(node, platform, read_back=None, *, operating_point=True) -> dict:
     """Set the hardware inside a restore scope; return the values set (or ``read_back`` read in scope)."""
     with restoring_parameters(platform) as restore:
         node._restore = restore
-        node._set_operating_point_hardware(Q1)
+        if operating_point:
+            node._set_operating_point_hardware(Q1)
+        else:
+            node._set_drive_source(Q1)
         return _snapshot(platform, read_back) if read_back is not None else dict(platform.values)
 
 
@@ -194,28 +175,29 @@ def test_qcm_rf_sets_the_gain_and_restores_it_on_a_real_platform(leaf_cls, platf
 @pytest.mark.parametrize(
     ("instrument", "parameters", "message"),
     [
-        ("ROHDE_SCHWARZ", {"drive_gain": 0.4}, "sets no 'drive_power'"),
-        ("QCMRF", {"drive_power": -20}, "sets no 'drive_gain'"),
+        ("ROHDE_SCHWARZ", {"drive_gain": 0.4}, "needs drive_power"),
+        ("QCMRF", {"drive_power": -20}, "needs drive_gain"),
     ],
 )
 def test_a_missing_drive_level_fails_before_any_write(leaf_cls, instrument, parameters, message):
     platform = InstrumentPlatform(instrument)
     node = _node(leaf_cls, platform, parameters)
 
-    with pytest.raises(KeyError, match=message):
+    with pytest.raises(ValueError, match=message):
         _set_in_scope(node, platform)
 
     assert platform.values == {}
 
 
-def test_an_unknown_drive_instrument_warns_and_sets_no_power(leaf_cls):
-    platform = InstrumentPlatform("SOMETHING_ELSE")
-    node = _node(leaf_cls, platform, {"drive_power": -20})
+def test_the_drive_source_needs_no_operating_point(leaf_cls):
+    # The experiment has no section in this calibration file, so no operating point: the drive still arms.
+    platform = InstrumentPlatform("ROHDE_SCHWARZ")
+    node = _node(leaf_cls, platform, {"drive_power": -20}, calibration=Calibration())
 
-    with pytest.warns(UserWarning, match=NO_DRIVE_INSTRUMENT_MSG):
-        snap = _set_in_scope(node, platform)
+    snap = _set_in_scope(node, platform, operating_point=False)
 
-    assert ("drive_q1", Parameter.POWER) not in snap
+    assert snap["drive_q1", Parameter.POWER] == -20
+    assert ("drive_q1", Parameter.LO_FREQUENCY) not in snap
 
 
 def test_a_fractional_attenuation_is_rejected(leaf_cls):
