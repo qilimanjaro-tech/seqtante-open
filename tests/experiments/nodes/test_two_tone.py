@@ -10,7 +10,6 @@ of them. The rejected-fit path checks that the step fails the target and leaves 
 import numpy as np
 import pytest
 from qililab.qprogram.calibration import Calibration
-from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 
 from seqtante_open.calibration.io import read_calibration_file, write_calibration_file
 from seqtante_open.calibration.model import (
@@ -27,9 +26,9 @@ from seqtante_open.experiments.nodes import TwoToneNode
 from seqtante_open.experiments.nodes import two_tone as two_tone_module
 from seqtante_open.outputs import FittedParameter
 from seqtante_open.targets import ExperimentTarget
+from tests.experiments.nodes.fakes import FakePlatform, identity_crosstalk
 
 Q1 = ExperimentTarget.from_str("q1")
-CROSSTALK_BUSES = ("flux_z_q1", "flux_x_q1")
 
 DRIVE_LO = 2.9e9
 FITTED_IF = -0.10e9  # + LO = 2.80 GHz
@@ -38,28 +37,6 @@ MEAS_ID = 100
 
 #: The sweep window the step hands the node (absolute Hz).
 PARAMS = {"sweep_start": 2.79e9, "sweep_stop": 2.81e9, "sweep_step": 0.4e6}
-
-
-class FakePlatform:
-    def __init__(self):
-        self.values: dict = {}
-        self.calls: list = []
-
-    def set_crosstalk(self, *, crosstalk):
-        self.calls.append("set_crosstalk")
-
-    def set_flux_to_zero(self):
-        self.calls.append("set_flux_to_zero")
-
-    def set_bias_to_zero(self):
-        self.calls.append("set_bias_to_zero")
-
-    def get_parameter(self, *, alias, parameter):
-        return self.values.get((alias, parameter), 0.0)
-
-    def set_parameter(self, *, alias, parameter, value):
-        self.values[alias, parameter] = value
-        self.calls.append(f"set:{alias}")
 
 
 class FakeLorentzian:
@@ -97,12 +74,6 @@ class FakeLorentzian:
         return 0.95
 
 
-def _crosstalk() -> CrosstalkMatrix:
-    return CrosstalkMatrix.from_buses(
-        {b: {bb: (1.0 if b == bb else 0.0) for bb in CROSSTALK_BUSES} for b in CROSSTALK_BUSES}
-    )
-
-
 def _file() -> CalibrationFile:
     return CalibrationFile(
         operating_points_version=1,
@@ -121,7 +92,7 @@ def _file() -> CalibrationFile:
 
 def _calibration() -> Calibration:
     calibration = Calibration()
-    calibration.crosstalk_matrix = _crosstalk()
+    calibration.crosstalk_matrix = identity_crosstalk()
     write_calibration_file(calibration, _file())
     return calibration
 
