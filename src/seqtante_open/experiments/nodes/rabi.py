@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from qili_qprograms.experiments import rabi_amplitude
@@ -92,8 +92,8 @@ class RabiFitted:
 class RabiNode(FixedFluxNode[RabiFitted]):
     """One Rabi amplitude sweep, analysed as ``pi_amplitude`` or ``readout_levels`` per step (QHC-1806)."""
 
-    experiment: ClassVar[str] = "rabi"
-    analyses: ClassVar[tuple[str, ...]] = (PI_AMPLITUDE, READOUT_LEVELS)
+    experiment = "rabi"
+    analyses = (PI_AMPLITUDE, READOUT_LEVELS)
     defaults = RABI_DEFAULTS
 
     def execute_node(self, targets: list[Target]) -> dict[Target, list[int]]:
@@ -191,8 +191,8 @@ class RabiNode(FixedFluxNode[RabiFitted]):
 
     def _apply_readout_levels(self, target: Target, fitted: RabiFitted) -> None:
         """Write the |0>/|1> levels onto the target's operating point, tagged with the readout pulse."""
-        point = operating_point_for(self.calibration_file, self.experiment, target)
-        point.readout.levels = ReadoutLevels(
+        operating_point = operating_point_for(self.calibration_file, self.experiment, target)
+        operating_point.readout.levels = ReadoutLevels(
             pulse=self._readout_pulse(target),
             level_0=Measured(nominal=fitted.level_0, std=fitted.level_0_std),
             level_1=Measured(nominal=fitted.level_1, std=fitted.level_1_std),
