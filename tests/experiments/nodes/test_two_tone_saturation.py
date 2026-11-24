@@ -10,11 +10,8 @@ from typing import ClassVar
 
 import numpy as np
 import pytest
-from qililab import Parameter
-from qililab.qprogram.calibration import Calibration
-
-from seqtante_open.calibration.io import write_calibration_file
-from seqtante_open.calibration.model import (
+from qili_qprograms.calibration.io import write_calibration_file
+from qili_qprograms.calibration.model import (
     CalibrationFile,
     DriveFreqs,
     ExperimentSection,
@@ -22,11 +19,14 @@ from seqtante_open.calibration.model import (
     OperatingPoint,
     ReadoutFreqs,
 )
+from qili_qprograms.targets import ExperimentTarget
+from qililab import Parameter, Square
+from qililab.qprogram.calibration import Calibration
+
 from seqtante_open.controllers import node_registry
 from seqtante_open.controllers.calibration_node import AnalysisResult, RunContext
 from seqtante_open.experiments.nodes import two_tone_saturation as spine_module
 from seqtante_open.experiments.nodes.two_tone_saturation import TwoToneSaturationNode
-from seqtante_open.targets import ExperimentTarget
 from tests.experiments.nodes.harness import ExecutingPlatform, identity_crosstalk, stub_output_and_save
 
 Q1 = ExperimentTarget.from_str("q1")
@@ -68,6 +68,7 @@ class FakeSaturationPlatform(ExecutingPlatform):
 
 def _calibration() -> Calibration:
     calibration = Calibration()
+    calibration.add_waveform(bus="readout_q1", name="readout-sweet_spot", waveform=Square(amplitude=1.0, duration=1000))
     calibration.crosstalk_matrix = identity_crosstalk()
     file = CalibrationFile(
         operating_points_version=1,

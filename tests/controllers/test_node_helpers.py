@@ -8,12 +8,9 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from qililab import IQDrag, Square
-from qililab.qprogram.calibration import Calibration
-
-from seqtante_open.calibration.bus_alias import Role
-from seqtante_open.calibration.io import write_calibration_file
-from seqtante_open.calibration.model import (
+from qili_qprograms.bus_alias import Role
+from qili_qprograms.calibration.io import write_calibration_file
+from qili_qprograms.calibration.model import (
     CalibrationFile,
     DriveFreqs,
     ExperimentSection,
@@ -21,6 +18,10 @@ from seqtante_open.calibration.model import (
     OperatingPoint,
     ReadoutFreqs,
 )
+from qili_qprograms.targets import ExperimentTarget
+from qililab import IQDrag, Square
+from qililab.qprogram.calibration import Calibration
+
 from seqtante_open.controllers.calibration_node import (
     AnalysisResult,
     FixedFluxNode,
@@ -28,7 +29,6 @@ from seqtante_open.controllers.calibration_node import (
     write_whole,
 )
 from seqtante_open.controllers.verdicts import AnalysisError
-from seqtante_open.targets import ExperimentTarget
 from tests.experiments.nodes.harness import ExecutingPlatform, FakeStreamArray, build_context, stub_output_and_save
 
 Q1 = ExperimentTarget.from_str("q1")
@@ -216,9 +216,21 @@ def test_the_stream_writes_one_acquisition_per_point(monkeypatch):
     assert stream.kwargs["qubit_idx"] == "q1"
 
 
-def test_the_stream_writes_the_whole_sweep_once_per_repetition(monkeypatch):
-    _, stream, platform = _streamed(monkeypatch, 1, write=write_whole, repetitions=2)
+def test_the_stream_writes_the_running_average_once_per_repetition(monkeypatch):
+    _, stream, platform = _streamed(monkeypatch, 1, write=write_whole, repetitions=3)
 
-    assert platform.executions == 2
-    assert [key for key, _ in stream.writes] == [(), ()]
-    np.testing.assert_array_equal(stream.writes[-1][1], np.full((3, 2), 2))
+    assert platform.executions == 3
+    assert [key for key, _ in stream.writes] == [(), (), ()]
+    # Executions return 1, 2, 3: the stream holds the average so far after each one.
+    for (_, written), average in zip(stream.writes, (1.0, 1.5, 2.0), strict=True):
+        np.testing.assert_array_equal(written, np.full((3, 2), average))
+
+
+@pytest.mark.parametrize("repetitions", [0, -1])
+def test_a_stream_with_no_repetition_is_rejected(monkeypatch, repetitions):
+    stub_output_and_save(monkeypatch)
+    node = _node(platform=_Platform(1))
+    qprogram = SimpleNamespace(name="qprogram")
+
+    with pytest.raises(ValueError, match="repetitions must be at least 1"):
+        node._stream(Q1, qprogram, experiment_name="helpers", loops={}, shape=(1, 2), repetitions=repetitions)

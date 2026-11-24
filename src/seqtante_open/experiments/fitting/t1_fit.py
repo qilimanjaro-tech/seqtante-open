@@ -66,6 +66,8 @@ class T1Fit(FittingClass[T1Results]):
         would give a negative lifetime, or raise on ``rate == 0``. :attr:`is_physical_decay` then reports
         the failure so ``analyze`` fails the target instead of scoring a non-physical value (QHC-1803).
         """
+        # A refit that finds nothing must not leave the previous result readable.
+        self._results = None
         params, pcov = sp.curve_fit(
             self.exponential,
             self.wait_values,
