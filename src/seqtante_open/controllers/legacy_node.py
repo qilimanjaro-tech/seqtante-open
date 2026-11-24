@@ -28,10 +28,10 @@ from copy import copy
 from typing import Any
 
 from loguru import logger
+from qili_qprograms.targets import ExperimentTarget
 from qililab import Platform
 
 from seqtante_open.experiments.experiment_functions import ExperimentFunction, experiment_functions_dict
-from seqtante_open.targets import ExperimentTarget
 
 #: A target as its name ("q1", "c1_2"), either a plain ``str`` or an ``ExperimentTarget`` (ADR-0001).
 TargetLike = str | ExperimentTarget

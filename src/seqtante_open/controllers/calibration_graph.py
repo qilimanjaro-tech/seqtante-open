@@ -25,7 +25,8 @@ from seqtante_open.controllers.legacy_node import LegacyNode
 from seqtante_open.controllers.node_registry import experiment_spec
 
 if TYPE_CHECKING:
-    from seqtante_open.calibration.model import CalibrationFile
+    from qili_qprograms.calibration.model import CalibrationFile
+
     from seqtante_open.controllers.calibration_node import GraphNode, RunContext
     from seqtante_open.controllers.calibration_tree_parser import Pipeline, Step
 

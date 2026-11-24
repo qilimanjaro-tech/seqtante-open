@@ -41,13 +41,14 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Generic, Protocol, TypeVar, runtime_checkable
 
 from loguru import logger
+from qili_qprograms.bus_alias import Role, bus_alias
+from qili_qprograms.calibration.io import read_calibration_file, save_calibration, write_calibration_file
+from qili_qprograms.calibration.model import CalibrationFile
+from qili_qprograms.targets import Target
 from qililab import Parameter, Platform
 from qililab.qprogram.calibration import Calibration
 from qililab.typings import ParameterValue
 
-from seqtante_open.calibration.bus_alias import Role, bus_alias
-from seqtante_open.calibration.io import read_calibration_file, save_calibration, write_calibration_file
-from seqtante_open.calibration.model import CalibrationFile
 from seqtante_open.controllers.crosstalk_session import CrosstalkSession, crosstalk_session
 from seqtante_open.controllers.drive_source import drive_source_writes
 from seqtante_open.controllers.node_registry import BenchmarkSpec, Parallel, experiment_spec, register_node
@@ -58,7 +59,6 @@ from seqtante_open.controllers.operating_point import (
 )
 from seqtante_open.controllers.parameter_restore import ParameterRestore, restoring_parameters
 from seqtante_open.controllers.verdicts import AnalysisError, BenchmarkResult, BenchmarkThresholds, verdict_for
-from seqtante_open.targets import Target
 
 #: The node-specific fitted payload an ``analyze`` hands its ``apply`` (a frequency, a pi amplitude,
 #: readout levels...). The base passes it through untouched; each node fixes its own concrete type.

@@ -18,20 +18,20 @@ import os
 
 import networkx as nx
 import pytest
-
-from seqtante_open.calibration.model import (
+from qili_qprograms.calibration.model import (
     CalibrationFile,
     DriveFreqs,
     Flux,
     OperatingPoint,
     ReadoutFreqs,
 )
+from qili_qprograms.targets import QubitTarget
+
 from seqtante_open.controllers import node_registry
 from seqtante_open.controllers.calibration_graph import CalibrationGraph, GraphBuildError
 from seqtante_open.controllers.calibration_node import AnalysisResult, CalibrationNode, RunContext
 from seqtante_open.controllers.calibration_tree_parser import Pipeline, Step
 from seqtante_open.controllers.legacy_node import LegacyNode
-from seqtante_open.targets import QubitTarget
 
 
 def _operating_point() -> OperatingPoint:
