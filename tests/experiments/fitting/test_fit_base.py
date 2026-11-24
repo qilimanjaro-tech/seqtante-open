@@ -87,21 +87,24 @@ def make_fit(path=None, fitting=None):
     fit.id = 42
     fit.fitting = {} if fitting is None else dict(fitting)
     fit.path = path
-    fit.fitted = False
+    fit._results = None
     return fit
 
 
-# ------------------------------- _require_fit -------------------------------
+# --------------------------------- results ----------------------------------
 
 
-def test_require_fit_raises_until_a_fit_succeeds():
-    """Every fit gates its results on ``fitted``, with the same error, instead of its own check."""
+def test_results_refuse_to_be_read_until_a_fit_assigns_them():
+    """Every fitted value is read through ``results``, so a read before ``fit()`` raises without a per-method check."""
     fit = make_fit()
+    assert fit.fitted is False
     with pytest.raises(RuntimeError, match="FittingClass has no fit result"):
-        fit._require_fit()
+        _ = fit.results
 
-    fit.fitted = True
-    fit._require_fit()
+    fit.results = {"center": 0.1}
+
+    assert fit.fitted is True
+    assert fit.results == {"center": 0.1}
 
 
 # --------------------------- add_fitted_parameter ---------------------------

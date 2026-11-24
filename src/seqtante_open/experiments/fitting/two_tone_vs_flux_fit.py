@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import TypedDict
+
 import numpy as np
 import plotly.graph_objects as go
 from qililab.typings.enums import Parameter
@@ -24,7 +26,18 @@ _MAX_TRACE_ATTEMPTS = 20
 _MIN_TRACES_FOR_PARABOLA = 3
 
 
-class FluxoniumTwoToneFluxModel(FittingClass):
+class SweetSpotResults(TypedDict):
+    """What :meth:`FluxoniumTwoToneFluxModel.fit` produces when it finds a sweet spot."""
+
+    #: The parabola's vertex, in the swept flux's units.
+    center: float
+    #: The parabola's R²; NaN when the fitted IFs have no spread.
+    r_squared: float
+    #: ``np.polyfit`` coefficients of the parabola, highest power first.
+    coefficients: np.ndarray
+
+
+class FluxoniumTwoToneFluxModel(FittingClass[SweetSpotResults]):
     """Fit and plot a two-tone (qubit spectroscopy) frequency-vs-flux map.
 
     Rotates the IQ plane of every flux row onto its signal quadrature, fits a Lorentzian to
@@ -35,7 +48,7 @@ class FluxoniumTwoToneFluxModel(FittingClass):
 
     Rows whose Lorentzian never reaches ``r² >= 0.9`` are dropped, and the parabola is only
     fitted when at least three rows survive and its vertex falls inside the swept range;
-    otherwise :attr:`fitted` stays ``False`` and callers must not use :attr:`center`.
+    otherwise :attr:`fitted` stays ``False`` and reading :attr:`center` raises.
 
     Args:
         measurement_id: Autocalibration database id of the sweep to load.
@@ -46,10 +59,6 @@ class FluxoniumTwoToneFluxModel(FittingClass):
         flux_bus: Bus the flux loop swept, used to label the plot. Defaults to the bus the
             measurement recorded for that loop.
     """
-
-    center: float
-    r_squared: float
-    coefficients: np.ndarray
 
     def __init__(
         self,
@@ -99,10 +108,24 @@ class FluxoniumTwoToneFluxModel(FittingClass):
 
         residuals = self.fitted_if[self.mask] - np.polyval(coefficients, self.fluxes[self.mask])
         spread = self.fitted_if[self.mask] - self.fitted_if[self.mask].mean()
-        self.coefficients = coefficients
-        self.r_squared = float(1 - residuals @ residuals / (spread @ spread)) if spread.any() else 0.0
-        self.center = float(center)
-        self.fitted = True
+        # IFs with no spread leave nothing for the parabola to explain: R² is undefined (NaN), as for T1.
+        r_squared = float(1 - residuals @ residuals / (spread @ spread)) if spread.any() else float("nan")
+        self.results = SweetSpotResults(center=float(center), r_squared=r_squared, coefficients=coefficients)
+
+    @property
+    def center(self) -> float:
+        """The flux sweet spot: the parabola's vertex."""
+        return self.results["center"]
+
+    @property
+    def r_squared(self) -> float:
+        """The parabola's R²."""
+        return self.results["r_squared"]
+
+    @property
+    def coefficients(self) -> np.ndarray:
+        """The parabola's ``np.polyfit`` coefficients, highest power first."""
+        return self.results["coefficients"]
 
     def save_fitting(self, loop: str) -> None:
         """Write the sweet-spot bias on ``loop`` and the parabola R² to the measurement entry (QHC-1497).
@@ -115,7 +138,6 @@ class FluxoniumTwoToneFluxModel(FittingClass):
         """
         from seqtante_open.outputs import FittedParameter
 
-        self._require_fit()
         self.add_fitted_parameter(FittedParameter(f"sweet_spot_flux_{loop}"), self.center)
         self.add_fitted_parameter(FittedParameter.FIT_R2, self.r_squared)
         self.save_fitting_to_database()
