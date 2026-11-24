@@ -85,6 +85,8 @@ class T2Fit(FittingClass[T2Results]):
         :attr:`is_physical_decay` then reports the failure so ``analyze`` fails the target instead of
         scoring a non-physical value, as for T1 (QHC-1803).
         """
+        # A refit that finds nothing must not leave the previous result readable.
+        self._results = None
         params, pcov = sp.curve_fit(
             self.sinus_exp,
             self.wait_values,

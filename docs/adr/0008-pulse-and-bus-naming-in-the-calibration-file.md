@@ -4,6 +4,8 @@ status: accepted
 
 # Pulses are named by purpose per bus, and bus keys keep qililab's existing convention
 
+> **Where this lives now (QHC-1933).** The calibration-file model, its I/O, the pulse-name grammar, bus aliases and targets are implemented in [qili-qprograms](https://github.com/qilimanjaro-tech/qili-qprograms) (`qili_qprograms.calibration`, `qili_qprograms.bus_alias`, `qili_qprograms.targets`), because its QPrograms read the calibration file. seqtante-open imports them. A change to the format is a qili-qprograms PR plus a `uv.lock` bump here.
+
 ADR-0001 stores operating points per target and has each experiment section name the operating point it runs at and the pulses it plays, with pulses living as named waveforms in qililab's `Calibration.waveforms`. It left two things to a cross-team agreement with the qili-experiments and qili-runtime developers, to be settled before either side codes against the format: how pulses are named, and the exact shape of an experiment section. We decided that **bus keys keep the hardware/crosstalk convention already in qililab**, that **pulse names are by purpose, `lower_snake` and unique per bus, carrying their operating point as a `-`-joined suffix where a purpose is calibrated at more than one point**, and that a **section names only its operating point and its pulses (role → name)**. The operating point holds no pulse references; the pulse name is where the point lives. Agreed on QHC-1796 (Juanjo Martinez with Ely Farrés, Natàlia Padilla and Oscar).
 
 ## The shape

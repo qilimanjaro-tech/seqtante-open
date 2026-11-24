@@ -13,11 +13,8 @@ from typing import ClassVar
 
 import numpy as np
 import pytest
-from qililab import Parameter
-from qililab.qprogram.calibration import Calibration
-
-from seqtante_open.calibration.io import write_calibration_file
-from seqtante_open.calibration.model import (
+from qili_qprograms.calibration.io import write_calibration_file
+from qili_qprograms.calibration.model import (
     CalibrationFile,
     DriveFreqs,
     ExperimentSection,
@@ -25,10 +22,13 @@ from seqtante_open.calibration.model import (
     OperatingPoint,
     ReadoutFreqs,
 )
+from qili_qprograms.targets import ExperimentTarget
+from qililab import Parameter, Square
+from qililab.qprogram.calibration import Calibration
+
 from seqtante_open.controllers.verdicts import BenchmarkDirection, BenchmarkThresholds, Verdict
 from seqtante_open.experiments.nodes import T2Node
 from seqtante_open.experiments.nodes import t2 as t2_module
-from seqtante_open.targets import ExperimentTarget
 from tests.experiments.nodes.harness import (
     ExecutingPlatform,
     FakeStreamArray,
@@ -122,6 +122,7 @@ class FakeT2Fit:
 
 def _calibration() -> Calibration:
     calibration = Calibration()
+    calibration.add_waveform(bus="readout_q1", name="readout-sweet_spot", waveform=Square(amplitude=1.0, duration=1000))
     calibration.crosstalk_matrix = identity_crosstalk()
     write_calibration_file(
         calibration,

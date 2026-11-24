@@ -19,11 +19,11 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from qili_qprograms.targets import CouplerTarget, QubitTarget
 from ruamel.yaml import YAML
 
 from seqtante_open.controllers import BenchmarkThresholds, CalibrationParser, Pipeline, Step, TreeParseError
 from seqtante_open.controllers.verdicts import BenchmarkDirection
-from seqtante_open.targets import CouplerTarget, QubitTarget
 
 HIGHER = BenchmarkDirection.higher_is_better
 LOWER = BenchmarkDirection.lower_is_better
