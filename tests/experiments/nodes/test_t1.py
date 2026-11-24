@@ -19,7 +19,6 @@ import numpy as np
 import pytest
 from qililab import Parameter
 from qililab.qprogram.calibration import Calibration
-from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 
 from seqtante_open.calibration.io import write_calibration_file
 from seqtante_open.calibration.model import (
@@ -34,10 +33,15 @@ from seqtante_open.controllers.verdicts import BenchmarkDirection, BenchmarkThre
 from seqtante_open.experiments.nodes import T1Node
 from seqtante_open.experiments.nodes import t1 as t1_module
 from seqtante_open.targets import ExperimentTarget
-from tests.experiments.nodes.harness import ExecutingPlatform, FakeStreamArray, build_context, stub_output_and_save
+from tests.experiments.nodes.harness import (
+    ExecutingPlatform,
+    FakeStreamArray,
+    build_context,
+    identity_crosstalk,
+    stub_output_and_save,
+)
 
 Q1 = ExperimentTarget.from_str("q1")
-CROSSTALK_BUSES = ("flux_z_q1", "flux_x_q1")
 DRIVE_BUS = "drive_q1"
 READOUT_BUS = "readout_q1"
 
@@ -128,15 +132,9 @@ class FakeT1Fit:
         return T1_SIGMA_US
 
 
-def _crosstalk() -> CrosstalkMatrix:
-    return CrosstalkMatrix.from_buses(
-        {b: {bb: (1.0 if b == bb else 0.0) for bb in CROSSTALK_BUSES} for b in CROSSTALK_BUSES}
-    )
-
-
 def _calibration() -> Calibration:
     calibration = Calibration()
-    calibration.crosstalk_matrix = _crosstalk()
+    calibration.crosstalk_matrix = identity_crosstalk()
     write_calibration_file(
         calibration,
         CalibrationFile(

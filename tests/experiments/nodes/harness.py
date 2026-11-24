@@ -22,15 +22,23 @@ test module.
 
 The shape mirrors :mod:`tests.experiments.fitting.harness`: shared fakes and helpers in one place, so a
 new node's test is the node-specific stubs plus a few calls here. As more nodes land this can grow a
-declarative ``NodeTestCase`` (scripted driver + fit + EXPECTED verdict) in the same vein; for now it is
-the toolkit the real nodes (``T1Node``, QHC-1803; ``TwoToneVsFluxNode``, QHC-1804) share: the platform
-fakes, the stream array and the output/save stubbing.
+declarative ``NodeTestCase`` (scripted driver + fit + EXPECTED verdict) in the same vein. For now it is
+the toolkit every node test shares (QHC-1932):
+
+- :class:`FakePlatform`: records writes and lifecycle calls.
+- :class:`ExecutingPlatform`: also answers ``get_element`` for the buses a test declares, and
+  ``execute_qprogram`` with the readout shape the test's :meth:`~ExecutingPlatform.results` returns.
+- :class:`FakeStreamArray`: stands in for ``StreamArray``, recording how it was built and what was written.
+- :func:`identity_crosstalk`: the crosstalk matrix the operating-point placement needs.
+- :func:`build_context` and :func:`stub_output_and_save`: the run context and the DB/save stubs.
 """
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, ClassVar
+
+from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 
 from seqtante_open.controllers import calibration_node as node_module
 from seqtante_open.controllers.calibration_node import RunContext
@@ -39,6 +47,15 @@ from seqtante_open.outputs import output_controller
 if TYPE_CHECKING:
     import pytest
     from qililab.qprogram.calibration import Calibration
+
+
+#: The flux buses of ``q1`` the identity crosstalk spans by default.
+CROSSTALK_BUSES = ("flux_z_q1", "flux_x_q1")
+
+
+def identity_crosstalk(buses: tuple[str, ...] = CROSSTALK_BUSES) -> CrosstalkMatrix:
+    """An identity crosstalk matrix over ``buses``: each flux line drives only itself."""
+    return CrosstalkMatrix.from_buses({b: {bb: (1.0 if b == bb else 0.0) for bb in buses} for b in buses})
 
 
 class FakePlatform:

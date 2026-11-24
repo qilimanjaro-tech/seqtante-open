@@ -27,7 +27,6 @@ import numpy as np
 import pytest
 from qililab import Parameter
 from qililab.qprogram.calibration import Calibration
-from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 
 from seqtante_open.calibration.io import read_calibration_file, write_calibration_file
 from seqtante_open.calibration.model import (
@@ -41,7 +40,13 @@ from seqtante_open.calibration.model import (
 from seqtante_open.experiments.nodes import TwoToneVsFluxNode
 from seqtante_open.experiments.nodes import two_tone_vs_flux as node_module
 from seqtante_open.targets import ExperimentTarget
-from tests.experiments.nodes.harness import ExecutingPlatform, FakeStreamArray, build_context, stub_output_and_save
+from tests.experiments.nodes.harness import (
+    ExecutingPlatform,
+    FakeStreamArray,
+    build_context,
+    identity_crosstalk,
+    stub_output_and_save,
+)
 
 Q1 = ExperimentTarget.from_str("q1")
 C1_2 = ExperimentTarget.from_str("c1_2")
@@ -134,9 +139,7 @@ class FakeFluxPlatform(ExecutingPlatform):
 
 def _calibration(flux: Flux | None = None) -> Calibration:
     calibration = Calibration()
-    calibration.crosstalk_matrix = CrosstalkMatrix.from_buses(
-        {b: {bb: (1.0 if b == bb else 0.0) for bb in CROSSTALK_BUSES} for b in CROSSTALK_BUSES}
-    )
+    calibration.crosstalk_matrix = identity_crosstalk(CROSSTALK_BUSES)
     write_calibration_file(
         calibration,
         CalibrationFile(
@@ -343,3 +346,14 @@ def test_an_unmeasurable_step_fails_the_target_before_measuring(calls, flux, par
     assert failed == [str(targets[0])]
     assert calls["build"] is None
     assert platform.executions == 0
+
+
+def test_two_tone_vs_flux_runs_as_its_node_class():
+    # Ported in QHC-1804: the graph builds a TwoToneVsFluxNode, not the legacy function, for this experiment.
+    from seqtante_open.controllers.node_registry import experiment_spec
+    from seqtante_open.experiments.nodes import TwoToneVsFluxNode
+
+    spec = experiment_spec("two_tone_vs_flux")
+    assert spec is not None
+    assert spec.node_cls is TwoToneVsFluxNode
+    assert spec.analyses == ("parabola_vertex",)
