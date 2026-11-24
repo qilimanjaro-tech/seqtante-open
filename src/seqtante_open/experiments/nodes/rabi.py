@@ -168,7 +168,8 @@ class RabiNode(FixedFluxNode[RabiFitted]):
     def _require_pi_in_window(target: Target, pi_amplitude: float, amplitudes: np.ndarray) -> None:
         """Fail the target unless the fitted pi amplitude is defined and inside the swept window."""
         low, high = float(np.min(amplitudes)), float(np.max(amplitudes))
-        if not low <= pi_amplitude <= high:  # NaN (no oscillation) fails too
+        # NaN (no oscillation) fails too.
+        if not low <= pi_amplitude <= high:
             raise AnalysisError(
                 f"{target} rabi fit puts the pi amplitude at {pi_amplitude:.4g}, outside the swept window "
                 f"[{low:.4g}, {high:.4g}]; widen drive_amplitude_sweep"
