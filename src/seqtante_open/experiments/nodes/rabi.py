@@ -33,24 +33,18 @@ lives in :class:`~seqtante_open.experiments.fitting.RabiAmplitudeModel` and the 
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
-from qili_qprograms.calibration import pulse_name
 from qili_qprograms.experiments import rabi_amplitude
 from qililab import IQDrag
-from qililab.result import StreamArray
 
 from seqtante_open.calibration.bus_alias import Role, bus_alias
 from seqtante_open.calibration.model import Measured, ReadoutLevels
-from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode
+from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode, write_whole
 from seqtante_open.controllers.operating_point import operating_point_for
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.fitting import RabiAmplitudeModel
-from seqtante_open.experiments.results import measurement_id
-from seqtante_open.outputs import output_controller
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -64,19 +58,14 @@ _EXPERIMENT_NAME = "rabi_amplitude_drag"
 READOUT_LEVELS = "readout_levels"
 PI_AMPLITUDE = "pi_amplitude"
 
-#: Default minimum R² a ``readout_levels`` fit must reach to pass its step (overridable per step).
-DEFAULT_MIN_R2 = 0.9
-
 #: The node's ``defaults``; every one is overridable in the tree. ``drive_amplitude_sweep``, ``averages``
 #: and ``relax_duration`` have no default, and the drive instrument decides which of ``drive_power``
 #: (Rohde & Schwarz, dBm) or ``drive_gain`` (QCM-RF, [-1, 1]) the step must set.
 RABI_DEFAULTS: Mapping[str, Any] = {
     "readout_ringup_time": 0,
-    "min_r2": DEFAULT_MIN_R2,
+    # Minimum R² the cosine fit must reach to pass the step.
+    "min_r2": 0.9,
 }
-
-#: The pulse purposes ``rabi_amplitude`` plays, per role (ADR-0008): ``<purpose>-<operating_point>``.
-_PULSE_PURPOSES: Mapping[Role, str] = {Role.drive: "pi", Role.readout: "readout"}
 
 
 @dataclass(frozen=True)
@@ -111,20 +100,14 @@ class RabiNode(FixedFluxNode[RabiFitted]):
         :meth:`~seqtante_open.controllers.calibration_node.CalibrationNode._set_operating_point_hardware`
         sets from the operating point, through the restore handle so the run undoes it (ADR-0006).
         """
-        section = self.calibration_file.experiments[self.experiment][str(target)]
-        operating_point_name = section.operating_point
-        for role in _PULSE_PURPOSES:
-            self._require_pulse(target, role)
-        drive_bus = bus_alias(target, Role.drive)
-        readout_bus = bus_alias(target, Role.readout)
-        sweep = np.linspace(*self._param(target, "drive_amplitude_sweep"))
-        if len(sweep) < 2:
-            raise ValueError(f"{target}: drive_amplitude_sweep must have at least 2 points, got {len(sweep)}")
+        self._require_pulse(target, Role.drive, "pi")
+        self._require_pulse(target, Role.readout, "readout")
+        sweep = self._sweep(target, "drive_amplitude_sweep")
 
         qprogram = rabi_amplitude(
             calibration=self.context.calibration,
             target=str(target),
-            operating_point=operating_point_name,
+            operating_point=self._section(target).operating_point,
             drive_amplitude_sweep=sweep,
             averages=self._param(target, "averages"),
             relax_duration=self._param(target, "relax_duration"),
@@ -132,24 +115,22 @@ class RabiNode(FixedFluxNode[RabiFitted]):
         )
 
         self._set_operating_point_hardware(target)
-
-        platform = self.context.platform
-        stream_array = StreamArray(
-            shape=(len(sweep), 2),
-            loops={
-                "drive_amplitude": {"array": sweep, "units": "amp", "bus": drive_bus, "parameter": "drive_amplitude"}
-            },
-            platform=platform,
+        # The gain sweep runs in hardware: one acquisition holds the whole sweep.
+        return self._stream(
+            target,
+            qprogram,
             experiment_name=_EXPERIMENT_NAME,
-            db_manager=output_controller.db_manager,
-            qprogram=qprogram,
-            calibration=self.context.calibration,
-            qubit_idx=str(target),
+            loops={
+                "drive_amplitude": {
+                    "array": sweep,
+                    "units": "amp",
+                    "bus": bus_alias(target, Role.drive),
+                    "parameter": "drive_amplitude",
+                }
+            },
+            shape=(len(sweep), 2),
+            write=write_whole,
         )
-        with stream_array:
-            results = platform.execute_qprogram(qprogram).results
-            stream_array[()] = results[readout_bus][0].array.T
-        return measurement_id(stream_array)
 
     def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[RabiFitted]:
         """Fit the sweep, check it, save the fit to the DB, plot, and return the pi amplitude and readout levels.
@@ -164,10 +145,7 @@ class RabiNode(FixedFluxNode[RabiFitted]):
         )
         model.fit()
 
-        min_r2 = self._param(target, "min_r2")
-        # A flat trace leaves R² NaN; reject it explicitly, since every comparison with NaN is False.
-        if math.isnan(model.r_squared) or model.r_squared < min_r2:
-            raise AnalysisError(f"{target} rabi fit R² {model.r_squared:.3f} is below the minimum {min_r2}")
+        self._require_r2(target, model.r_squared)
         if self.analysis == PI_AMPLITUDE and model.results["angular_frequency"] <= 0:
             raise AnalysisError(f"{target} rabi fit shows no oscillation; there is no pi amplitude to apply")
 
@@ -196,7 +174,7 @@ class RabiNode(FixedFluxNode[RabiFitted]):
         """Write the |0>/|1> levels onto the target's operating point, tagged with the readout pulse."""
         operating_point = operating_point_for(self.calibration_file, self.experiment, target)
         operating_point.readout.levels = ReadoutLevels(
-            pulse=self._pulse(target, Role.readout),
+            pulse=self._pulse(target, Role.readout, "readout"),
             level_0=Measured(nominal=fitted.level_0, std=fitted.level_0_std),
             level_1=Measured(nominal=fitted.level_1, std=fitted.level_1_std),
         )
@@ -204,7 +182,7 @@ class RabiNode(FixedFluxNode[RabiFitted]):
     def _apply_pi_amplitude(self, target: Target, fitted: RabiFitted) -> None:
         """Write the pi amplitude into the ``pi-<operating_point>`` DRAG pulse, keeping its other shape parameters."""
         drive_bus = bus_alias(target, Role.drive)
-        drive_pulse = self._require_pulse(target, Role.drive)
+        drive_pulse = self._require_pulse(target, Role.drive, "pi")
         existing = self.context.calibration.get_waveform(drive_bus, drive_pulse)
         if not isinstance(existing, IQDrag):
             raise AnalysisError(
@@ -218,35 +196,3 @@ class RabiNode(FixedFluxNode[RabiFitted]):
             drag_coefficient=existing.drag_coefficient,
         )
         self.context.calibration.add_waveform(bus=drive_bus, name=drive_pulse, waveform=pulse)
-
-    def _pulse(self, target: Target, role: Role) -> str:
-        """The pulse ``rabi_amplitude`` plays on ``role``: ``<purpose>-<operating_point>`` (ADR-0008).
-
-        Raises:
-            ValueError: if the section names a different pulse for ``role``, which the shared QProgram
-                would not play.
-        """
-        section = self.calibration_file.experiments[self.experiment][str(target)]
-        played = pulse_name(_PULSE_PURPOSES[role], section.operating_point)
-        named = section.pulses.get(role, played)
-        if named != played:
-            raise ValueError(
-                f"{target}: the rabi section names {role.value} pulse '{named}', but rabi_amplitude "
-                f"plays '{played}' at operating point '{section.operating_point}'"
-            )
-        return played
-
-    def _require_pulse(self, target: Target, role: Role) -> str:
-        """:meth:`_pulse`, checked to exist on its bus, so a missing pulse fails before any hardware is set.
-
-        Raises:
-            ValueError: if the section names another pulse, or the pulse is not in ``Calibration.waveforms``.
-        """
-        name = self._pulse(target, role)
-        bus = bus_alias(target, role)
-        if not self.context.calibration.has_waveform(bus, name):
-            raise ValueError(
-                f"{target}: rabi needs the '{name}' pulse on {bus}, which is not in Calibration.waveforms; "
-                "it comes with the manual calibration"
-            )
-        return name

@@ -29,13 +29,12 @@ from seqtante_open.controllers.calibration_node import RunContext
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.nodes import RabiNode
 from seqtante_open.experiments.nodes import rabi as rabi_module
-from seqtante_open.outputs import output_controller
 from seqtante_open.targets import ExperimentTarget
 from tests.experiments.nodes.harness import (
     ExecutingPlatform,
     FakePlatform,
-    FakeStreamArray,
     identity_crosstalk,
+    stub_output_and_save,
 )
 
 Q1 = ExperimentTarget.from_str("q1")
@@ -206,8 +205,7 @@ def test_execute_builds_the_qili_sweep_and_sets_the_hardware(monkeypatch):
     """The real ``execute_node`` builds the qili QProgram at the operating point and sets the HW from it."""
     monkeypatch.setattr(node_module, "save_calibration", lambda calibration, path: None)
     monkeypatch.setattr(rabi_module, "RabiAmplitudeModel", FakeRabiModel)
-    monkeypatch.setattr(output_controller, "_initialized", True)
-    monkeypatch.setattr(output_controller, "_db_manager", object())
+    stub_output_and_save(monkeypatch)
     built: dict = {}
 
     def fake_rabi_amplitude(**kwargs):
@@ -215,7 +213,6 @@ def test_execute_builds_the_qili_sweep_and_sets_the_hardware(monkeypatch):
         return SimpleNamespace(name="qprogram")  # sentinel; the fake platform/stream ignore its content
 
     monkeypatch.setattr(rabi_module, "rabi_amplitude", fake_rabi_amplitude)
-    monkeypatch.setattr(rabi_module, "StreamArray", FakeStreamArray)
 
     calibration = _calibration(_rabi_file("sweet_spot"))
     _add_played_pulses(calibration, "sweet_spot")
@@ -289,9 +286,7 @@ def test_a_rejected_fit_is_never_saved_or_plotted(monkeypatch, analysis, knob, v
 def _executing_rabi(calibration: Calibration, monkeypatch) -> tuple[RabiNode, FakeRabiPlatform]:
     """A rabi node whose real ``execute_node`` runs against a fake platform, with the QProgram builder stubbed."""
     monkeypatch.setattr(rabi_module, "rabi_amplitude", lambda **kwargs: SimpleNamespace(name="qprogram"))
-    monkeypatch.setattr(rabi_module, "StreamArray", FakeStreamArray)
-    monkeypatch.setattr(output_controller, "_initialized", True)
-    monkeypatch.setattr(output_controller, "_db_manager", object())
+    stub_output_and_save(monkeypatch)
     platform = FakeRabiPlatform()
     context = RunContext(
         platform=platform, platform_path="runcard.yml", calibration=calibration, calibration_path="calibration.yml"
@@ -320,7 +315,7 @@ def test_a_section_naming_another_pulse_is_rejected(monkeypatch):
     _add_played_pulses(calibration, "reset")  # the named pulse exists, so only rabi's own check can reject it
     node, platform = _executing_rabi(calibration, monkeypatch)
 
-    with pytest.raises(ValueError, match="names drive pulse 'pi-reset', but rabi_amplitude plays 'pi-sweet_spot'"):
+    with pytest.raises(ValueError, match="names drive pulse 'pi-reset', but its QProgram plays 'pi-sweet_spot'"):
         node.execute_node([Q1])
 
     assert platform.calls == []

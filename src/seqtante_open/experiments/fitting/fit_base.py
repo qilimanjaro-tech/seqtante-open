@@ -141,7 +141,7 @@ class FittingClass(ABC, Generic[ResultsT]):
             return
         output_controller.db_manager.add_fitting(id=self.id, path=filepath)
 
-    def save_plot(self, fig: go.Figure, title: str, save_to_db: bool = False) -> str | None:
+    def save_plot(self, fig: go.Figure, title: str, save_to_db: bool = True) -> str | None:
         """Write ``fig`` under :attr:`path`, or show it when there is no path.
 
         Args:
@@ -149,7 +149,8 @@ class FittingClass(ABC, Generic[ResultsT]):
             title (str): Basename for the file. Newlines are stripped, so a plot
                 title broken across lines can be passed straight in.
             save_to_db (bool, optional): Store the written path as the fit's representative plot with
-                :meth:`save_fitting_path_to_database`. Defaults to False.
+                :meth:`save_fitting_path_to_database`, so the measurement entry points at it. Defaults to True
+                (QHC-1932): every fit stores its plot's path.
 
         Returns:
             str | None: Path written, or None when the figure was shown instead.
