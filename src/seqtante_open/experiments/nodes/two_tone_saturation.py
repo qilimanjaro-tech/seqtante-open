@@ -28,12 +28,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from qili_qprograms.experiments import two_tone_saturation
-from qililab.result import StreamArray
 
 from seqtante_open.calibration.bus_alias import Role, bus_alias
-from seqtante_open.controllers.calibration_node import FixedFluxNode, ResultT
-from seqtante_open.experiments.results import measurement_id
-from seqtante_open.outputs import output_controller
+from seqtante_open.controllers.calibration_node import FixedFluxNode, ResultT, write_whole
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -79,21 +76,12 @@ class TwoToneSaturationNode(FixedFluxNode[ResultT]):
 
         Raises:
             TypeError: if called on a node that sets no ``experiment`` (a spine, not a leaf).
-            ValueError: if ``drive_if_sweep`` has fewer than 2 points.
         """
-        experiment = self.experiment
-        if experiment is None:
-            raise TypeError(f"{type(self).__name__} sets no experiment; only a leaf node can measure")
-        if len(drive_if_sweep) < 2:
-            raise ValueError(f"{target}: the drive-IF sweep must have at least 2 points, got {len(drive_if_sweep)}")
-        section = self.calibration_file.experiments[experiment][str(target)]
-        drive_bus = bus_alias(target, Role.drive)
-        readout_bus = bus_alias(target, Role.readout)
-
+        operating_point = self._section(target).operating_point
         qprogram = two_tone_saturation(
             calibration=self.context.calibration,
             target=str(target),
-            operating_point=section.operating_point,
+            operating_point=operating_point,
             drive_if_sweep=drive_if_sweep,
             averages=self._param(target, "averages"),
             relax_duration=self._param(target, "relax_duration"),
@@ -107,21 +95,19 @@ class TwoToneSaturationNode(FixedFluxNode[ResultT]):
         )
 
         self._set_operating_point_hardware(target)
-
-        platform = self.context.platform
-        stream_array = StreamArray(
-            shape=(len(drive_if_sweep), 2),
-            loops={
-                "IF_frequency": {"array": drive_if_sweep, "units": "Hz", "bus": drive_bus, "parameter": "IF_frequency"}
-            },
-            platform=platform,
+        # The drive-IF sweep runs in hardware: one acquisition holds the whole sweep.
+        return self._stream(
+            target,
+            qprogram,
             experiment_name=EXPERIMENT_NAME,
-            db_manager=output_controller.db_manager,
-            qprogram=qprogram,
-            calibration=self.context.calibration,
-            qubit_idx=str(target),
+            loops={
+                "IF_frequency": {
+                    "array": drive_if_sweep,
+                    "units": "Hz",
+                    "bus": bus_alias(target, Role.drive),
+                    "parameter": "IF_frequency",
+                }
+            },
+            shape=(len(drive_if_sweep), 2),
+            write=write_whole,
         )
-        with stream_array:
-            results = platform.execute_qprogram(qprogram).results
-            stream_array[()] = results[readout_bus][0].array.T
-        return measurement_id(stream_array)

@@ -34,8 +34,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
-
 from seqtante_open.controllers.calibration_node import AnalysisResult
 from seqtante_open.controllers.operating_point import operating_point_for
 from seqtante_open.controllers.verdicts import AnalysisError
@@ -50,12 +48,14 @@ if TYPE_CHECKING:
 
 LORENTZIAN_PEAK = "lorentzian_peak"
 
-#: Default minimum R² a Lorentzian fit must reach to pass the step (overridable per step).
-DEFAULT_MIN_R2 = 0.8
-
 #: The node's ``defaults``: the shared two-tone measurement's, plus the fit acceptance. The sweep window
-#: (``sweep_start``, ``sweep_stop``, ``sweep_step``, absolute Hz) has no default: the step must set it.
-TWO_TONE_DEFAULTS: Mapping[str, Any] = {**TWO_TONE_SATURATION_DEFAULTS, "min_r2": DEFAULT_MIN_R2}
+#: ``drive_if_sweep`` (``np.linspace`` args as offsets from the stored drive IF, Hz) has no default: the
+#: step must set it.
+TWO_TONE_DEFAULTS: Mapping[str, Any] = {
+    **TWO_TONE_SATURATION_DEFAULTS,
+    # Minimum R² the Lorentzian fit must reach to pass the step.
+    "min_r2": 0.8,
+}
 
 
 @dataclass(frozen=True)
@@ -79,15 +79,8 @@ class TwoToneNode(TwoToneSaturationNode[TwoToneSweetSpot]):
     def _measure(self, target: Target) -> int:
         """Run one two-tone pulsed-saturation sweep at the target's operating point; return its id."""
         operating_point = operating_point_for(self.calibration_file, self.experiment, target)
-        return self._measure_two_tone_saturation(target, self._drive_if_sweep(target, operating_point.drive.lo))
-
-    def _drive_if_sweep(self, target: Target, drive_lo: float) -> np.ndarray:
-        """Build the drive-IF sweep (Hz) from the step's absolute-frequency window and the placed LO."""
-        start = self._param(target, "sweep_start")
-        stop = self._param(target, "sweep_stop")
-        step = self._param(target, "sweep_step")
-        npoints = round((stop - start) / step) + 1
-        return np.linspace(start, stop, num=npoints, endpoint=True) - drive_lo
+        drive_if_sweep = self._absolute_sweep(target, "drive_if_sweep", operating_point.drive.if_)
+        return self._measure_two_tone_saturation(target, drive_if_sweep)
 
     def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[TwoToneSweetSpot]:
         """Fit the sweep, check it, save ``drive_if``/``drive_lo``/``fit_r2``, plot, and return the drive IF; read-only.

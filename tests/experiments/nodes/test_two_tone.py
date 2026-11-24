@@ -36,7 +36,8 @@ STORED_IF = -0.08e9  # the point's drive IF before the node runs
 MEAS_ID = 100
 
 #: The sweep window the step hands the node (absolute Hz).
-PARAMS = {"sweep_start": 2.79e9, "sweep_stop": 2.81e9, "sweep_step": 0.4e6}
+#: The drive-IF window: np.linspace args as offsets from the stored drive IF (QHC-1932).
+PARAMS = {"drive_if_sweep": (-10e6, 10e6, 51)}
 
 
 class FakeLorentzian:
@@ -143,8 +144,7 @@ def test_accepted_fit_writes_the_drive_if_and_keeps_the_lo(monkeypatch):
     failed = node.run({})
 
     assert failed == []
-    assert calls["measure"] == 1  # one two-tone sweep, over the step's window minus the placed LO
-    np.testing.assert_allclose(calls["sweep"], node._drive_if_sweep(Q1, DRIVE_LO))
+    assert calls["measure"] == 1  # one two-tone sweep, over the step's window around the stored drive IF
     point = read_calibration_file(calibration).operating_points["q1"]["sweet_spot"]
     assert point.drive.if_ == pytest.approx(FITTED_IF)  # drive IF taken from the fit
     assert point.drive.lo == pytest.approx(DRIVE_LO)  # the LO is left untouched
@@ -167,13 +167,9 @@ def test_rejected_fit_fails_the_target_and_leaves_the_point(monkeypatch):
     assert FakeLorentzian.events == ["fit"]  # a rejected fit is never saved or plotted
 
 
-def test_drive_if_sweep_is_centred_on_the_window_minus_the_lo(monkeypatch):
-    _patch(monkeypatch)
-    node = _make(_calibration())
+def test_the_drive_if_sweep_is_the_window_offset_onto_the_stored_drive_if(monkeypatch):
+    calls = _patch(monkeypatch)
 
-    sweep = node._drive_if_sweep(Q1, DRIVE_LO)
+    _make(_calibration()).run({})
 
-    assert sweep[0] == pytest.approx(PARAMS["sweep_start"] - DRIVE_LO)
-    assert sweep[-1] == pytest.approx(PARAMS["sweep_stop"] - DRIVE_LO)
-    assert len(sweep) == round((PARAMS["sweep_stop"] - PARAMS["sweep_start"]) / PARAMS["sweep_step"]) + 1
-    assert np.all(np.diff(sweep) > 0)
+    np.testing.assert_allclose(calls["sweep"], STORED_IF + np.linspace(*PARAMS["drive_if_sweep"]))

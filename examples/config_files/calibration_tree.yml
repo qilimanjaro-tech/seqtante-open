@@ -18,11 +18,9 @@ defaults:
     relax_duration: 20000
     averages: 1000
   two_tone:
-    # Absolute drive-frequency window (Hz); the node subtracts the placed drive LO. The readout pulse
-    # comes from the calibration file. A QCM-RF drive takes drive_gain instead of drive_power.
-    sweep_start: 2.795e9
-    sweep_stop: 2.805e9
-    sweep_step: 0.1e6
+    # Drive-IF window (np.linspace args, Hz) as offsets from the operating point's stored drive IF. The
+    # readout pulse comes from the calibration file. A QCM-RF drive takes drive_gain instead of drive_power.
+    drive_if_sweep: [-5e6, 5e6, 101]
     drive_amplitude: 0.05
     drive_duration: 2000
     drive_power: -40
@@ -31,7 +29,7 @@ defaults:
   rabi:
     amplitude_sweep: [0.02, 0.8, 40]
   t1:
-    idle_sweep: [0, 200000, 51]
+    idle_duration_sweep: [0, 200000, 51]
     drive_amplitude: 0.1
     drive_duration: 2000
     drive_power: -20  # dBm, for a Rohde & Schwarz drive source; a QCM-RF drive takes drive_gain in [-1, 1]
@@ -53,8 +51,7 @@ pipelines:
         operating_point: sweet_spot
         overrides:
           - targets: [q14]
-            sweep_start: 2.79e9
-            sweep_stop: 2.81e9
+            drive_if_sweep: [-10e6, 10e6, 201]
 
   t1:
     after: two_tone_sweet_spot
@@ -89,7 +86,8 @@ pipelines:
       reset_flux:
         experiment: reset_point_search
         operating_point: reset
-        target_frequency: [2.79e9, 2.81e9]
+        target_freq_min: 2.79e9
+        target_freq_max: 2.81e9
       rabi_reset:
         experiment: rabi
         analysis: readout_levels

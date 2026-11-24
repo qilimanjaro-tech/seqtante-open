@@ -61,7 +61,7 @@ N_IDLE = len(np.linspace(*IDLE_SWEEP))
 #: The readout pulse and the drive/readout IFs are no longer step knobs: qili_qprograms reads them from
 #: the operating point in the calibration file, so the node passes only its name (and sets the hardware).
 PARAMS = {
-    "idle_sweep": IDLE_SWEEP,
+    "idle_duration_sweep": IDLE_SWEEP,
     "averages": 1000,
     "relax_duration": 50_000,
     "drive_duration": 20_000,
@@ -185,9 +185,7 @@ def _patch(monkeypatch):
         return SimpleNamespace(name="qprogram")  # sentinel; the fake platform/stream ignore its content
 
     monkeypatch.setattr(t1_module, "t1_saturation", fake_build)
-    monkeypatch.setattr(t1_module, "StreamArray", FakeStreamArray)
     monkeypatch.setattr(FakeStreamArray, "measurement_id", MEAS_ID)
-    monkeypatch.setattr(FakeStreamArray, "last", None)
     monkeypatch.setattr(t1_module, "T1Fit", FakeT1Fit)
     stub_output_and_save(monkeypatch)
     # Reset the fit knobs to an accepted decay; each test flips the one it exercises.
@@ -293,7 +291,7 @@ def test_infinite_uncertainty_fails_the_target(monkeypatch):
 
 def test_idle_durations_are_rounded_not_truncated(monkeypatch):
     calls = _patch(monkeypatch)
-    node = _make(_calibration(), THRESHOLDS, idle_sweep=(0, 1000, 7))
+    node = _make(_calibration(), THRESHOLDS, idle_duration_sweep=(0, 1000, 7))
 
     node.run({})
 

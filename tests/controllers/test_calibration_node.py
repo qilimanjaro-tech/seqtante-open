@@ -3,7 +3,7 @@
 import pytest
 from qililab.qprogram.calibration import Calibration
 
-from seqtante_open.controllers.calibration_node import AnalysisResult, CalibrationNode, RunContext
+from seqtante_open.controllers.calibration_node import AnalysisResult, CalibrationNode, FluxSweepNode, RunContext
 from seqtante_open.targets import ExperimentTarget
 
 
@@ -57,6 +57,37 @@ def test_concrete_node_stores_its_inputs():
     assert node.benchmark_results == ()
 
 
+class _LoopNode(FluxSweepNode):
+    experiment = "flux_loop_example"
+    analyses = ("a",)
+    defaults = {"flux_axis": "z"}
+
+    def execute_node(self, targets):
+        return {target: [0] for target in targets}
+
+    def analyze(self, target, measurements):
+        return AnalysisResult()
+
+    def apply(self, target, result):
+        pass
+
+
+@pytest.mark.parametrize(("params", "expected"), [({}, "z"), ({"flux_axis": "x"}, "x")])
+def test_flux_sweep_loop_reads_the_step_flux_axis_or_the_default(params, expected):
+    q1 = ExperimentTarget.from_str("q1")
+    node = _LoopNode(name="step1", idx=0, targets=[q1], parameters={q1: params}, context=_context())
+
+    assert node._loop(q1) == expected
+
+
+def test_flux_sweep_loop_rejects_an_unknown_loop():
+    q1 = ExperimentTarget.from_str("q1")
+    node = _LoopNode(name="step1", idx=0, targets=[q1], parameters={q1: {"flux_axis": "y"}}, context=_context())
+
+    with pytest.raises(ValueError, match="flux_axis must be one of"):
+        node._loop(q1)
+
+
 def test_place_operating_points_requires_an_experiment():
     class Spine(CalibrationNode):
         def execute_node(self, targets):
@@ -70,5 +101,5 @@ def test_place_operating_points_requires_an_experiment():
 
     node = Spine(name="spine", idx=0, targets=[], parameters={}, context=_context())
     target = ExperimentTarget.from_str("q1")
-    with pytest.raises(RuntimeError, match="declares no experiment"):
+    with pytest.raises(TypeError, match="Spine sets no experiment"):
         node._place_operating_point(target)

@@ -87,7 +87,7 @@ so your case is picked up the moment the module is imported. Nothing to register
 | `test_fit` | every `EXPECTED` path, after `fit()`. Skipped if the class does not override `fit` |
 | `test_plot_saves_image_to_path` | `plot()` writing nothing, writing an empty file, or leaking an open matplotlib figure |
 | `test_fit_writes_to_database_at_most_once` | `fit()` calling `add_fitting` more than once, e.g. a duplicated `save_fitting_to_database()` |
-| `test_plot_writes_to_database_at_most_once` | `plot()` storing more than one plot path, i.e. `save_to_db=True` on several `save_plot()` calls |
+| `test_plot_writes_to_database_at_most_once` | `plot()` storing more than one plot path, i.e. several `save_plot()` calls that store their path (the default; pass `save_to_db=False` on the others) |
 | `test_plot_shows_when_no_path` | `plot()` silently doing nothing when `path` is `None`. Counts both matplotlib and plotly |
 | `test_added_methods_are_covered` | a public method beyond `fit`/`plot` with no test of its own |
 | `test_init_signature_matches_declared_kwargs` | `INIT` drifting from a renamed constructor argument |

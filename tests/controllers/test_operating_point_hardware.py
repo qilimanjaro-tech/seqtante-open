@@ -120,8 +120,8 @@ def test_a_step_parameter_overrides_the_node_default(leaf_cls):
 def test_a_parameter_with_no_default_is_required(leaf_cls):
     node = _node(leaf_cls, InstrumentPlatform("ROHDE_SCHWARZ"), {})
 
-    with pytest.raises(KeyError, match="step 'step': q1 sets no 'idle_sweep'"):
-        node._param(Q1, "idle_sweep")
+    with pytest.raises(KeyError, match="step 'step': q1 sets no 'idle_duration_sweep'"):
+        node._param(Q1, "idle_duration_sweep")
 
 
 def test_rohde_schwarz_sets_power_iq_modulation_and_rf(leaf_cls):

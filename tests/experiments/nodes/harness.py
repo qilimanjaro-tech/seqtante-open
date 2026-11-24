@@ -167,12 +167,15 @@ def build_context(
 
 
 def stub_output_and_save(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub the boundaries every node run touches off the hardware path: the DB and the calibration save.
+    """Stub the boundaries every node run touches off the hardware path: the DB, the stream and the save.
 
     Marks the ``output_controller`` initialised with a dummy db manager (so ``db_manager`` is available
-    without a real database) and turns ``save_calibration`` into a no-op. A node's own driver and fit
-    stubs are layered on top of this in the node's test module.
+    without a real database), streams through :class:`FakeStreamArray` (every node measures through
+    ``CalibrationNode._stream``; :attr:`FakeStreamArray.last` is reset) and turns ``save_calibration``
+    into a no-op. A node's own QProgram and fit stubs are layered on top of this in its test module.
     """
     monkeypatch.setattr(node_module, "save_calibration", lambda calibration, path: None)
+    monkeypatch.setattr(node_module, "StreamArray", FakeStreamArray)
+    monkeypatch.setattr(FakeStreamArray, "last", None)
     monkeypatch.setattr(output_controller, "_initialized", True)
     monkeypatch.setattr(output_controller, "_db_manager", object())
