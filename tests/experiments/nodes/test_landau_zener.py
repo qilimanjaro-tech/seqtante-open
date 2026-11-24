@@ -200,7 +200,11 @@ def test_runs_one_qprogram_per_path_and_leaves_the_benchmark_unscored(builds):
     for build, path in zip(builds, PARAMS["flux_paths"], strict=True):
         assert build["calibration"] is calibration
         assert build["target"] == "q1"
-        assert (build["idle_operating_point"], build["reset_point"], build["readout_point"]) == ("reset",) * 3
+        assert (build["idle_operating_point"], build["reset_point"], build["readout_point"]) == (
+            "reset",
+            "reset",
+            "reset",
+        )
         assert build["flux_path"] == path
         assert (build["averages"], build["relax_duration"], build["readout_ringup_time"]) == (1_000, 1_000, 0)
         # A YAML [z, x] ramp duration reaches the QProgram as its (z, x) pair; the move order is defaulted.
