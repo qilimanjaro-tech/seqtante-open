@@ -34,7 +34,7 @@ from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 
 from seqtante_open.experiments.nodes import LandauZenerNode
 from seqtante_open.experiments.nodes import landau_zener as lz_module
-from tests.experiments.nodes.harness import FakePlatform, build_context, stub_output_and_save
+from tests.experiments.nodes.harness import ExecutingPlatform, FakeStreamArray, build_context, stub_output_and_save
 
 Q1 = ExperimentTarget.from_str("q1")
 DC_FLUX_BUSES = ["flux_z_q1", "flux_x_q1"]
@@ -47,7 +47,6 @@ IDLE = (0.1, 0.2)
 SWEET_SPOT = (0.0, 0.5)
 LEVEL_0 = 0.0
 LEVEL_1 = 1.0
-MEAS_ID = 100
 THRESHOLD = 0.25
 READOUT_PULSE = "readout-reset"
 AC_CROSSTALK = [[1.0, 0.1], [0.05, 1.0]]
@@ -67,41 +66,22 @@ PARAMS = {
 }
 
 
-class ExecutingPlatform(FakePlatform):
-    """A :class:`FakePlatform` that records each ``execute_qprogram`` and the parameters set at that moment.
+class LandauZenerPlatform(ExecutingPlatform):
+    """The shared :class:`ExecutingPlatform` with no instruments, recording each execution's calibration and parameters.
 
-    It has no ``get_element``: the node plays no drive, so asking for a drive instrument is an error.
+    It declares no instrument: the node plays no drive, so asking for one is an error.
     """
 
     def __init__(self) -> None:
-        super().__init__()
-        self.executions: list[dict] = []
+        super().__init__(instruments={})
+        self.runs: list[dict] = []
 
     def execute_qprogram(self, qprogram, calibration=None, **kwargs):
-        self.executions.append({"qprogram": qprogram, "calibration": calibration, "values": dict(self.values)})
-        result = SimpleNamespace(array=np.array([0.5, -0.5]), threshold=[THRESHOLD])
-        return SimpleNamespace(results={READOUT_BUS: [result]})
+        self.runs.append({"calibration": calibration, "values": dict(self.values)})
+        return super().execute_qprogram(qprogram, calibration=calibration, **kwargs)
 
-
-class FakeStreamArray:
-    """Stand-in for ``StreamArray``: records its arguments and every write, and carries ``MEAS_ID``."""
-
-    last: ClassVar[FakeStreamArray | None] = None
-
-    def __init__(self, **kwargs):
-        self.kwargs = kwargs
-        self.writes: list = []
-        self.measurement = SimpleNamespace(measurement_id=MEAS_ID)
-        type(self).last = self
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def __setitem__(self, key, value):
-        self.writes.append((key, value))
+    def results(self) -> dict:
+        return {READOUT_BUS: [SimpleNamespace(array=np.array([0.5, -0.5]), threshold=[THRESHOLD])]}
 
 
 class FakeLandauZenerFit:
@@ -157,7 +137,7 @@ def _calibration(readout_levels_pulse: str = READOUT_PULSE) -> Calibration:
     return calibration
 
 
-def _make(calibration: Calibration, platform: ExecutingPlatform, **params) -> LandauZenerNode:
+def _make(calibration: Calibration, platform: LandauZenerPlatform, **params) -> LandauZenerNode:
     # No thresholds: the run leaves the benchmark unscored ("Not evaluated") until QHC-1921.
     return LandauZenerNode(
         name="lz",
@@ -179,9 +159,8 @@ def builds(monkeypatch) -> list[dict]:
         return real_build(**kwargs)
 
     monkeypatch.setattr(lz_module, "generalized_linear_ramps", spy)
-    monkeypatch.setattr(lz_module, "StreamArray", FakeStreamArray)
+    monkeypatch.setattr(lz_module, "StreamArray", FakeStreamArray)  # the node streams itself, not via _stream
     monkeypatch.setattr(lz_module, "LandauZenerFit", FakeLandauZenerFit)
-    monkeypatch.setattr(FakeStreamArray, "last", None)
     monkeypatch.setattr(FakeLandauZenerFit, "last", {})
     stub_output_and_save(monkeypatch)
     return recorded
@@ -189,7 +168,7 @@ def builds(monkeypatch) -> list[dict]:
 
 def test_runs_one_qprogram_per_path_and_leaves_the_benchmark_unscored(builds):
     calibration = _calibration()
-    platform = ExecutingPlatform()
+    platform = LandauZenerPlatform()
     node = _make(calibration, platform)
 
     failed = node.run({})
@@ -212,8 +191,8 @@ def test_runs_one_qprogram_per_path_and_leaves_the_benchmark_unscored(builds):
         assert build["exit_ramp_duration"] == 50
         assert (build["entry_ramp_move_first"], build["exit_ramp_move_first"]) == ("z", "both")
     # Each QProgram ran with the step's AC crosstalk on the fast-flux lines, on a copy of the calibration.
-    assert len(platform.executions) == 2
-    for execution in platform.executions:
+    assert platform.executions == 2
+    for execution in platform.runs:
         compiled_with = execution["calibration"]
         assert compiled_with is not calibration
         assert set(compiled_with.crosstalk_matrix_ac.matrix) == set(FAST_FLUX_BUSES)
@@ -231,7 +210,7 @@ def test_runs_one_qprogram_per_path_and_leaves_the_benchmark_unscored(builds):
     assert ((1, 2), THRESHOLD) in stream.writes
     # analyze normalised with the operating point's readout levels, and reported no value.
     assert FakeLandauZenerFit.last == {
-        "measurement_id": MEAS_ID,
+        "measurement_id": FakeStreamArray.measurement_id,
         "target": "q1",
         "level_0": LEVEL_0,
         "level_1": LEVEL_1,
@@ -240,7 +219,7 @@ def test_runs_one_qprogram_per_path_and_leaves_the_benchmark_unscored(builds):
 
 
 def test_the_reset_point_can_be_another_operating_point(builds):
-    _make(_calibration(), ExecutingPlatform(), reset_point="sweet_spot").run({})
+    _make(_calibration(), LandauZenerPlatform(), reset_point="sweet_spot").run({})
 
     assert [build["reset_point"] for build in builds] == ["sweet_spot", "sweet_spot"]
     assert [build["readout_point"] for build in builds] == ["reset", "reset"]
@@ -249,12 +228,12 @@ def test_the_reset_point_can_be_another_operating_point(builds):
 def test_without_a_step_matrix_the_calibrations_ac_crosstalk_is_used(builds):
     calibration = _calibration()
     calibration.crosstalk_matrix_ac = CrosstalkMatrix.from_array(buses=FAST_FLUX_BUSES, matrix_array=np.eye(2))
-    platform = ExecutingPlatform()
+    platform = LandauZenerPlatform()
 
     failed = _make(calibration, platform, ac_crosstalk=None).run({})
 
     assert failed == []
-    assert all(execution["calibration"] is calibration for execution in platform.executions)
+    assert all(execution["calibration"] is calibration for execution in platform.runs)
 
 
 @pytest.mark.parametrize(
@@ -267,12 +246,12 @@ def test_without_a_step_matrix_the_calibrations_ac_crosstalk_is_used(builds):
     ],
 )
 def test_an_unrunnable_step_fails_the_target_before_measuring(builds, params):
-    platform = ExecutingPlatform()
+    platform = LandauZenerPlatform()
 
     failed = _make(_calibration(), platform, **params).run({})
 
     assert failed == ["q1"]
-    assert platform.executions == []
+    assert platform.executions == 0
     assert FakeStreamArray.last is None
 
 
@@ -281,17 +260,17 @@ def test_ac_crosstalk_with_flux_offsets_is_refused(builds):
     matrix = CrosstalkMatrix.from_array(buses=FAST_FLUX_BUSES, matrix_array=np.eye(2))
     matrix.flux_offsets["fast_flux_z_q1"] = 0.01
     calibration.crosstalk_matrix_ac = matrix
-    platform = ExecutingPlatform()
+    platform = LandauZenerPlatform()
 
     failed = _make(calibration, platform, ac_crosstalk=None).run({})
 
     assert failed == ["q1"]
-    assert platform.executions == []
+    assert platform.executions == 0
 
 
 def test_refuses_readout_levels_taken_with_a_different_pulse(builds):
     # Levels stored under a different pulse than the QProgram plays -> ADR-0001 D8 refusal in analyze.
-    node = _make(_calibration(readout_levels_pulse="readout-other"), ExecutingPlatform())
+    node = _make(_calibration(readout_levels_pulse="readout-other"), LandauZenerPlatform())
 
     failed = node.run({})
 

@@ -52,7 +52,7 @@ class TestT1Fit(FittingTestCase):
     INIT = {"measurement_id": 1, "target": "q1"}
     PLOTS = ["q1_T1.png"]
     EXPECTED = {
-        "results.1": pytest.approx(DECAY_RATE, rel=0.02),
+        "results.params.1": pytest.approx(DECAY_RATE, rel=0.02),
         "T1": pytest.approx(T1_NS, rel=0.02),
         "r_squared": pytest.approx(1.0, abs=0.05),
     }
@@ -73,6 +73,11 @@ class TestT1Fit(FittingTestCase):
         assert recorded[FittedParameter.T1] == pytest.approx(T1_NS / 1000, rel=0.02)
         assert recorded[FittedParameter.FIT_R2] == pytest.approx(1.0, abs=0.05)
         assert recorded["saved"] is True
+
+    def test_save_fitting_refuses_an_unfitted_model(self, fit_obj):
+        """Before ``fit()`` there is no T1 to store, so it raises the shared ``FittingClass`` error."""
+        with pytest.raises(RuntimeError, match="T1Fit has no fit result"):
+            fit_obj.save_fitting()
 
     def test_is_physical_decay(self, fitted):
         """A clean decay fits to rate < 0, so it reads as a physical decay with a small relative uncertainty."""

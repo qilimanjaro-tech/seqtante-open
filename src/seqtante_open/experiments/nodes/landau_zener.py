@@ -41,7 +41,7 @@ Where the inputs come from:
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import numpy as np
 from qili_qprograms.bus_alias import Role, bus_alias
@@ -54,7 +54,6 @@ from qililab.result import StreamArray
 from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.fitting.landau_zener_fit import LandauZenerFit
-from seqtante_open.experiments.results import measurement_id
 from seqtante_open.outputs import output_controller
 
 if TYPE_CHECKING:
@@ -63,6 +62,7 @@ if TYPE_CHECKING:
     from qili_qprograms.targets import Target
     from qililab import QProgram
     from qililab.qprogram.calibration import Calibration
+    from qililab.result import AutocalMeasurement, Measurement
 
 EXPERIMENT = "landau_zener"
 THEORY_AGREEMENT = "theory_agreement"
@@ -105,7 +105,9 @@ class LandauZenerNode(FixedFluxNode[None]):
         """Build one QProgram per flux path, set the readout line, run them in turn and stream the results.
 
         Every QProgram is built before the hardware is touched, so a malformed or over-long path fails
-        the target before anything is measured.
+        the target before anything is measured. It streams itself rather than through :meth:`_stream`,
+        which repeats one QProgram compiled with the run's calibration: here each row is its own
+        QProgram, compiled with the AC crosstalk of :meth:`_with_ac_crosstalk`, and stores the threshold.
 
         Raises:
             ValueError: if there are no flux paths, their count differs from the annealing times', a path
@@ -122,7 +124,7 @@ class LandauZenerNode(FixedFluxNode[None]):
                 "have one entry per sweep point"
             )
 
-        operating_point = self.calibration_file.experiments[EXPERIMENT][str(target)].operating_point
+        operating_point = self._section(target).operating_point
         reset_point = self._param(target, "reset_point") or operating_point
         calibration = self._with_ac_crosstalk(target)
         qprograms = [self._build(target, operating_point, reset_point, path) for path in flux_paths]
@@ -154,7 +156,7 @@ class LandauZenerNode(FixedFluxNode[None]):
                 result = platform.execute_qprogram(qprogram, calibration=calibration).results[readout_bus][0]
                 stream_array[idx, :2] = result.array.T
                 stream_array[idx, 2] = result.threshold[0]
-        return measurement_id(stream_array)
+        return cast("Measurement | AutocalMeasurement", stream_array.measurement).measurement_id
 
     def _build(self, target: Target, operating_point: str, reset_point: str, flux_path: Any) -> QProgram:
         """The ``generalized_linear_ramps`` QProgram for one flux path, idle and read out at ``operating_point``."""
@@ -227,7 +229,7 @@ class LandauZenerNode(FixedFluxNode[None]):
             AnalysisError: when the operating point stores no readout levels, or stores them for another
                 readout pulse.
         """
-        operating_point = self.calibration_file.experiments[EXPERIMENT][str(target)].operating_point
+        operating_point = self._section(target).operating_point
         # The pulse generalized_linear_ramps plays at its readout point, the step's operating point.
         readout_pulse = pulse_name("readout", operating_point)
         try:
