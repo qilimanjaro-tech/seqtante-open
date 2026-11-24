@@ -30,7 +30,7 @@ from seqtante_open.experiments.nodes import T2Node
 from seqtante_open.experiments.nodes import t2 as t2_module
 from seqtante_open.targets import ExperimentTarget
 from tests.experiments.nodes.harness import (
-    FakePlatform,
+    ExecutingPlatform,
     FakeStreamArray,
     build_context,
     identity_crosstalk,
@@ -142,10 +142,20 @@ def _calibration() -> Calibration:
     return calibration
 
 
-def _make(calibration: Calibration, thresholds, **params) -> tuple[T2Node, FakePlatform]:
+class FakeT2Platform(ExecutingPlatform):
+    """An :class:`ExecutingPlatform` with a Rohde & Schwarz drive whose execution returns one point per idle."""
+
+    def __init__(self, n_points: int) -> None:
+        super().__init__(instruments={"drive_q1": "ROHDE_SCHWARZ"})
+        self.n_points = n_points
+
+    def results(self) -> dict:
+        return {"readout_q1": [SimpleNamespace(array=np.zeros((2, 1))) for _ in range(self.n_points)]}
+
+
+def _make(calibration: Calibration, thresholds, **params) -> tuple[T2Node, FakeT2Platform]:
     parameters = {**PARAMS, **params}
-    # One readout result per unrolled idle point.
-    platform = FakePlatform(readout_points=len(np.linspace(*parameters["elapsed_sweep"])))
+    platform = FakeT2Platform(len(np.linspace(*parameters["elapsed_sweep"])))
     context = build_context(calibration, platform)
     node = T2Node(
         name="t2_sweet_spot", idx=0, targets=[Q1], parameters={Q1: parameters}, context=context, thresholds=thresholds
