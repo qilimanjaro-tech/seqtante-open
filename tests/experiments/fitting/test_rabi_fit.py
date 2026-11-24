@@ -83,3 +83,68 @@ class TestRabiAmplitudeModel(FittingTestCase):
         fitted.fit()
 
         assert np.isnan(fitted.r_squared)
+
+    @staticmethod
+    def _refit(model: RabiAmplitudeModel, monkeypatch, amplitudes: np.ndarray, signal: np.ndarray) -> None:
+        """Refit ``model`` on a noiseless trace (the rotated signal, as the fit sees it)."""
+        monkeypatch.setattr(model, "amplitudes", amplitudes)
+        monkeypatch.setattr(model, "signal", signal)
+        model.fit()
+
+    def test_a_sweep_over_several_periods_reports_the_first_pi(self, fitted, monkeypatch) -> None:
+        """Every excited extremum fits equally well; the pi amplitude is the first one, not the 3π one."""
+        amplitudes = np.linspace(0.02, 1.6, 80)
+        self._refit(fitted, monkeypatch, amplitudes, np.cos(np.pi * amplitudes / PI_AMPLITUDE))
+
+        assert fitted.pi_amplitude == pytest.approx(PI_AMPLITUDE, abs=0.01)
+
+    def test_a_trace_starting_at_its_minimum_still_fits(self, fitted, monkeypatch) -> None:
+        """``rotate_iq`` fixes the trace's sign arbitrarily, so |0> may be the bottom of the trace."""
+        amplitudes = np.linspace(0.0, 1.0, 81)
+        self._refit(fitted, monkeypatch, amplitudes, -np.cos(np.pi * amplitudes / PI_AMPLITUDE))
+
+        assert fitted.r_squared > 0.99
+        assert fitted.pi_amplitude == pytest.approx(PI_AMPLITUDE, abs=0.01)
+        level_0, _, level_1, _ = fitted.readout_levels
+        assert level_0 == pytest.approx(-1.0, abs=0.01)  # the value at zero drive
+        assert level_1 == pytest.approx(1.0, abs=0.01)
+
+    def test_ground_is_the_fit_at_zero_drive_not_the_first_sample(self, fitted, monkeypatch) -> None:
+        """A window starting past the pi amplitude still takes |0> from zero drive and the first pi after it."""
+        pi = 0.4
+        amplitudes = np.linspace(0.3, 1.0, 40)  # starts near the excited extremum
+        self._refit(fitted, monkeypatch, amplitudes, np.cos(np.pi * amplitudes / pi))
+
+        assert fitted.pi_amplitude == pytest.approx(pi, abs=0.01)
+        level_0, _, level_1, _ = fitted.readout_levels
+        assert level_0 == pytest.approx(1.0, abs=0.01)
+        assert level_1 == pytest.approx(-1.0, abs=0.01)
+
+    def test_a_sweep_ending_before_pi_puts_it_past_the_window(self, fitted, monkeypatch) -> None:
+        """A partial cosine still fits well; the pi amplitude lands past the window for the node to reject."""
+        amplitudes = np.linspace(0.02, 0.8, 40)
+        self._refit(fitted, monkeypatch, amplitudes, np.cos(np.pi * amplitudes / 1.0))
+
+        assert fitted.r_squared > 0.99
+        assert fitted.pi_amplitude > amplitudes.max()
+
+    def test_a_fit_without_a_covariance_has_undefined_uncertainties(self, fitted, monkeypatch) -> None:
+        """When lmfit cannot estimate the covariance the uncertainties are NaN, never a fake 0."""
+        from lmfit import Model
+
+        from seqtante_open.experiments.fitting import rabi_fit
+
+        class NoCovarianceModel(Model):
+            def fit(self, *args, **kwargs):
+                result = super().fit(*args, **kwargs)
+                for parameter in result.params.values():
+                    parameter.stderr = None
+                return result
+
+        monkeypatch.setattr(rabi_fit, "Model", NoCovarianceModel)
+        fitted.fit()
+
+        _, level_0_std, _, level_1_std = fitted.readout_levels
+        assert np.isnan(level_0_std)
+        assert np.isnan(level_1_std)
+        assert np.isnan(fitted.results["pi_amplitude_std"])

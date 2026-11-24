@@ -61,14 +61,17 @@ class FakeRabiModel:
     """
 
     r_squared = 0.99
-    angular_frequency = 1.0
+    pi_amplitude = FAKE_PI
+    pi_amplitude_std = 0.01
+    level_std = FAKE_L0_STD
+    amplitudes = np.linspace(0.0, 0.8, 21)  # the swept window; FAKE_PI sits inside it
     events: ClassVar[list[str]] = []
 
     def __init__(self, measurement_id, target=None, path=None):
         self.id = measurement_id
         self.target = target
         self.path = path
-        self.results = {"angular_frequency": type(self).angular_frequency}
+        self.results = {"pi_amplitude": type(self).pi_amplitude, "pi_amplitude_std": type(self).pi_amplitude_std}
 
     def fit(self):
         type(self).events.append("fit")
@@ -81,12 +84,8 @@ class FakeRabiModel:
         type(self).events.append("save")
 
     @property
-    def pi_amplitude(self):
-        return FAKE_PI
-
-    @property
     def readout_levels(self):
-        return (FAKE_L0, FAKE_L0_STD, FAKE_L1, FAKE_L1_STD)
+        return (FAKE_L0, type(self).level_std, FAKE_L1, FAKE_L1_STD)
 
 
 def _operating_point() -> OperatingPoint:
@@ -246,7 +245,11 @@ def test_analyze_fits_checks_saves_then_plots(monkeypatch):
     ("analysis", "knob", "value"),
     [
         ("readout_levels", "r_squared", 0.5),  # below the node's default minimum
-        ("pi_amplitude", "angular_frequency", 0.0),  # no oscillation: there is no pi amplitude
+        ("pi_amplitude", "pi_amplitude", float("nan")),  # no oscillation: there is no pi amplitude
+        ("pi_amplitude", "pi_amplitude", 0.9),  # the sweep stops short of the pi amplitude
+        ("readout_levels", "pi_amplitude", 0.9),  # ... so |1> was never measured, only extrapolated
+        ("readout_levels", "level_std", float("nan")),  # no covariance: the levels have no uncertainty
+        ("pi_amplitude", "pi_amplitude_std", float("nan")),  # no covariance: the pi amplitude has none
     ],
 )
 def test_a_rejected_fit_is_never_saved_or_plotted(monkeypatch, analysis, knob, value):

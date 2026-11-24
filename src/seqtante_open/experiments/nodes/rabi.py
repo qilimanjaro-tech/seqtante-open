@@ -35,6 +35,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 from qili_qprograms.bus_alias import Role, bus_alias
 from qili_qprograms.calibration.model import Measured, ReadoutLevels
 from qili_qprograms.experiments import rabi_amplitude
@@ -136,8 +137,9 @@ class RabiNode(FixedFluxNode[RabiFitted]):
 
         Read-only. Fit, then every acceptance check, then save, then plot: a rejected fit never reaches the
         DB, as for T1 (QHC-1803). Both analyses fail (``AnalysisError``) when the fit's R² is below the
-        step's minimum or undefined (a flat trace); a ``pi_amplitude`` step also fails when the fit shows
-        no oscillation (no pi pulse exists).
+        step's minimum or undefined (a flat trace), when the pi amplitude is undefined (no oscillation) or
+        outside the swept window (the sweep stopped short of the excited level, so neither the pi amplitude
+        nor |1> was measured), or when the value the step writes has no uncertainty estimate.
         """
         model = RabiAmplitudeModel(
             measurements[-1], target=str(target), path=self.parameters[target].get("data_folder")
@@ -145,12 +147,14 @@ class RabiNode(FixedFluxNode[RabiFitted]):
         model.fit()
 
         self._require_r2(target, model.r_squared)
-        if self.analysis == PI_AMPLITUDE and model.results["angular_frequency"] <= 0:
-            raise AnalysisError(f"{target} rabi fit shows no oscillation; there is no pi amplitude to apply")
+        self._require_pi_in_window(target, model.pi_amplitude, model.amplitudes)
+        level_0, level_0_std, level_1, level_1_std = model.readout_levels
+        stds = (level_0_std, level_1_std) if self.analysis == READOUT_LEVELS else (model.results["pi_amplitude_std"],)
+        if not np.all(np.isfinite(stds)):
+            raise AnalysisError(f"{target} rabi fit has no uncertainty estimate (singular covariance); not storing it")
 
         model.save_fitting()
         plot = model.plot()
-        level_0, level_0_std, level_1, level_1_std = model.readout_levels
         fitted = RabiFitted(
             pi_amplitude=model.pi_amplitude,
             level_0=level_0,
@@ -159,6 +163,16 @@ class RabiNode(FixedFluxNode[RabiFitted]):
             level_1_std=level_1_std,
         )
         return AnalysisResult(fitted=fitted, plots=(plot,) if plot else ())
+
+    @staticmethod
+    def _require_pi_in_window(target: Target, pi_amplitude: float, amplitudes: np.ndarray) -> None:
+        """Fail the target unless the fitted pi amplitude is defined and inside the swept window."""
+        low, high = float(np.min(amplitudes)), float(np.max(amplitudes))
+        if not low <= pi_amplitude <= high:  # NaN (no oscillation) fails too
+            raise AnalysisError(
+                f"{target} rabi fit puts the pi amplitude at {pi_amplitude:.4g}, outside the swept window "
+                f"[{low:.4g}, {high:.4g}]; widen drive_amplitude_sweep"
+            )
 
     def apply(self, target: Target, result: AnalysisResult[RabiFitted]) -> None:
         """Write the chosen analysis's result (``readout_levels`` onto the point, ``pi_amplitude`` to the pulse)."""

@@ -25,9 +25,9 @@ class _RabiResults(TypedDict):
     offset: float
     amplitude: float
     angular_frequency: float
-    phase: float
     r_squared: float
     pi_amplitude: float
+    pi_amplitude_std: float
     level_0: float
     level_0_std: float
     level_1: float
@@ -37,16 +37,20 @@ class _RabiResults(TypedDict):
 class RabiAmplitudeModel(FittingClass[_RabiResults]):
     """Fit a Rabi amplitude sweep (DRAG drive) and read the pi amplitude and the |0>/|1> readout levels.
 
-    The measurement sweeps the drive amplitude; the rotated readout signal oscillates as a cosine of
-    the drive amplitude. An undamped cosine is fit (an amplitude sweep has no time decay), and from it:
+    The measurement sweeps the drive amplitude. The rotation angle is linear in it and zero at zero
+    drive, where the qubit sits in |0>, so the rotated readout signal is the undamped cosine
+    ``offset + amplitude * cos(angular_frequency * x)`` (:meth:`FittingClass.cosfunc` with its phase
+    fixed at 0). ``amplitude`` is signed: ``rotate_iq`` fixes the trace's sign arbitrarily, so |0> may
+    be its top or its bottom. From the fit:
 
-    - the two readout **levels** are the cosine's extrema, ``offset ± |amplitude|``. Which one is |0> is
-      decided by the first sweep point (the qubit sits in the ground state at the lowest drive). Each
-      level carries the uncertainty propagated from the fitted ``offset`` and ``amplitude``. The levels
-      fold in thermal population and readout SNR, an accepted caveat until single-shot readout
-      calibration exists (QHC-1806).
-    - the **pi amplitude** is the drive amplitude of the first excited-state extremum after the ground
-      point: half a Rabi period on from the ground extremum nearest the first sweep point.
+    - the two readout **levels** are the cosine at zero drive (|0>, ``offset + amplitude``) and half a
+      period on (|1>, ``offset - amplitude``), whatever amplitude the window starts at. Each carries the
+      uncertainty propagated from the fitted ``offset`` and ``amplitude``, NaN when lmfit cannot estimate
+      the covariance. The levels fold in thermal population and readout SNR, an accepted caveat until
+      single-shot readout calibration exists (QHC-1806).
+    - the **pi amplitude** is the first excited extremum, ``pi / angular_frequency`` (NaN for no
+      oscillation), with its propagated uncertainty. It may lie outside the swept window when the sweep
+      stops short of it; the node rejects that.
 
     Fitted parameters (``rabi_amplitude``, ``fit_r2``; QHC-1497) are written to the measurement entry
     with :meth:`save_fitting`.
@@ -65,38 +69,33 @@ class RabiAmplitudeModel(FittingClass[_RabiResults]):
         self.signal = np.real(self.rotate_iq(xarr.to_numpy()))
 
     def fit(self) -> _RabiResults:
-        """Fit the undamped cosine and derive the pi amplitude and the two readout levels."""
+        """Fit the cosine with its phase fixed at zero drive and derive the pi amplitude and the two readout levels."""
         # A refit that finds nothing must not leave the previous result readable.
         self._results = None
         amplitudes, signal = self.amplitudes, self.signal
 
-        offset_guess = float(np.mean(signal))
-        amplitude_guess = float((np.max(signal) - np.min(signal)) / 2) or 1.0
-        angular_frequency_guess = self._angular_frequency_guess(amplitudes, signal)
-
-        # The undamped cosine ``offset + a * cos(omega * phi + phase_offset)`` every fit shares.
+        half_range = float((np.max(signal) - np.min(signal)) / 2) or 1.0
         model = Model(self.cosfunc)
-        model.set_param_hint("a", value=amplitude_guess, min=0.0)
-        model.set_param_hint("omega", value=angular_frequency_guess, min=0.0)
-        model.set_param_hint("offset", value=offset_guess)
-        model.set_param_hint("phase_offset", value=0.0, min=-np.pi, max=np.pi)
-        params = model.make_params()
-        fit = model.fit(data=signal, params=params, phi=amplitudes)
+        model.set_param_hint("omega", value=self._angular_frequency_guess(amplitudes, signal), min=0.0)
+        model.set_param_hint("offset", value=float(np.mean(signal)))
+        # A Rabi rotation starts from |0> at zero drive: the phase is 0, not a free parameter.
+        model.set_param_hint("phase_offset", value=0.0, vary=False)
+        # |0> may be the top or the bottom of the rotated trace, so start from both signs and keep the better fit.
+        fit = min(
+            (model.fit(data=signal, params=model.make_params(a=sign * half_range), phi=amplitudes) for sign in (1, -1)),
+            key=lambda result: result.chisqr,
+        )
 
-        offset = fit.params["offset"].value
-        amplitude = fit.params["a"].value
-        angular_frequency = fit.params["omega"].value
-        phase = fit.params["phase_offset"].value
-        offset_std = fit.params["offset"].stderr or 0.0
-        amplitude_std = fit.params["a"].stderr or 0.0
-
-        # Both levels (offset ± amplitude) carry the same std, propagated from offset and amplitude
-        # ignoring their covariance -- an accepted approximation for the level uncertainty.
+        offset, amplitude, angular_frequency = (fit.params[name].value for name in ("offset", "a", "omega"))
+        offset_std, amplitude_std, angular_frequency_std = (
+            self._stderr(fit.params[name]) for name in ("offset", "a", "omega")
+        )
+        # Both levels carry the same std, propagated from offset and amplitude ignoring their covariance --
+        # an accepted approximation for the level uncertainty.
         level_std = float(np.hypot(offset_std, amplitude_std))
-        top, bottom = offset + amplitude, offset - amplitude
-        # The first sweep point is the ground state; |0> is the extremum its fitted value sits closest to.
-        first = self.cosfunc(amplitudes[0], amplitude, angular_frequency, offset, phase)
-        ground, excited = (top, bottom) if abs(first - top) <= abs(first - bottom) else (bottom, top)
+        has_oscillation = angular_frequency > 0
+        pi_amplitude = np.pi / angular_frequency if has_oscillation else float("nan")
+        pi_amplitude_std = pi_amplitude * angular_frequency_std / angular_frequency if has_oscillation else float("nan")
 
         # A flat trace (drive off, readout saturated) has no variance to explain: R² is undefined (NaN),
         # and the node rejects it like a low R².
@@ -107,15 +106,20 @@ class RabiAmplitudeModel(FittingClass[_RabiResults]):
             offset=offset,
             amplitude=amplitude,
             angular_frequency=angular_frequency,
-            phase=phase,
             r_squared=r_squared,
-            pi_amplitude=self._pi_amplitude(offset, amplitude, angular_frequency, phase, excited),
-            level_0=float(ground),
+            pi_amplitude=float(pi_amplitude),
+            pi_amplitude_std=float(pi_amplitude_std),
+            level_0=float(offset + amplitude),
             level_0_std=level_std,
-            level_1=float(excited),
+            level_1=float(offset - amplitude),
             level_1_std=level_std,
         )
         return self.results
+
+    @staticmethod
+    def _stderr(parameter) -> float:
+        """A fitted parameter's standard error, NaN (never 0) when lmfit could not estimate the covariance."""
+        return float(parameter.stderr) if parameter.stderr is not None else float("nan")
 
     @staticmethod
     def _angular_frequency_guess(amplitudes: np.ndarray, signal: np.ndarray) -> float:
@@ -128,23 +132,6 @@ class RabiAmplitudeModel(FittingClass[_RabiResults]):
         peak = int(np.argmax(spectrum[1:]) + 1) if len(spectrum) > 1 else 0
         dominant = frequencies[peak] if peak else 1.0 / (abs(step) * len(signal))
         return float(2 * np.pi * dominant)
-
-    def _pi_amplitude(
-        self, offset: float, amplitude: float, angular_frequency: float, phase: float, excited: float
-    ) -> float:
-        """The first drive amplitude at which the fitted cosine reaches the excited level, after the first point.
-
-        Walks a dense grid across the swept range and returns the first amplitude whose fitted value is
-        closest to the excited extremum. Falls back to the first sweep point's amplitude if the fit is
-        degenerate (no oscillation), which then fails the step's R² gate upstream.
-        """
-        if angular_frequency <= 0:
-            return float(self.amplitudes[0])
-        grid = np.linspace(self.amplitudes[0], self.amplitudes[-1], max(1000, 10 * len(self.amplitudes)))
-        curve = self.cosfunc(grid, amplitude, angular_frequency, offset, phase)
-        # The excited extremum is reached where the fitted curve is closest to the excited level.
-        reached = grid[np.argmin(np.abs(curve - excited))]
-        return float(reached)
 
     @property
     def pi_amplitude(self) -> float:
@@ -177,7 +164,7 @@ class RabiAmplitudeModel(FittingClass[_RabiResults]):
         results = self.results
         title = f"Rabi amplitude {self.target}"
         curve = self.cosfunc(
-            self.amplitudes, results["amplitude"], results["angular_frequency"], results["offset"], results["phase"]
+            self.amplitudes, results["amplitude"], results["angular_frequency"], results["offset"], 0.0
         )
 
         fig = go.Figure()
