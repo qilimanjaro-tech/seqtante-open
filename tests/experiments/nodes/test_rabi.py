@@ -14,7 +14,6 @@ import numpy as np
 import pytest
 from qililab import IQDrag, Parameter, Square
 from qililab.qprogram.calibration import Calibration
-from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 
 from seqtante_open.calibration.io import read_calibration_file, write_calibration_file
 from seqtante_open.calibration.model import (
@@ -32,9 +31,14 @@ from seqtante_open.experiments.nodes import RabiNode
 from seqtante_open.experiments.nodes import rabi as rabi_module
 from seqtante_open.outputs import output_controller
 from seqtante_open.targets import ExperimentTarget
+from tests.experiments.nodes.harness import (
+    ExecutingPlatform,
+    FakePlatform,
+    FakeStreamArray,
+    identity_crosstalk,
+)
 
 Q1 = ExperimentTarget.from_str("q1")
-CROSSTALK_BUSES = ("flux_z_q1", "flux_x_q1")
 
 # Scripted fit outputs the fake model returns.
 FAKE_PI = 0.42
@@ -42,64 +46,14 @@ FAKE_L0, FAKE_L0_STD = -1.5, 0.03
 FAKE_L1, FAKE_L1_STD = 1.5, 0.04
 
 
-class FakePlatform:
-    def __init__(self):
-        self.values: dict = {}
-        self.calls: list = []
+class FakeRabiPlatform(ExecutingPlatform):
+    """An :class:`ExecutingPlatform` with a Rohde & Schwarz drive whose one execution returns the whole sweep."""
 
-    def set_crosstalk(self, *, crosstalk):
-        self.calls.append("set_crosstalk")
+    def __init__(self) -> None:
+        super().__init__(instruments={"drive_q1": "ROHDE_SCHWARZ"})
 
-    def set_flux_to_zero(self):
-        self.calls.append("set_flux_to_zero")
-
-    def set_bias_to_zero(self):
-        self.calls.append("set_bias_to_zero")
-
-    def get_parameter(self, *, alias, parameter):
-        return self.values.get((alias, parameter), 0.0)
-
-    def set_parameter(self, *, alias, parameter, value):
-        self.values[alias, parameter] = value
-        self.calls.append(f"set:{alias}")
-
-
-class FakeRabiPlatform(FakePlatform):
-    """A :class:`FakePlatform` that also answers the execution calls the inlined node makes.
-
-    ``get_element`` reports a Rohde & Schwarz drive instrument (so the IQ-modulation/POWER/RF branch
-    runs) and ``execute_qprogram`` returns a readout result. On execute it snapshots the parameters set
-    so far into :attr:`values_at_execute`, before the node's run restores them.
-    """
-
-    def __init__(self):
-        super().__init__()
-        self.values_at_execute: dict = {}
-
-    def get_element(self, alias):
-        self.calls.append(f"get_element:{alias}")
-        return SimpleNamespace(instruments=[SimpleNamespace(name=SimpleNamespace(name="ROHDE_SCHWARZ"))])
-
-    def execute_qprogram(self, qprogram, **kwargs):
-        self.calls.append("execute_qprogram")
-        self.values_at_execute = dict(self.values)
-        return SimpleNamespace(results={"readout_q1": [SimpleNamespace(array=np.zeros((2, 2)))]})
-
-
-class FakeStreamArray:
-    """Stand-in for ``StreamArray``: a context manager that swallows the write and carries a measurement id."""
-
-    def __init__(self, **kwargs):
-        self.measurement = SimpleNamespace(measurement_id=777)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def __setitem__(self, key, value):
-        return None
+    def results(self) -> dict:
+        return {"readout_q1": [SimpleNamespace(array=np.zeros((2, 2)))]}
 
 
 class FakeRabiModel:
@@ -138,12 +92,6 @@ class FakeRabiModel:
         return (FAKE_L0, FAKE_L0_STD, FAKE_L1, FAKE_L1_STD)
 
 
-def _crosstalk() -> CrosstalkMatrix:
-    return CrosstalkMatrix.from_buses(
-        {b: {bb: (1.0 if b == bb else 0.0) for bb in CROSSTALK_BUSES} for b in CROSSTALK_BUSES}
-    )
-
-
 def _operating_point() -> OperatingPoint:
     return OperatingPoint(
         flux=Flux(z=0.1),
@@ -176,7 +124,7 @@ def _add_played_pulses(calibration: Calibration, point_name: str, *, pi: bool = 
 
 def _calibration(file: CalibrationFile) -> Calibration:
     calibration = Calibration()
-    calibration.crosstalk_matrix = _crosstalk()
+    calibration.crosstalk_matrix = identity_crosstalk()
     write_calibration_file(calibration, file)
     return calibration
 
