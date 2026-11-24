@@ -59,6 +59,11 @@ class TestLorentzianPeakModel(FittingTestCase):
         assert parameters[FittedParameter.DRIVE_IF.value] == pytest.approx(QUBIT_IF, abs=FREQ_STEP)
         assert FittedParameter.FIT_R2.value in parameters
 
+    def test_save_fitting_refuses_an_unfitted_model(self, fit_obj) -> None:
+        """Before ``fit()`` there is no drive IF to store, so it raises the shared ``FittingClass`` error."""
+        with pytest.raises(RuntimeError, match="LorentzianPeakModel has no fit result"):
+            fit_obj.save_fitting()
+
     def test_flat_trace_is_rejected_with_an_undefined_r_squared(self, fitted, monkeypatch) -> None:
         """A flat trace has no variance: R² is ``nan``, not a division by zero, and the fit is rejected.
 

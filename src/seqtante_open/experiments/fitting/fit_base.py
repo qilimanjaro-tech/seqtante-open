@@ -61,6 +61,8 @@ class FittingClass(ABC):
         self.fitting: dict[str, float] = {}
         self.path = path
         self.target = target
+        #: Set to True by a subclass's :meth:`fit` once it has a usable result; :meth:`_require_fit` checks it.
+        self.fitted = False
 
     @cached_property
     def platform(self) -> "Platform":
@@ -74,6 +76,15 @@ class FittingClass(ABC):
 
     def plot(self):
         """Plots the fitted data. if a folder is given, it saves ther plot, else it shows it."""
+
+    def _require_fit(self) -> None:
+        """Raise unless :meth:`fit` produced a usable result; call it before reading or saving a fitted value.
+
+        Raises:
+            RuntimeError: if :attr:`fitted` is ``False``.
+        """
+        if not self.fitted:
+            raise RuntimeError(f"{type(self).__name__} has no fit result: call fit() and check `fitted` first.")
 
     def fit_and_plot(self):
         """Sequentially does the fit and the plot functions."""

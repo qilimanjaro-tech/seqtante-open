@@ -65,7 +65,7 @@ class LorentzianPeakModel(FittingClass):
         frequency_coord = xarr[xarr.dims[0]]
         self.frequencies = np.asarray(frequency_coord.data, dtype=float)
         self.magnitude = np.abs(xarr.to_numpy())
-        # ``results`` is populated by fit(); left unset until then, so it reads as unpopulated.
+        # ``results`` is populated by fit(), which then sets ``fitted``; until then ``_require_fit`` raises.
 
     def fit(self) -> _LorentzianResults:
         """Fit the Lorentzian, apply the acceptance checks and record the outcome."""
@@ -110,6 +110,8 @@ class LorentzianPeakModel(FittingClass):
             "quality": quality,
             "params": params,
         }
+        # Set even for a rejected fit: ``accepted`` and ``quality`` are its result, read by the node.
+        self.fitted = True
         return self.results
 
     @staticmethod
@@ -154,10 +156,6 @@ class LorentzianPeakModel(FittingClass):
             self.add_fitted_parameter(FittedParameter.DRIVE_IF, self.results["fitted_if"])
         self.add_fitted_parameter(FittedParameter.FIT_R2, self.results["r_squared"])
         self.save_fitting_to_database()
-
-    def _require_fit(self):
-        if not getattr(self, "results", None):
-            raise RuntimeError("No fit results available, call fit() first.")
 
     def plot(self):
         """Plot the sweep and, when accepted, its Lorentzian fit; save it next to the measurement."""
