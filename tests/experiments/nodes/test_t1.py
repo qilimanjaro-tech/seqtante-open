@@ -7,9 +7,9 @@ hardware (LOs, readout attenuation, drive power/RF), reports its value in micros
 score the benchmark. The rejection paths check that a bad fit (low R², non-physical decay, ill-determined
 lifetime) fails the target, records no benchmark result, and never reaches the DB.
 
-The platform fake and the output/save stubbing come from :mod:`tests.experiments.nodes.harness`; the
-T1-specific execution fakes (QProgram builder, stream array, ``execute_qprogram``) and the fit stub live
-here.
+The platform and stream-array fakes and the output/save stubbing come from
+:mod:`tests.experiments.nodes.harness`; the readout shape the T1 QProgram returns, the QProgram builder
+stub and the fit stub live here.
 """
 
 from types import SimpleNamespace
@@ -34,7 +34,7 @@ from seqtante_open.experiments.nodes import T1Node
 from seqtante_open.experiments.nodes import t1 as t1_module
 from seqtante_open.targets import ExperimentTarget
 from tests.experiments.nodes.harness import (
-    FakePlatform,
+    ExecutingPlatform,
     FakeStreamArray,
     build_context,
     identity_crosstalk,
@@ -154,13 +154,18 @@ def _calibration() -> Calibration:
     return calibration
 
 
-def _t1_platform() -> FakePlatform:
-    """A fake platform whose readout returns one result per idle point."""
-    return FakePlatform(readout_bus=READOUT_BUS, readout_points=N_IDLE, readout_shape=(2, 1))
+class FakeT1Platform(ExecutingPlatform):
+    """An :class:`ExecutingPlatform` with a Rohde & Schwarz drive whose execution returns one point per idle."""
+
+    def __init__(self) -> None:
+        super().__init__(instruments={DRIVE_BUS: "ROHDE_SCHWARZ"})
+
+    def results(self) -> dict:
+        return {READOUT_BUS: [SimpleNamespace(array=np.zeros((2, 1))) for _ in range(N_IDLE)]}
 
 
 def _make(calibration: Calibration, thresholds, platform=None, **params) -> T1Node:
-    context = build_context(calibration, platform if platform is not None else _t1_platform())
+    context = build_context(calibration, platform if platform is not None else FakeT1Platform())
     return T1Node(
         name="t1_sweet_spot",
         idx=0,
@@ -182,6 +187,7 @@ def _patch(monkeypatch):
     monkeypatch.setattr(t1_module, "t1_saturation", fake_build)
     monkeypatch.setattr(t1_module, "StreamArray", FakeStreamArray)
     monkeypatch.setattr(FakeStreamArray, "measurement_id", MEAS_ID)
+    monkeypatch.setattr(FakeStreamArray, "last", None)
     monkeypatch.setattr(t1_module, "T1Fit", FakeT1Fit)
     stub_output_and_save(monkeypatch)
     # Reset the fit knobs to an accepted decay; each test flips the one it exercises.
@@ -197,7 +203,7 @@ def _patch(monkeypatch):
 def test_runs_the_saturation_sweep_at_the_point_and_scores_the_benchmark(monkeypatch):
     calls = _patch(monkeypatch)
     calibration = _calibration()
-    platform = _t1_platform()
+    platform = FakeT1Platform()
     node = _make(calibration, THRESHOLDS, platform=platform)
 
     failed = node.run({})

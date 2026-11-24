@@ -29,7 +29,7 @@ from seqtante_open.experiments.nodes import two_tone_saturation as spine_module
 from seqtante_open.experiments.nodes.two_tone_saturation import TwoToneSaturationNode
 from seqtante_open.outputs import output_controller
 from seqtante_open.targets import ExperimentTarget
-from tests.experiments.nodes.harness import FakePlatform, FakeStreamArray, identity_crosstalk
+from tests.experiments.nodes.harness import ExecutingPlatform, FakeStreamArray, identity_crosstalk
 
 Q1 = ExperimentTarget.from_str("q1")
 EXPERIMENT = "example_two_tone_saturation"
@@ -56,6 +56,16 @@ def example_node_cls(monkeypatch):
             return None
 
     return ExampleNode
+
+
+class FakeSaturationPlatform(ExecutingPlatform):
+    """An :class:`ExecutingPlatform` with a Rohde & Schwarz drive whose one execution returns the whole sweep."""
+
+    def __init__(self) -> None:
+        super().__init__(instruments={"drive_q1": "ROHDE_SCHWARZ"})
+
+    def results(self) -> dict:
+        return {"readout_q1": [SimpleNamespace(array=np.zeros((2, len(SWEEP))))]}
 
 
 def _calibration() -> Calibration:
@@ -91,7 +101,7 @@ def test_measure_builds_the_qili_sweep_and_sets_the_hardware(monkeypatch, exampl
     monkeypatch.setattr(output_controller, "_initialized", True)
     monkeypatch.setattr(output_controller, "_db_manager", object())
     calibration = _calibration()
-    platform = FakePlatform()
+    platform = FakeSaturationPlatform()
     context = RunContext(
         platform=platform, platform_path="runcard.yml", calibration=calibration, calibration_path="calibration.yml"
     )

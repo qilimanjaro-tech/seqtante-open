@@ -18,15 +18,9 @@ One flat dict. Every experiment takes ``str`` targets (``"q1"``, ``"c1_2"``), so
 there is nothing to group by: ``CalibrationNode`` validates targets against
 ``str`` directly rather than looking the experiment up in a category.
 
-The legacy experiments still registered here as callables:
-
-- ``single_tone_vs_flux`` (offset calibration)
-- ``single_tone``
-- ``two_tone_vs_flux``
-
-``two_tone`` has been ported to a :class:`CalibrationNode` (``TwoToneNode``, QHC-1805) and is driven
-through ``NODE_REGISTRY``'s ``node_cls``, not from this dict. Register each remaining experiment here
-as it lands, and drop it as it is ported.
+The legacy experiments still registered here as callables. An experiment ported to a
+:class:`CalibrationNode` is driven through ``NODE_REGISTRY``'s ``node_cls`` and removed from here;
+QHC-1930 removes the rest.
 """
 
 from typing import Any, Protocol
