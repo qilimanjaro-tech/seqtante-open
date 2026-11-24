@@ -8,12 +8,9 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from qililab import IQDrag, Square
-from qililab.qprogram.calibration import Calibration
-
-from seqtante_open.calibration.bus_alias import Role
-from seqtante_open.calibration.io import write_calibration_file
-from seqtante_open.calibration.model import (
+from qili_qprograms.bus_alias import Role
+from qili_qprograms.calibration.io import write_calibration_file
+from qili_qprograms.calibration.model import (
     CalibrationFile,
     DriveFreqs,
     ExperimentSection,
@@ -21,6 +18,10 @@ from seqtante_open.calibration.model import (
     OperatingPoint,
     ReadoutFreqs,
 )
+from qili_qprograms.targets import ExperimentTarget
+from qililab import IQDrag, Square
+from qililab.qprogram.calibration import Calibration
+
 from seqtante_open.controllers.calibration_node import (
     AnalysisResult,
     FixedFluxNode,
@@ -28,7 +29,6 @@ from seqtante_open.controllers.calibration_node import (
     write_whole,
 )
 from seqtante_open.controllers.verdicts import AnalysisError
-from seqtante_open.targets import ExperimentTarget
 from tests.experiments.nodes.harness import ExecutingPlatform, FakeStreamArray, build_context, stub_output_and_save
 
 Q1 = ExperimentTarget.from_str("q1")

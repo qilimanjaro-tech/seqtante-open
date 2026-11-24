@@ -8,12 +8,8 @@ tested without any hardware, fit or disk write.
 from typing import ClassVar
 
 import pytest
-from qililab.qprogram.calibration import Calibration
-from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
-from qililab.typings.enums import Parameter
-
-from seqtante_open.calibration.io import write_calibration_file
-from seqtante_open.calibration.model import (
+from qili_qprograms.calibration.io import write_calibration_file
+from qili_qprograms.calibration.model import (
     CalibrationFile,
     DriveFreqs,
     ExperimentSection,
@@ -21,6 +17,11 @@ from seqtante_open.calibration.model import (
     OperatingPoint,
     ReadoutFreqs,
 )
+from qili_qprograms.targets import ExperimentTarget
+from qililab.qprogram.calibration import Calibration
+from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
+from qililab.typings.enums import Parameter
+
 from seqtante_open.controllers import calibration_node as node_module
 from seqtante_open.controllers import node_registry
 from seqtante_open.controllers.calibration_node import AnalysisResult, CalibrationNode, RunContext
@@ -31,7 +32,6 @@ from seqtante_open.controllers.verdicts import (
     BenchmarkThresholds,
     Verdict,
 )
-from seqtante_open.targets import ExperimentTarget
 
 CROSSTALK_BUSES = ("flux_z_q1", "flux_z_q2", "flux_x_q1")
 THRESHOLDS = BenchmarkThresholds(passed=1.0, warning=0.5, unit="ns", direction=BenchmarkDirection.higher_is_better)

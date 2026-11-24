@@ -1,9 +1,7 @@
 """Tests for the operating-point helper (ADR-0001, ADR-0006)."""
 
 import pytest
-from qililab.typings.enums import Parameter
-
-from seqtante_open.calibration.model import (
+from qili_qprograms.calibration.model import (
     CalibrationFile,
     DriveFreqs,
     ExperimentSection,
@@ -11,13 +9,15 @@ from seqtante_open.calibration.model import (
     OperatingPoint,
     ReadoutFreqs,
 )
+from qili_qprograms.targets import ExperimentTarget
+from qililab.typings.enums import Parameter
+
 from seqtante_open.controllers.operating_point import (
     apply_operating_point,
     operating_point_for,
     park_lo_outside_sweep,
 )
 from seqtante_open.controllers.parameter_restore import ParameterRestore
-from seqtante_open.targets import ExperimentTarget
 
 
 class FakePlatform:

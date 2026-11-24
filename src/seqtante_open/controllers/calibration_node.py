@@ -42,15 +42,16 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, Protocol, Typ
 
 import numpy as np
 from loguru import logger
+from qili_qprograms.bus_alias import AXES, Axis, Role, bus_alias
 from qili_qprograms.calibration import pulse_name
+from qili_qprograms.calibration.io import read_calibration_file, save_calibration, write_calibration_file
+from qili_qprograms.calibration.model import CalibrationFile, ExperimentSection
+from qili_qprograms.targets import Target
 from qililab import Parameter, Platform
 from qililab.qprogram.calibration import Calibration
 from qililab.result import StreamArray
 from qililab.typings import ParameterValue
 
-from seqtante_open.calibration.bus_alias import Role, bus_alias
-from seqtante_open.calibration.io import read_calibration_file, save_calibration, write_calibration_file
-from seqtante_open.calibration.model import FLUX_LOOPS, CalibrationFile, ExperimentSection, FluxLoop
 from seqtante_open.controllers.crosstalk_session import CrosstalkSession, crosstalk_session
 from seqtante_open.controllers.drive_source import drive_source_writes
 from seqtante_open.controllers.node_registry import BenchmarkSpec, Parallel, experiment_spec, register_node
@@ -62,7 +63,6 @@ from seqtante_open.controllers.operating_point import (
 from seqtante_open.controllers.parameter_restore import ParameterRestore, restoring_parameters
 from seqtante_open.controllers.verdicts import AnalysisError, BenchmarkResult, BenchmarkThresholds, verdict_for
 from seqtante_open.outputs import output_controller
-from seqtante_open.targets import Target
 
 if TYPE_CHECKING:
     from qililab.qprogram import QProgram
@@ -796,14 +796,14 @@ class FluxSweepNode(CalibrationNode[ResultT]):
 
     applies_operating_point: ClassVar[bool] = False
 
-    def _loop(self, target: Target) -> FluxLoop:
+    def _loop(self, target: Target) -> Axis:
         """The flux loop the step sweeps on ``target`` (its ``flux_axis``), checked to be ``z`` or ``x``.
 
         Raises:
             KeyError: if the step sets no ``flux_axis`` and the node has no default for it.
-            ValueError: if ``flux_axis`` is not one of :data:`~seqtante_open.calibration.model.FLUX_LOOPS`.
+            ValueError: if ``flux_axis`` is not one of :data:`~qili_qprograms.bus_alias.AXES`.
         """
         loop = self._param(target, "flux_axis")
-        if loop not in FLUX_LOOPS:
-            raise ValueError(f"step '{self.name}': {target} flux_axis must be one of {FLUX_LOOPS}, not {loop!r}")
+        if loop not in AXES:
+            raise ValueError(f"step '{self.name}': {target} flux_axis must be one of {AXES}, not {loop!r}")
         return loop

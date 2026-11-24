@@ -34,25 +34,24 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from qili_qprograms.bus_alias import Role, bus_alias
 from qili_qprograms.experiments import two_tone_vs_flux_saturation
+from qili_qprograms.targets import QubitTarget
 from qililab import Parameter
 
-from seqtante_open.calibration.bus_alias import Role, bus_alias
 from seqtante_open.controllers.calibration_node import AnalysisResult, FluxSweepNode
 from seqtante_open.controllers.operating_point import operating_point_for
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.fitting import FluxoniumTwoToneFluxModel
 from seqtante_open.experiments.utils.qdac_utils import get_qdac_out_trigger, qdac_step_timings
-from seqtante_open.targets import QubitTarget
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     import numpy as np
+    from qili_qprograms.bus_alias import Axis
+    from qili_qprograms.targets import Target
     from qililab.result import StreamArray
-
-    from seqtante_open.calibration.model import FluxLoop
-    from seqtante_open.targets import Target
 
 PARABOLA_VERTEX = "parabola_vertex"
 
@@ -91,7 +90,7 @@ def _write_map(stream_array: StreamArray, averaged: Sequence[np.ndarray]) -> Non
 class SweetSpotFlux:
     """What ``analyze`` hands ``apply``: the measured sweet-spot bias on one loop, in Φ0."""
 
-    loop: FluxLoop
+    loop: Axis
     flux: float
 
 
@@ -168,9 +167,7 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
         self._set_operating_point_hardware(target)
         return self._stream_map(target, qprogram, fluxes, drive_ifs, loop)
 
-    def _stream_map(
-        self, target: Target, qprogram: Any, fluxes: np.ndarray, drive_ifs: np.ndarray, loop: FluxLoop
-    ) -> int:
+    def _stream_map(self, target: Target, qprogram: Any, fluxes: np.ndarray, drive_ifs: np.ndarray, loop: Axis) -> int:
         """Run the map ``repetitions`` times and stream the running average; return the measurement id."""
         flux_bus = bus_alias(target, Role.flux, loop)
         return self._stream(

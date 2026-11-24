@@ -25,11 +25,8 @@ from typing import ClassVar
 
 import numpy as np
 import pytest
-from qililab import Parameter, Square
-from qililab.qprogram.calibration import Calibration
-
-from seqtante_open.calibration.io import read_calibration_file, write_calibration_file
-from seqtante_open.calibration.model import (
+from qili_qprograms.calibration.io import read_calibration_file, write_calibration_file
+from qili_qprograms.calibration.model import (
     CalibrationFile,
     DriveFreqs,
     ExperimentSection,
@@ -37,9 +34,12 @@ from seqtante_open.calibration.model import (
     OperatingPoint,
     ReadoutFreqs,
 )
+from qili_qprograms.targets import ExperimentTarget
+from qililab import Parameter, Square
+from qililab.qprogram.calibration import Calibration
+
 from seqtante_open.experiments.nodes import TwoToneVsFluxNode
 from seqtante_open.experiments.nodes import two_tone_vs_flux as node_module
-from seqtante_open.targets import ExperimentTarget
 from tests.experiments.nodes.harness import (
     ExecutingPlatform,
     FakeStreamArray,

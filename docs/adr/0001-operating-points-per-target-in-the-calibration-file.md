@@ -4,6 +4,8 @@ status: accepted
 
 # Operating points live per target in the calibration file, and experiment sections reference them
 
+> **Where this lives now (QHC-1933).** The calibration-file model, its I/O, the pulse-name grammar, bus aliases and targets are implemented in [qili-qprograms](https://github.com/qilimanjaro-tech/qili-qprograms) (`qili_qprograms.calibration`, `qili_qprograms.bus_alias`, `qili_qprograms.targets`), because its QPrograms read the calibration file. seqtante-open imports them. A change to the format is a qili-qprograms PR plus a `uv.lock` bump here.
+
 Seqtante-Open calibrates the device; qili-experiments, run through qili-runtime and QiliSDK, later operates it from the runcard and the calibration file alone. Today qili-experiments copies each qubit's fluxes and frequencies into every experiment section, so one recalibration would have to find and update every copy, and any copy it missed would silently run at a stale point. We decided that operating points are stored **once per target** in the calibration file, that each experiment section **names** the operating point it runs at and the pulses it plays, and holds only what is specific to it, and that Seqtante-Open writes operating points while qili-experiments changes its contract to read them. The runcard keeps only the baseline; operating-point values never reach it.
 
 ## The shape
