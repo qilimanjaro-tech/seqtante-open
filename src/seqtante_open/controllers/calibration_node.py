@@ -246,18 +246,6 @@ class CalibrationNode(ABC, Generic[ResultT]):
             return self.defaults[key]
         raise KeyError(f"step '{self.name}': {target} sets no '{key}' and {type(self).__name__} has no default for it")
 
-    def _flux_loop(self, target: Target) -> FluxLoop:
-        """The flux loop the step names for ``target`` (its ``loop`` parameter), checked to be ``z`` or ``x``.
-
-        Raises:
-            KeyError: if the step sets no ``loop`` and the node has no default for it.
-            ValueError: if ``loop`` is not one of :data:`~seqtante_open.calibration.model.FLUX_LOOPS`.
-        """
-        loop = self._param(target, "loop")
-        if loop not in FLUX_LOOPS:
-            raise ValueError(f"step '{self.name}': {target} loop must be one of {FLUX_LOOPS}, not {loop!r}")
-        return loop
-
     def _drive_source_writes(self, target: Target) -> list[tuple[Parameter, ParameterValue]]:
         """The writes that arm ``target``'s drive source, its level read from the step or :attr:`defaults`.
 
@@ -625,3 +613,15 @@ class FluxSweepNode(CalibrationNode[ResultT]):
     """
 
     applies_operating_point: ClassVar[bool] = False
+
+    def _loop(self, target: Target) -> FluxLoop:
+        """The flux loop the step sweeps on ``target`` (its ``loop`` parameter), checked to be ``z`` or ``x``.
+
+        Raises:
+            KeyError: if the step sets no ``loop`` and the node has no default for it.
+            ValueError: if ``loop`` is not one of :data:`~seqtante_open.calibration.model.FLUX_LOOPS`.
+        """
+        loop = self._param(target, "loop")
+        if loop not in FLUX_LOOPS:
+            raise ValueError(f"step '{self.name}': {target} loop must be one of {FLUX_LOOPS}, not {loop!r}")
+        return loop

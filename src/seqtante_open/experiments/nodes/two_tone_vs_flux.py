@@ -123,7 +123,7 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
                 f"{target}: two_tone_vs_flux runs on qubits only; a coupler has no drive line of its own "
                 "and the shared experiment has no readout-qubit mapping"
             )
-        loop = self._flux_loop(target)
+        loop = self._loop(target)
         section = self.calibration_file.experiments[self.experiment][str(target)]
         operating_point = operating_point_for(self.calibration_file, self.experiment, target)
         fluxes = self._absolute_sweep(target, "flux_sweep", operating_point.flux.on(loop))
@@ -213,7 +213,7 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
                 the swept window, or its R² is below the step's minimum or undefined. The target then
                 fails the step.
         """
-        loop = self._flux_loop(target)
+        loop = self._loop(target)
         operating_point = operating_point_for(self.calibration_file, self.experiment, target)
         model = FluxoniumTwoToneFluxModel(
             measurements[-1],
