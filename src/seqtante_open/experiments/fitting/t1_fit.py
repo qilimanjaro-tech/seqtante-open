@@ -36,8 +36,8 @@ class T1Fit(FittingClass):
         path (str | None, optional): Directory the plot is saved into; if None the plot is shown.
     """
 
-    results: np.ndarray | None
     #: Set by :meth:`fit`; left unset until then so a missing fit is an error, not a silent default.
+    results: np.ndarray
     rate: float
     T1: float
     t1_uncertainty: float
@@ -45,7 +45,6 @@ class T1Fit(FittingClass):
 
     def __init__(self, target: str, measurement_id: int, path: str | None = None):
         super().__init__(measurement_id=measurement_id, target=target, path=path)
-        self.results = None
         xarr = self.get_xarray()
         self.wait_values = xarr[xarr.dims[0]].data
         self.arr = np.real(self.rotate_iq(self.array[:, 0] + 1j * self.array[:, 1]))
@@ -80,6 +79,7 @@ class T1Fit(FittingClass):
         ss_tot = float(np.sum((self.arr - np.mean(self.arr)) ** 2))
         # A flat trace (drive off, readout saturated) has no variance to explain: R² is undefined, not a crash.
         self.r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+        self.fitted = True
 
     @property
     def is_physical_decay(self) -> bool:
@@ -118,14 +118,10 @@ class T1Fit(FittingClass):
         self.add_fitted_parameter(FittedParameter.FIT_R2, self.r_squared)
         self.save_fitting_to_database()
 
-    def _require_fit(self) -> np.ndarray:
-        if self.results is None:
-            raise RuntimeError("No fit results available, call fit() first.")
-        return self.results
-
     def plot(self):
         """Plot the rotated decay and the fitted exponential."""
-        results = self._require_fit()
+        self._require_fit()
+        results = self.results
         title = f"{self.target}_T1"
 
         fig = go.Figure(
