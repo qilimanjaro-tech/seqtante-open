@@ -113,6 +113,11 @@ class FluxoniumTwoToneFluxModel(FittingClass[SweetSpotResults]):
         self.results = SweetSpotResults(center=float(center), r_squared=r_squared, coefficients=coefficients)
 
     @property
+    def fitted(self) -> bool:
+        """Whether :meth:`fit` found a sweet spot, so :attr:`center` can be read."""
+        return self._results is not None
+
+    @property
     def center(self) -> float:
         """The flux sweet spot: the parabola's vertex."""
         return self.results["center"]

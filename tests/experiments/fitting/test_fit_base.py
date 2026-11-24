@@ -97,13 +97,11 @@ def make_fit(path=None, fitting=None):
 def test_results_refuse_to_be_read_until_a_fit_assigns_them():
     """Every fitted value is read through ``results``, so a read before ``fit()`` raises without a per-method check."""
     fit = make_fit()
-    assert fit.fitted is False
     with pytest.raises(RuntimeError, match="FittingClass has no fit result"):
         _ = fit.results
 
     fit.results = {"center": 0.1}
 
-    assert fit.fitted is True
     assert fit.results == {"center": 0.1}
 
 

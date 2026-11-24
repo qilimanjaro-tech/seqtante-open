@@ -91,17 +91,12 @@ class FittingClass(ABC, Generic[ResultsT]):
             RuntimeError: before :meth:`fit` has assigned a result, or after a fit that found none.
         """
         if self._results is None:
-            raise RuntimeError(f"{type(self).__name__} has no fit result: call fit() and check `fitted` first.")
+            raise RuntimeError(f"{type(self).__name__} has no fit result: call fit() first.")
         return self._results
 
     @results.setter
     def results(self, value: ResultsT) -> None:
         self._results = value
-
-    @property
-    def fitted(self) -> bool:
-        """Whether :meth:`fit` produced a result, so :attr:`results` can be read."""
-        return self._results is not None
 
     def fit_and_plot(self):
         """Sequentially does the fit and the plot functions."""
