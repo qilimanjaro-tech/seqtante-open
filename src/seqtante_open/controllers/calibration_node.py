@@ -66,20 +66,20 @@ from seqtante_open.targets import Target
 
 if TYPE_CHECKING:
     from qililab.qprogram import QProgram
-    from qililab.result import AutocalMeasurement, Measurement
+    from qililab.result import AutocalMeasurement, Measurement, MeasurementResult
 
 #: How :meth:`CalibrationNode._stream` writes one execution's acquisitions (the readout bus's results)
-#: into the stream: ``write(stream_array, acquisitions, repetition)``.
-StreamWrite = Callable[[StreamArray, Sequence[Any], int], None]
+#: into the stream: ``write(stream_array, acquisitions)``, once per execution.
+StreamWrite = Callable[[StreamArray, Sequence["MeasurementResult"]], None]
 
 
-def write_per_point(stream_array: StreamArray, acquisitions: Sequence[Any], repetition: int) -> None:
+def write_per_point(stream_array: StreamArray, acquisitions: Sequence["MeasurementResult"]) -> None:
     """One acquisition per sweep point (an unrolled sweep, e.g. T1/T2 idle times): write each at its index."""
     for index, acquisition in enumerate(acquisitions):
         stream_array[index,] = acquisition.array.T
 
 
-def write_whole(stream_array: StreamArray, acquisitions: Sequence[Any], repetition: int) -> None:
+def write_whole(stream_array: StreamArray, acquisitions: Sequence["MeasurementResult"]) -> None:
     """One acquisition holding the whole sweep (a hardware loop, e.g. rabi, two-tone): write it in one go."""
     stream_array[()] = acquisitions[0].array.T
 
@@ -409,8 +409,8 @@ class CalibrationNode(ABC, Generic[ResultT]):
             qubit_idx=str(target),
         )
         with stream_array:
-            for repetition in range(repetitions):
-                write(stream_array, platform.execute_qprogram(qprogram).results[readout_bus], repetition)
+            for _ in range(repetitions):
+                write(stream_array, platform.execute_qprogram(qprogram).results[readout_bus])
         return cast("Measurement | AutocalMeasurement", stream_array.measurement).measurement_id
 
     def _drive_source_writes(self, target: Target) -> list[tuple[Parameter, ParameterValue]]:
