@@ -40,7 +40,7 @@ from qililab import Parameter
 from qililab.result import StreamArray
 
 from seqtante_open.calibration.bus_alias import Role, bus_alias
-from seqtante_open.controllers.calibration_node import AnalysisResult, FluxLoop, FluxSweepNode
+from seqtante_open.controllers.calibration_node import AnalysisResult, FluxSweepNode
 from seqtante_open.controllers.operating_point import operating_point_for
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.fitting import FluxoniumTwoToneFluxModel
@@ -52,6 +52,7 @@ from seqtante_open.targets import QubitTarget
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from seqtante_open.calibration.model import FluxLoop
     from seqtante_open.targets import Target
 
 PARABOLA_VERTEX = "parabola_vertex"
@@ -122,10 +123,10 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
                 f"{target}: two_tone_vs_flux runs on qubits only; a coupler has no drive line of its own "
                 "and the shared experiment has no readout-qubit mapping"
             )
-        loop = self._loop(target)
+        loop = self._flux_loop(target)
         section = self.calibration_file.experiments[self.experiment][str(target)]
         operating_point = operating_point_for(self.calibration_file, self.experiment, target)
-        fluxes = self._absolute_sweep(target, "flux_sweep", self._stored_flux(target, operating_point, loop))
+        fluxes = self._absolute_sweep(target, "flux_sweep", operating_point.flux.on(loop))
         drive_ifs = self._absolute_sweep(target, "drive_if_sweep", operating_point.drive.if_)
 
         platform = self.context.platform
@@ -212,7 +213,7 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
                 the swept window, or its R² is below the step's minimum or undefined. The target then
                 fails the step.
         """
-        loop = self._loop(target)
+        loop = self._flux_loop(target)
         operating_point = operating_point_for(self.calibration_file, self.experiment, target)
         model = FluxoniumTwoToneFluxModel(
             measurements[-1],

@@ -57,6 +57,37 @@ def test_concrete_node_stores_its_inputs():
     assert node.benchmark_results == ()
 
 
+class _LoopNode(CalibrationNode):
+    experiment = "flux_loop_example"
+    analyses = ("a",)
+    defaults = {"loop": "z"}
+
+    def execute_node(self, targets):
+        return {target: [0] for target in targets}
+
+    def analyze(self, target, measurements):
+        return AnalysisResult()
+
+    def apply(self, target, result):
+        pass
+
+
+@pytest.mark.parametrize(("params", "expected"), [({}, "z"), ({"loop": "x"}, "x")])
+def test_flux_loop_reads_the_step_loop_or_the_default(params, expected):
+    q1 = ExperimentTarget.from_str("q1")
+    node = _LoopNode(name="step1", idx=0, targets=[q1], parameters={q1: params}, context=_context())
+
+    assert node._flux_loop(q1) == expected
+
+
+def test_flux_loop_rejects_an_unknown_loop():
+    q1 = ExperimentTarget.from_str("q1")
+    node = _LoopNode(name="step1", idx=0, targets=[q1], parameters={q1: {"loop": "y"}}, context=_context())
+
+    with pytest.raises(ValueError, match="loop must be one of"):
+        node._flux_loop(q1)
+
+
 def test_place_operating_points_requires_an_experiment():
     class Spine(CalibrationNode):
         def execute_node(self, targets):
