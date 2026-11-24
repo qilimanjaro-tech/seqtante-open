@@ -183,4 +183,4 @@ class LorentzianPeakModel(FittingClass[_LorentzianResults]):
             width=1000,
             height=600,
         )
-        return self.save_plot(fig, title, save_to_db=True)
+        return self.save_plot(fig, title)

@@ -28,7 +28,7 @@ defaults:
   rabi:
     amplitude_sweep: [0.02, 0.8, 40]
   t1:
-    idle_sweep: [0, 200000, 51]
+    idle_duration_sweep: [0, 200000, 51]
     drive_amplitude: 0.1
     drive_duration: 2000
     drive_power: -20  # dBm, for a Rohde & Schwarz drive source; a QCM-RF drive takes drive_gain in [-1, 1]
@@ -85,7 +85,8 @@ pipelines:
       reset_flux:
         experiment: reset_point_search
         operating_point: reset
-        target_frequency: [2.79e9, 2.81e9]
+        target_freq_min: 2.79e9
+        target_freq_max: 2.81e9
       rabi_reset:
         experiment: rabi
         analysis: readout_levels

@@ -45,11 +45,31 @@ class Measured(_Base):
     std: float
 
 
+#: A flux loop of a target: ``z``, or ``x`` on a two-loop qubit.
+FluxLoop = Literal["z", "x"]
+FLUX_LOOPS: tuple[FluxLoop, ...] = ("z", "x")
+
+
 class Flux(_Base):
     """A flux setpoint on a target's loops, as a measured bias (ADR-0011). ``x`` is absent on z-only loops."""
 
     z: float
     x: float | None = None
+
+    def on(self, loop: FluxLoop) -> float:
+        """The bias stored on ``loop``.
+
+        Raises:
+            ValueError: if ``loop`` is not ``z``/``x``, or it is ``x`` and the setpoint stores none (a
+                z-only loop).
+        """
+        if loop not in FLUX_LOOPS:
+            raise ValueError(f"flux loop must be one of {FLUX_LOOPS}, not {loop!r}")
+        if loop == "z":
+            return self.z
+        if self.x is None:
+            raise ValueError("no 'x' flux stored: this setpoint is on a z-only loop")
+        return self.x
 
 
 class DriveFreqs(_Base):

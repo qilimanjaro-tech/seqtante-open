@@ -51,7 +51,6 @@ from seqtante_open.experiments.nodes.two_tone_saturation import TWO_TONE_SATURAT
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from seqtante_open.calibration.model import OperatingPoint
     from seqtante_open.targets import Target
 
 LORENTZIAN_PEAK = "lorentzian_peak"
@@ -62,18 +61,19 @@ RESET_POINT_SEARCH_DEFAULTS: Mapping[str, Any] = {
     # Fit acceptance and span widening.
     "min_r2": 0.8,
     "retry_spans": (30e6, 60e6),
-    # Target frequency window (absolute Hz) and the sweep that first looks for the line (absolute Hz).
+    # Target frequency window (absolute Hz), and the drive-IF window that first looks for the line:
+    # ``np.linspace`` args as offsets from the stored drive IF (QHC-1932). Its spacing is kept when the
+    # search re-centres the sweep or widens it to ``retry_spans``.
     "target_freq_min": 2.79e9,
     "target_freq_max": 2.81e9,
-    "sweep_start": 2.79e9,
-    "sweep_stop": 2.81e9,
-    "sweep_step": 0.4e6,
+    "drive_if_sweep": (-10e6, 10e6, 51),
     # flux_z tuning.
     "flux_z_probe_step": 0.0005,
     "flux_z_max_step": 0.001,
     "flux_z_max_shift": 0.003,
     "flux_z_max_moves": 6,
-    "flux_settle_s": 5.0,
+    # Wait for the flux to settle after each move, in ns (5 s).
+    "flux_settle_duration": 5_000_000_000,
     # Two-tone measurement.
     **TWO_TONE_SATURATION_DEFAULTS,
 }
@@ -168,10 +168,9 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
         flux_z = flux_z_initial
         ids: list[int] = []
 
-        sweep_start = self._param(target, "sweep_start")
-        sweep_stop = self._param(target, "sweep_stop")
-        initial_center = (sweep_start + sweep_stop) / 2
-        qubit_if, plot_path = self._find_qubit(target, operating_point, initial_center, ids)
+        window = self._sweep(target, "drive_if_sweep")
+        window_centre = (window[0] + window[-1]) / 2
+        qubit_if, plot_path = self._find_qubit(target, operating_point.drive.if_ + window_centre, ids)
         if qubit_if is None:
             raise AnalysisError(f"{target}: no qubit line found at flux_z = {flux_z:.5f} in any sweep width")
         qubit_freq_abs = qubit_if + drive_lo
@@ -202,11 +201,11 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
 
             # The flux move goes through the restore handle, so the run returns the bus to where it was.
             self.restore.set(flux_z_bus, Parameter.FLUX, next_flux_z)
-            time.sleep(self._param(target, "flux_settle_s"))
+            time.sleep(self._param(target, "flux_settle_duration") * 1e-9)
             flux_z = next_flux_z
             moves += 1
 
-            qubit_if, plot_path = self._find_qubit(target, operating_point, expected_freq, ids)
+            qubit_if, plot_path = self._find_qubit(target, expected_freq - drive_lo, ids)
             if qubit_if is None:
                 raise AnalysisError(f"{target}: lost the qubit line after moving flux_z to {flux_z:.5f}")
             qubit_freq_abs = qubit_if + drive_lo
@@ -215,19 +214,22 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
         self._search[target] = _SearchOutcome(flux_z=flux_z, measurement_id=ids[-1], plot_path=plot_path)
         return ids
 
-    def _find_qubit(
-        self, target: Target, operating_point: OperatingPoint, center: float, ids: list[int]
-    ) -> tuple[float | None, str | None]:
-        """Look for the qubit line around ``center`` (absolute Hz), widening the sweep until a fit is accepted.
+    def _find_qubit(self, target: Target, centre_if: float, ids: list[int]) -> tuple[float | None, str | None]:
+        """Look for the qubit line around ``centre_if`` (Hz), widening the sweep until a fit is accepted.
 
-        Every attempt is plotted (accepted or not), so a failed search still leaves its sweeps in the
-        report. Returns the fitted IF and the accepted fit's plot path, so :meth:`analyze` can reuse that
-        plot instead of re-plotting the same measurement.
+        The first sweep is the step's ``drive_if_sweep`` window, centred on ``centre_if``; each retry
+        widens it to the next of ``retry_spans`` at the same point spacing. Every attempt is plotted
+        (accepted or not), so a failed search still leaves its sweeps in the report. Returns the fitted IF
+        and the accepted fit's plot path, so :meth:`analyze` can reuse that plot instead of re-plotting it.
         """
-        sweep_span = self._param(target, "sweep_stop") - self._param(target, "sweep_start")
-        spans = [sweep_span, *self._param(target, "retry_spans")]
-        for span in spans:
-            measurement_id = self._measure_two_tone(target, operating_point, center - span / 2, center + span / 2)
+        window = self._sweep(target, "drive_if_sweep")
+        spacing = abs(window[1] - window[0])
+        offsets = [window - (window[0] + window[-1]) / 2]
+        for span in self._param(target, "retry_spans"):
+            half = round(span / spacing / 2)
+            offsets.append(np.arange(-half, half + 1) * spacing)
+        for offset in offsets:
+            measurement_id = self._measure_two_tone_saturation(target, centre_if + offset)
             ids.append(measurement_id)
             model = LorentzianPeakModel(
                 measurement_id,
@@ -240,16 +242,6 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
             if model.accepted:
                 return model.fitted_if, plot
         return None, None
-
-    def _measure_two_tone(
-        self, target: Target, operating_point: OperatingPoint, freq_start: float, freq_stop: float
-    ) -> int:
-        """Run one two-tone pulsed-saturation sweep over ``[freq_start, freq_stop]`` (absolute Hz); return its id."""
-        drive_lo = operating_point.drive.lo
-        step = self._param(target, "sweep_step")
-        npoints = round((freq_stop - freq_start) / step) + 1
-        drive_if_sweep = np.linspace(freq_start, freq_stop, num=npoints, endpoint=True) - drive_lo
-        return self._measure_two_tone_saturation(target, drive_if_sweep)
 
     def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[ResetPoint]:
         """Fit the final sweep, check it, save it, and return the reset point's flux_z and drive IF; read-only.

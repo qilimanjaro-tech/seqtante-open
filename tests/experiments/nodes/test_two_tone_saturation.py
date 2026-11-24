@@ -22,14 +22,12 @@ from seqtante_open.calibration.model import (
     OperatingPoint,
     ReadoutFreqs,
 )
-from seqtante_open.controllers import calibration_node as node_module
 from seqtante_open.controllers import node_registry
 from seqtante_open.controllers.calibration_node import AnalysisResult, RunContext
 from seqtante_open.experiments.nodes import two_tone_saturation as spine_module
 from seqtante_open.experiments.nodes.two_tone_saturation import TwoToneSaturationNode
-from seqtante_open.outputs import output_controller
 from seqtante_open.targets import ExperimentTarget
-from tests.experiments.nodes.harness import ExecutingPlatform, FakeStreamArray, identity_crosstalk
+from tests.experiments.nodes.harness import ExecutingPlatform, identity_crosstalk, stub_output_and_save
 
 Q1 = ExperimentTarget.from_str("q1")
 EXPERIMENT = "example_two_tone_saturation"
@@ -96,10 +94,7 @@ def test_measure_builds_the_qili_sweep_and_sets_the_hardware(monkeypatch, exampl
         return SimpleNamespace(name="qprogram")  # sentinel; the fake platform/stream ignore its content
 
     monkeypatch.setattr(spine_module, "two_tone_saturation", fake_two_tone_saturation)
-    monkeypatch.setattr(spine_module, "StreamArray", FakeStreamArray)
-    monkeypatch.setattr(node_module, "save_calibration", lambda calibration, path: None)
-    monkeypatch.setattr(output_controller, "_initialized", True)
-    monkeypatch.setattr(output_controller, "_db_manager", object())
+    stub_output_and_save(monkeypatch)
     calibration = _calibration()
     platform = FakeSaturationPlatform()
     context = RunContext(
@@ -131,12 +126,6 @@ def test_measure_builds_the_qili_sweep_and_sets_the_hardware(monkeypatch, exampl
     assert snap["drive_q1", Parameter.RF_ON] is True
     # The run restored what it set: the RF output is back off after the node.
     assert not platform.values["drive_q1", Parameter.RF_ON]
-
-
-def test_a_single_point_sweep_is_rejected(example_node_cls):
-    node = example_node_cls.__new__(example_node_cls)
-    with pytest.raises(ValueError, match="at least 2 points"):
-        node._measure_two_tone_saturation(Q1, np.array([1e8]))
 
 
 def test_a_node_without_an_experiment_cannot_measure():

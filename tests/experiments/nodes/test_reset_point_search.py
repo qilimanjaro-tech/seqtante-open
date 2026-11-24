@@ -6,6 +6,7 @@ search loop — measure, move ``flux.z`` through the restore handle, re-measure,
 asserted without hardware, a database or a disk write.
 """
 
+import numpy as np
 import pytest
 from qililab.qprogram.calibration import Calibration
 
@@ -199,3 +200,23 @@ def test_secant_step_is_clipped_to_the_maximum():
 def test_no_slope_when_the_frequency_did_not_move():
     with pytest.raises(ValueError, match="cannot take a slope"):
         next_flux_z_step([(0.6, 2.80e9), (0.5995, 2.80e9)], target_freq=2.80e9, probe_step=5e-4, max_step=1e-3)
+
+
+def test_the_search_starts_on_the_window_around_the_stored_if_and_widens_at_the_same_spacing(monkeypatch):
+    """The first sweep is ``drive_if_sweep`` around the stored drive IF; each retry widens it, same spacing."""
+    _patch(monkeypatch)
+    monkeypatch.setattr(FakeLorentzian, "accept", False)
+    sweeps: list = []
+    monkeypatch.setattr(
+        ResetPointSearchNode,
+        "_measure_two_tone_saturation",
+        lambda self, target, sweep: sweeps.append(sweep) or FIRST_ID,
+    )
+    node = _make(_calibration())
+    node.parameters[Q1].update({"drive_if_sweep": (-2e6, 2e6, 5), "retry_spans": (8e6,)})
+
+    assert node.run({}) == ["q1"]  # no fit is accepted, so the line is never found
+
+    stored_if = _file().operating_points["q1"]["reset"].drive.if_
+    np.testing.assert_allclose(sweeps[0], stored_if + np.linspace(-2e6, 2e6, 5))
+    np.testing.assert_allclose(sweeps[1], stored_if + np.arange(-4, 5) * 1e6)
