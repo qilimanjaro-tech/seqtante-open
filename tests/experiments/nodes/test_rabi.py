@@ -12,11 +12,8 @@ from typing import ClassVar
 
 import numpy as np
 import pytest
-from qililab import IQDrag, Parameter, Square
-from qililab.qprogram.calibration import Calibration
-
-from seqtante_open.calibration.io import read_calibration_file, write_calibration_file
-from seqtante_open.calibration.model import (
+from qili_qprograms.calibration.io import read_calibration_file, write_calibration_file
+from qili_qprograms.calibration.model import (
     CalibrationFile,
     DriveFreqs,
     ExperimentSection,
@@ -24,12 +21,15 @@ from seqtante_open.calibration.model import (
     OperatingPoint,
     ReadoutFreqs,
 )
+from qili_qprograms.targets import ExperimentTarget
+from qililab import IQDrag, Parameter, Square
+from qililab.qprogram.calibration import Calibration
+
 from seqtante_open.controllers import calibration_node as node_module
 from seqtante_open.controllers.calibration_node import RunContext
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.nodes import RabiNode
 from seqtante_open.experiments.nodes import rabi as rabi_module
-from seqtante_open.targets import ExperimentTarget
 from tests.experiments.nodes.harness import (
     ExecutingPlatform,
     FakePlatform,

@@ -73,6 +73,8 @@ class RabiAmplitudeModel(FittingClass[_RabiResults]):
 
     def fit(self) -> _RabiResults:
         """Fit the undamped cosine and derive the pi amplitude and the two readout levels."""
+        # A refit that finds nothing must not leave the previous result readable.
+        self._results = None
         amplitudes, signal = self.amplitudes, self.signal
 
         offset_guess = float(np.mean(signal))

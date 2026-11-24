@@ -36,11 +36,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from qili_qprograms.bus_alias import Role, bus_alias
+from qili_qprograms.calibration.model import Measured, ReadoutLevels
 from qili_qprograms.experiments import rabi_amplitude
 from qililab import IQDrag
 
-from seqtante_open.calibration.bus_alias import Role, bus_alias
-from seqtante_open.calibration.model import Measured, ReadoutLevels
 from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode, write_whole
 from seqtante_open.controllers.operating_point import operating_point_for
 from seqtante_open.controllers.verdicts import AnalysisError
@@ -49,7 +49,7 @@ from seqtante_open.experiments.fitting import RabiAmplitudeModel
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from seqtante_open.targets import Target
+    from qili_qprograms.targets import Target
 
 #: Stream/experiment name the measurement is stored under.
 _EXPERIMENT_NAME = "rabi_amplitude_drag"

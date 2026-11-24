@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 
 from loguru import logger
+from qili_qprograms.targets import CouplerTarget, ExperimentTarget, QubitTarget, Target
 from qililab import Platform
 
 from seqtante_open.controllers.node_registry import (
@@ -31,7 +32,6 @@ from seqtante_open.controllers.node_registry import (
     known_experiments,
 )
 from seqtante_open.controllers.verdicts import BenchmarkDirection, BenchmarkThresholds
-from seqtante_open.targets import CouplerTarget, ExperimentTarget, QubitTarget, Target
 
 _STEP_KEYS = frozenset({"experiment", "analysis", "targets", "overrides"})
 _RESERVED_PARAMETERS = frozenset({"data_folder"})

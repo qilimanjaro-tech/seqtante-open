@@ -12,11 +12,8 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
-from qililab import Parameter
-from qililab.qprogram.calibration import Calibration
-
-from seqtante_open.calibration.io import write_calibration_file
-from seqtante_open.calibration.model import (
+from qili_qprograms.calibration.io import write_calibration_file
+from qili_qprograms.calibration.model import (
     CalibrationFile,
     DriveFreqs,
     ExperimentSection,
@@ -24,10 +21,13 @@ from seqtante_open.calibration.model import (
     OperatingPoint,
     ReadoutFreqs,
 )
+from qili_qprograms.targets import ExperimentTarget
+from qililab import Parameter
+from qililab.qprogram.calibration import Calibration
+
 from seqtante_open.controllers import node_registry
 from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode, FluxSweepNode, RunContext
 from seqtante_open.controllers.parameter_restore import restoring_parameters
-from seqtante_open.targets import ExperimentTarget
 from tests.controllers.fakes import InstrumentPlatform
 
 #: The offline runcard the ``platform`` fixture builds a real qililab platform from (QCM-RF ``drive_q1``).

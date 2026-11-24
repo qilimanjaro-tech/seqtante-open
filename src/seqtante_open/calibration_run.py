@@ -20,19 +20,18 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 from qcodes.utils.deprecate import QCoDeSDeprecationWarning
+from qili_qprograms.calibration.io import read_calibration_file
 from qililab.data_management import build_platform
 from qililab.utils.serialization import deserialize_from
 from ruamel.yaml import YAML
 
-from seqtante_open.calibration.io import read_calibration_file
 from seqtante_open.controllers import CalibrationGraph, CalibrationParser, Pipeline, RunContext
 from seqtante_open.outputs import output_controller
 
 if TYPE_CHECKING:
+    from qili_qprograms.calibration.model import CalibrationFile
     from qililab.platform.platform import Platform
     from qililab.qprogram.calibration import Calibration
-
-    from seqtante_open.calibration.model import CalibrationFile
 
 warnings.filterwarnings("ignore", category=QCoDeSDeprecationWarning)
 warnings.filterwarnings("ignore", message="Using UFloat objects with std_dev==0*")

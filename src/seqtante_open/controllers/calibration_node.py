@@ -38,19 +38,20 @@ import math
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, Protocol, TypeVar, cast, runtime_checkable
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, Protocol, TypeVar, cast, runtime_checkable
 
 import numpy as np
 from loguru import logger
+from qili_qprograms.bus_alias import AXES, Axis, Role, bus_alias
 from qili_qprograms.calibration import pulse_name
+from qili_qprograms.calibration.io import read_calibration_file, save_calibration, write_calibration_file
+from qili_qprograms.calibration.model import CalibrationFile, ExperimentSection
+from qili_qprograms.targets import Target
 from qililab import Parameter, Platform
 from qililab.qprogram.calibration import Calibration
 from qililab.result import StreamArray
 from qililab.typings import ParameterValue
 
-from seqtante_open.calibration.bus_alias import Role, bus_alias
-from seqtante_open.calibration.io import read_calibration_file, save_calibration, write_calibration_file
-from seqtante_open.calibration.model import FLUX_LOOPS, CalibrationFile, ExperimentSection, FluxLoop
 from seqtante_open.controllers.crosstalk_session import CrosstalkSession, crosstalk_session
 from seqtante_open.controllers.drive_source import drive_source_writes
 from seqtante_open.controllers.node_registry import BenchmarkSpec, Parallel, experiment_spec, register_node
@@ -62,26 +63,31 @@ from seqtante_open.controllers.operating_point import (
 from seqtante_open.controllers.parameter_restore import ParameterRestore, restoring_parameters
 from seqtante_open.controllers.verdicts import AnalysisError, BenchmarkResult, BenchmarkThresholds, verdict_for
 from seqtante_open.outputs import output_controller
-from seqtante_open.targets import Target
 
 if TYPE_CHECKING:
     from qililab.qprogram import QProgram
-    from qililab.result import AutocalMeasurement, Measurement, MeasurementResult
+    from qililab.result import AutocalMeasurement, Measurement
 
-#: How :meth:`CalibrationNode._stream` writes one execution's acquisitions (the readout bus's results)
-#: into the stream: ``write(stream_array, acquisitions)``, once per execution.
-StreamWrite = Callable[[StreamArray, Sequence["MeasurementResult"]], None]
+#: How :meth:`CalibrationNode._stream` writes into the stream: ``write(stream_array, averaged)``, once per
+#: execution, where ``averaged`` holds the readout bus's acquisition arrays averaged over the executions so
+#: far. With ``repetitions == 1`` it is that one execution's arrays.
+StreamWrite = Callable[[StreamArray, Sequence[np.ndarray]], None]
 
 
-def write_per_point(stream_array: StreamArray, acquisitions: Sequence["MeasurementResult"]) -> None:
+def write_per_point(stream_array: StreamArray, averaged: Sequence[np.ndarray]) -> None:
     """One acquisition per sweep point (an unrolled sweep, e.g. T1/T2 idle times): write each at its index."""
-    for index, acquisition in enumerate(acquisitions):
-        stream_array[index,] = acquisition.array.T
+    for index, array in enumerate(averaged):
+        stream_array[index,] = array.T
 
 
-def write_whole(stream_array: StreamArray, acquisitions: Sequence["MeasurementResult"]) -> None:
+def write_whole(stream_array: StreamArray, averaged: Sequence[np.ndarray]) -> None:
     """One acquisition holding the whole sweep (a hardware loop, e.g. rabi, two-tone): write it in one go."""
-    stream_array[()] = acquisitions[0].array.T
+    stream_array[()] = averaged[0].T
+
+
+#: The pulse purposes a node asks :meth:`CalibrationNode._pulse` for: the ``<purpose>`` of a
+#: ``<purpose>-<operating_point>`` pulse name (ADR-0008).
+PulsePurpose = Literal["pi", "pi_half", "readout"]
 
 
 #: The node-specific fitted payload an ``analyze`` hands its ``apply`` (a frequency, a pi amplitude,
@@ -344,7 +350,7 @@ class CalibrationNode(ABC, Generic[ResultT]):
                 f"{max_rel_uncertainty}"
             )
 
-    def _pulse(self, target: Target, role: Role, purpose: str) -> str:
+    def _pulse(self, target: Target, role: Role, purpose: PulsePurpose) -> str:
         """The pulse ``target`` plays on ``role``: ``<purpose>-<operating_point>`` (ADR-0008, QHC-1932).
 
         That is the name the shared ``qili_qprograms`` experiments play (``readout-<op>``, ``pi-<op>``).
@@ -362,7 +368,7 @@ class CalibrationNode(ABC, Generic[ResultT]):
             )
         return played
 
-    def _require_pulse(self, target: Target, role: Role, purpose: str) -> str:
+    def _require_pulse(self, target: Target, role: Role, purpose: PulsePurpose) -> str:
         """:meth:`_pulse`, checked to exist on its bus, so a missing pulse fails before any hardware is set.
 
         Raises:
@@ -389,12 +395,18 @@ class CalibrationNode(ABC, Generic[ResultT]):
         repetitions: int = 1,
         optional_identifier: str | None = None,
     ) -> int:
-        """Run ``qprogram`` ``repetitions`` times, stream each execution with ``write``, and return the measurement id.
+        """Run ``qprogram`` ``repetitions`` times, stream the running average with ``write``, and return the measurement id.
 
         Every node measures through here (QHC-1932): the stream array is built the same way, and only how
-        an execution's acquisitions land in it differs (:func:`write_per_point`, :func:`write_whole`, or
-        a node's own, such as a running average over ``repetitions``).
+        the averaged acquisitions land in it differs (:func:`write_per_point`, :func:`write_whole`, or a
+        node's own). After every execution the stream holds the average over the executions so far, so an
+        interrupted run keeps what it measured.
+
+        Raises:
+            ValueError: if ``repetitions`` is below 1, which would run nothing and save an empty measurement.
         """
+        if repetitions < 1:
+            raise ValueError(f"{target} {self.experiment}: repetitions must be at least 1, not {repetitions}")
         platform = self.context.platform
         readout_bus = bus_alias(target, Role.readout)
         stream_array = StreamArray(
@@ -408,9 +420,17 @@ class CalibrationNode(ABC, Generic[ResultT]):
             optional_identifier=optional_identifier,
             qubit_idx=str(target),
         )
+        total: list[np.ndarray] = []
         with stream_array:
-            for _ in range(repetitions):
-                write(stream_array, platform.execute_qprogram(qprogram).results[readout_bus])
+            for execution in range(1, repetitions + 1):
+                arrays = [
+                    np.asarray(acquisition.array)
+                    for acquisition in platform.execute_qprogram(qprogram).results[readout_bus]
+                ]
+                total = (
+                    arrays if execution == 1 else [summed + array for summed, array in zip(total, arrays, strict=True)]
+                )
+                write(stream_array, [summed / execution for summed in total])
         return cast("Measurement | AutocalMeasurement", stream_array.measurement).measurement_id
 
     def _drive_source_writes(self, target: Target) -> list[tuple[Parameter, ParameterValue]]:
@@ -776,14 +796,14 @@ class FluxSweepNode(CalibrationNode[ResultT]):
 
     applies_operating_point: ClassVar[bool] = False
 
-    def _loop(self, target: Target) -> FluxLoop:
+    def _loop(self, target: Target) -> Axis:
         """The flux loop the step sweeps on ``target`` (its ``flux_axis``), checked to be ``z`` or ``x``.
 
         Raises:
             KeyError: if the step sets no ``flux_axis`` and the node has no default for it.
-            ValueError: if ``flux_axis`` is not one of :data:`~seqtante_open.calibration.model.FLUX_LOOPS`.
+            ValueError: if ``flux_axis`` is not one of :data:`~qili_qprograms.bus_alias.AXES`.
         """
         loop = self._param(target, "flux_axis")
-        if loop not in FLUX_LOOPS:
-            raise ValueError(f"step '{self.name}': {target} flux_axis must be one of {FLUX_LOOPS}, not {loop!r}")
+        if loop not in AXES:
+            raise ValueError(f"step '{self.name}': {target} flux_axis must be one of {AXES}, not {loop!r}")
         return loop
