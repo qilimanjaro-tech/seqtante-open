@@ -32,6 +32,7 @@ dependencies = [
     "pydantic>=2.0",
     "pyyaml>=6.0.2",
     "qcodes",
+    "qili-qprograms",
     "ruamel-yaml>=0.18.10",
     "scipy>=1.15",
     "xarray>=2024.7.0",
@@ -88,6 +89,9 @@ url = "https://aws@qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.c
 [tool.uv.sources]
 qililab = { index = "qilimanjaro" }
 qpysequence = { index = "qilimanjaro" }
+# Dev builds are published to the index on every push to qili-qprograms' main; uv.lock pins the
+# current main-head build. Switch to a version range here once it cuts a tagged release.
+qili-qprograms = { index = "qilimanjaro" }
 
 [tool.ruff]
 line-length = 120
