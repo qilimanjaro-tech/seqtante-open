@@ -47,7 +47,9 @@ from seqtante_open.experiments.utils.qdac_utils import get_qdac_out_trigger, qda
 from seqtante_open.targets import QubitTarget
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
+
+    from qililab.result import MeasurementResult, StreamArray
 
     from seqtante_open.calibration.model import FluxLoop
     from seqtante_open.targets import Target
@@ -166,12 +168,14 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
         """Run the map ``repetitions`` times and stream the running average; return the measurement id."""
         flux_bus = bus_alias(target, Role.flux, loop)
         total = np.zeros((len(fluxes), len(drive_ifs), 2))
+        executions = 0
 
-        def running_average(stream_array: Any, acquisitions: Any, repetition: int) -> None:
-            nonlocal total
+        def running_average(stream_array: StreamArray, acquisitions: Sequence[MeasurementResult]) -> None:
+            nonlocal total, executions
+            executions += 1
             # One acquisition, shaped (IQ, flux, drive IF): reorder it to the stored (flux, drive IF, IQ).
             total = total + np.asarray(acquisitions[0].array).transpose(1, 2, 0)
-            stream_array[()] = total / (repetition + 1)
+            stream_array[()] = total / executions
 
         return self._stream(
             target,

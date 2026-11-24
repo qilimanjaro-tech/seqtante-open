@@ -107,8 +107,9 @@ def test_a_sweep_is_the_step_linspace_and_an_absolute_sweep_is_offset_onto_the_s
 
 
 def test_a_sweep_with_fewer_than_two_points_is_rejected():
+    node = _node({"window": [0.0, 1.0, 1]})
     with pytest.raises(ValueError, match="window must have at least 2 points, got 1"):
-        _node({"window": [0.0, 1.0, 1]})._sweep(Q1, "window")
+        node._sweep(Q1, "window")
 
 
 def test_a_spine_has_no_section_to_read():
@@ -132,20 +133,23 @@ def test_a_spine_has_no_section_to_read():
 
 @pytest.mark.parametrize("r_squared", [0.5, float("nan")])
 def test_a_low_or_undefined_r_squared_fails_the_target(r_squared):
+    node = _node()
     with pytest.raises(AnalysisError, match=r"below the minimum 0\.8"):
-        _node()._require_r2(Q1, r_squared)
+        node._require_r2(Q1, r_squared)
 
 
 def test_the_step_min_r2_overrides_the_default():
     _node({"min_r2": 0.5})._require_r2(Q1, 0.6)
+    strict = _node({"min_r2": 0.9})
     with pytest.raises(AnalysisError):
-        _node({"min_r2": 0.9})._require_r2(Q1, 0.85)
+        strict._require_r2(Q1, 0.85)
 
 
 @pytest.mark.parametrize("relative_uncertainty", [0.6, float("inf"), float("nan")])
 def test_a_large_or_non_finite_relative_uncertainty_fails_the_target(relative_uncertainty):
+    node = _node()
     with pytest.raises(AnalysisError, match=r"exceeds the maximum 0\.5"):
-        _node()._require_rel_uncertainty(Q1, relative_uncertainty)
+        node._require_rel_uncertainty(Q1, relative_uncertainty)
 
 
 def test_an_accepted_fit_passes_both_checks():
