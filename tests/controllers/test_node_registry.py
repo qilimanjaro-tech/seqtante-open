@@ -96,8 +96,13 @@ def test_two_classes_cannot_claim_the_same_experiment():
 
 def test_legacy_experiments_are_seeded_without_a_node_class():
     # The legacy experiments no node ports are known to the parser but carry no node class; the graph
-    # builder (QHC-1800) falls back to their legacy function until they are removed (QHC-1930).
-    for experiment in ("single_tone", "offset_calibration", "two_tone_vs_flux"):
+    # builder (QHC-1800) falls back to their legacy function until they are removed (QHC-1930). Read from
+    # the legacy dict rather than named here, so porting an experiment (dropping it from the dict) does
+    # not break this test.
+    from seqtante_open.experiments.experiment_functions import experiment_functions_dict
+
+    assert experiment_functions_dict
+    for experiment in experiment_functions_dict:
         spec = experiment_spec(experiment)
         assert spec is not None
         assert spec.node_cls is None

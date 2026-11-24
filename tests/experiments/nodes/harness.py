@@ -22,11 +22,13 @@ test module.
 
 The shape mirrors :mod:`tests.experiments.fitting.harness`: shared fakes and helpers in one place, so a
 new node's test is the node-specific stubs plus a few calls here. As more nodes land this can grow a
-declarative ``NodeTestCase`` (scripted driver + fit + EXPECTED verdict) in the same vein.
+declarative ``NodeTestCase`` (scripted driver + fit + EXPECTED verdict) in the same vein. For now it is
+the toolkit every node test shares (QHC-1932):
 
-- :class:`FakePlatform`: records writes and lifecycle calls; reports a drive instrument and answers
-  ``execute_qprogram``, snapshotting the parameters set so far into ``values_at_execute``.
-- :class:`FakeStreamArray`: stands in for ``StreamArray``; carries a measurement id.
+- :class:`FakePlatform`: records writes and lifecycle calls.
+- :class:`ExecutingPlatform`: also answers ``get_element`` for the buses a test declares, and
+  ``execute_qprogram`` with the readout shape the test's :meth:`~ExecutingPlatform.results` returns.
+- :class:`FakeStreamArray`: stands in for ``StreamArray``, recording how it was built and what was written.
 - :func:`identity_crosstalk`: the crosstalk matrix the operating-point placement needs.
 - :func:`build_context` and :func:`stub_output_and_save`: the run context and the DB/save stubs.
 """
@@ -34,9 +36,8 @@ declarative ``NodeTestCase`` (scripted driver + fit + EXPECTED verdict) in the s
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
-import numpy as np
 from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 
 from seqtante_open.controllers import calibration_node as node_module
@@ -48,44 +49,27 @@ if TYPE_CHECKING:
     from qililab.qprogram.calibration import Calibration
 
 
-#: The flux buses of ``q1`` the identity crosstalk spans.
+#: The flux buses of ``q1`` the identity crosstalk spans by default.
 CROSSTALK_BUSES = ("flux_z_q1", "flux_x_q1")
 
 
 def identity_crosstalk(buses: tuple[str, ...] = CROSSTALK_BUSES) -> CrosstalkMatrix:
-    """An identity crosstalk matrix over ``buses``."""
+    """An identity crosstalk matrix over ``buses``: each flux line drives only itself."""
     return CrosstalkMatrix.from_buses({b: {bb: (1.0 if b == bb else 0.0) for bb in buses} for b in buses})
 
 
 class FakePlatform:
-    """A platform stand-in for node tests: records every set/get and the calls a run makes.
+    """A platform stand-in for node tests: records every set/get and the lifecycle calls a run makes.
 
     Covers the surface ``CalibrationNode.run`` and the operating-point placement reach for (crosstalk
-    zeroing, flux/bias reset, ``get_parameter``/``set_parameter``), plus what a measuring node calls:
-    ``get_element`` reports ``drive_instrument`` on every bus (Rohde & Schwarz by default, so the
-    IQ-modulation/POWER/RF branch runs), and ``execute_qprogram`` returns ``readout_points`` results of
-    shape ``readout_shape`` on ``readout_bus``. On execute it snapshots the parameters set so far into
-    :attr:`values_at_execute`, before the run restores them. Parameter writes are remembered in
-    :attr:`values`, and every call name is appended to :attr:`calls`, so a test can assert what a node
-    set and in what order.
+    zeroing, flux/bias reset, ``get_parameter``/``set_parameter``), so no hardware or runcard is needed.
+    Parameter writes are remembered in :attr:`values`, and every call name is appended to :attr:`calls`,
+    so a test can assert what a node set and in what order.
     """
 
-    def __init__(
-        self,
-        values: dict | None = None,
-        *,
-        drive_instrument: str = "ROHDE_SCHWARZ",
-        readout_bus: str = "readout_q1",
-        readout_points: int = 1,
-        readout_shape: tuple[int, ...] = (2, 2),
-    ) -> None:
+    def __init__(self, values: dict | None = None) -> None:
         self.values: dict = dict(values or {})
         self.calls: list = []
-        self.values_at_execute: dict = {}
-        self.drive_instrument = drive_instrument
-        self.readout_bus = readout_bus
-        self.readout_points = readout_points
-        self.readout_shape = readout_shape
 
     def set_crosstalk(self, *, crosstalk: Any) -> None:
         self.calls.append("set_crosstalk")
@@ -103,28 +87,58 @@ class FakePlatform:
         self.values[alias, parameter] = value
         self.calls.append(f"set:{alias}")
 
+
+class ExecutingPlatform(FakePlatform):
+    """A :class:`FakePlatform` that also answers what a node running its own QProgram calls.
+
+    ``get_element`` answers only for the buses declared in ``instruments`` (alias to instrument name,
+    e.g. ``{"drive_q1": "ROHDE_SCHWARZ"}``) and raises for any other, so a node that asks for the wrong
+    bus fails the test instead of getting a plausible instrument back. ``execute_qprogram`` counts the
+    executions and snapshots the parameters
+    set so far into :attr:`values_at_execute`, before the run restores them, then returns
+    ``SimpleNamespace(results=self.results())``. A node test subclasses it and overrides :meth:`results`
+    with the readout shape its QProgram produces.
+    """
+
+    def __init__(self, values: dict | None = None, *, instruments: dict[str, str]) -> None:
+        super().__init__(values)
+        self.instruments = dict(instruments)
+        self.values_at_execute: dict = {}
+        self.executions = 0
+
     def get_element(self, alias: str) -> Any:
         self.calls.append(f"get_element:{alias}")
-        return SimpleNamespace(instruments=[SimpleNamespace(name=SimpleNamespace(name=self.drive_instrument))])
+        if alias not in self.instruments:
+            raise KeyError(f"no instrument declared for bus {alias!r}; declared: {sorted(self.instruments)}")
+        return SimpleNamespace(instruments=[SimpleNamespace(name=SimpleNamespace(name=self.instruments[alias]))])
 
     def execute_qprogram(self, qprogram: Any, **kwargs: Any) -> Any:
         self.calls.append("execute_qprogram")
+        self.executions += 1
         self.values_at_execute = dict(self.values)
-        points = [SimpleNamespace(array=np.zeros(self.readout_shape)) for _ in range(self.readout_points)]
-        return SimpleNamespace(results={self.readout_bus: points})
+        return SimpleNamespace(results=self.results())
+
+    def results(self) -> dict:
+        """The ``{readout bus: acquisitions}`` one execution returns; the node test sets the shape."""
+        raise NotImplementedError("override results() with the readout shape the node's QProgram produces")
 
 
 class FakeStreamArray:
-    """Stand-in for ``StreamArray``: a context manager that swallows the writes and carries a measurement id.
+    """Stand-in for ``StreamArray``: records how it was built and every write, and carries a measurement id.
 
-    A test that checks the id sets :attr:`measurement_id` (``monkeypatch.setattr``) before the run.
+    The node module's ``StreamArray`` is patched with this class. :attr:`last` is the most recent instance,
+    so a test can read the loops and shape the node declared and the data it streamed. Reset
+    :attr:`last` (and set :attr:`measurement_id`) per test with ``monkeypatch``.
     """
 
-    measurement_id = 321
+    measurement_id: ClassVar[int] = 100
+    last: ClassVar[FakeStreamArray | None] = None
 
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
-        self.measurement = SimpleNamespace(measurement_id=self.measurement_id)
+        self.writes: list[tuple[Any, Any]] = []
+        self.measurement = SimpleNamespace(measurement_id=type(self).measurement_id)
+        type(self).last = self
 
     def __enter__(self) -> FakeStreamArray:
         return self
@@ -133,7 +147,7 @@ class FakeStreamArray:
         return False
 
     def __setitem__(self, key: Any, value: Any) -> None:
-        return None
+        self.writes.append((key, value))
 
 
 def build_context(
