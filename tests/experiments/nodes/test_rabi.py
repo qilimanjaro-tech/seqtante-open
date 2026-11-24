@@ -385,5 +385,7 @@ def test_pi_amplitude_refuses_a_pi_pulse_that_is_not_a_drag(monkeypatch):
     calibration.add_waveform(bus="drive_q1", name="pi-sweet_spot", waveform=Square(amplitude=1.0, duration=40))
     node = _make_rabi(analysis="pi_amplitude", calibration=calibration)
 
+    result = node.analyze(Q1, [777])
+
     with pytest.raises(AnalysisError, match="is a Square, not an IQDrag"):
-        node.apply(Q1, node.analyze(Q1, [777]))
+        node.apply(Q1, result)
