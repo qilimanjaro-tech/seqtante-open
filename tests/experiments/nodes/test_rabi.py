@@ -3,7 +3,8 @@
 One test per analysis drives the full three-phase run with the measurement and the fit scripted (a fake
 :class:`RabiAmplitudeModel`, a stubbed ``execute_node``), so each analysis's write is asserted without
 hardware, a database or a disk write: ``readout_levels`` writes the |0>/|1> levels onto the operating
-point, ``pi_amplitude`` writes the fitted amplitude into the named DRAG pulse in ``Calibration.waveforms``.
+point, ``pi_amplitude`` writes the fitted amplitude into the ``pi-<operating_point>`` DRAG pulse in
+``Calibration.waveforms``.
 """
 
 from types import SimpleNamespace
@@ -11,7 +12,7 @@ from typing import ClassVar
 
 import numpy as np
 import pytest
-from qililab import IQDrag, Parameter
+from qililab import IQDrag, Parameter, Square
 from qililab.qprogram.calibration import Calibration
 from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 
@@ -151,13 +152,26 @@ def _operating_point() -> OperatingPoint:
     )
 
 
-def _rabi_file(point_name: str) -> CalibrationFile:
-    """A calibration file with one ``rabi`` section for q1 at ``point_name`` (no pulse overrides)."""
+def _rabi_file(point_name: str, pulses: dict | None = None) -> CalibrationFile:
+    """A calibration file with one ``rabi`` section for q1 at ``point_name``, naming ``pulses`` if given."""
     return CalibrationFile(
         operating_points_version=1,
         operating_points={"q1": {point_name: _operating_point()}},
-        experiments={"rabi": {"q1": ExperimentSection(operating_point=point_name)}},
+        experiments={"rabi": {"q1": ExperimentSection(operating_point=point_name, pulses=pulses or {})}},
     )
+
+
+def _add_played_pulses(calibration: Calibration, point_name: str, *, pi: bool = True) -> None:
+    """Store the ``readout-<point>`` and (unless ``pi`` is False) ``pi-<point>`` pulses rabi_amplitude plays."""
+    calibration.add_waveform(
+        bus="readout_q1", name=f"readout-{point_name}", waveform=Square(amplitude=0.1, duration=2000)
+    )
+    if pi:
+        calibration.add_waveform(
+            bus="drive_q1",
+            name=f"pi-{point_name}",
+            waveform=IQDrag(amplitude=1.0, duration=40, num_sigmas=4, drag_coefficient=0.1),
+        )
 
 
 def _calibration(file: CalibrationFile) -> Calibration:
@@ -197,7 +211,7 @@ def test_readout_levels_analysis_writes_levels_onto_the_point(monkeypatch):
     assert failed == []
     levels = read_calibration_file(calibration).operating_points["q1"]["reset"].readout.levels
     assert levels is not None
-    assert levels.pulse == "readout"  # the default readout pulse name, tagged on the levels
+    assert levels.pulse == "readout-reset"  # the readout pulse rabi_amplitude plays at the point
     assert levels.level_0.nominal == pytest.approx(FAKE_L0)
     assert levels.level_0.std == pytest.approx(FAKE_L0_STD)
     assert levels.level_1.nominal == pytest.approx(FAKE_L1)
@@ -208,16 +222,14 @@ def test_pi_amplitude_analysis_writes_into_the_named_pulse(monkeypatch):
     monkeypatch.setattr(node_module, "save_calibration", lambda calibration, path: None)
     monkeypatch.setattr(rabi_module, "RabiAmplitudeModel", FakeRabiModel)
     calibration = _calibration(_rabi_file("sweet_spot"))
-    # The pi amplitude is written into this existing DRAG pulse, keeping its other shape parameters.
-    calibration.add_waveform(
-        bus="drive_q1", name="drag", waveform=IQDrag(amplitude=1.0, duration=40, num_sigmas=4, drag_coefficient=0.1)
-    )
+    # The pi amplitude is written into the pi-sweet_spot DRAG pulse, keeping its other shape parameters.
+    _add_played_pulses(calibration, "sweet_spot")
 
     node = _make_rabi(analysis="pi_amplitude", calibration=calibration)
     failed = node.run({})
 
     assert failed == []
-    pulse = calibration.get_waveform(bus="drive_q1", name="drag")
+    pulse = calibration.get_waveform(bus="drive_q1", name="pi-sweet_spot")
     assert pulse.amplitude == pytest.approx(FAKE_PI)  # amplitude updated to the fitted pi amplitude
     assert pulse.duration == 40  # shape preserved
     assert pulse.num_sigmas == 4
@@ -258,6 +270,7 @@ def test_execute_builds_the_qili_sweep_and_sets_the_hardware(monkeypatch):
     monkeypatch.setattr(rabi_module, "StreamArray", FakeStreamArray)
 
     calibration = _calibration(_rabi_file("sweet_spot"))
+    _add_played_pulses(calibration, "sweet_spot")
     platform = FakeRabiPlatform()
     context = RunContext(
         platform=platform, platform_path="runcard.yml", calibration=calibration, calibration_path="calibration.yml"
@@ -323,3 +336,54 @@ def test_a_rejected_fit_is_never_saved_or_plotted(monkeypatch, analysis, knob, v
         node.analyze(Q1, [777])
 
     assert FakeRabiModel.events == ["fit"]
+
+
+def _executing_rabi(calibration: Calibration, monkeypatch) -> tuple[RabiNode, FakeRabiPlatform]:
+    """A rabi node whose real ``execute_node`` runs against a fake platform, with the QProgram builder stubbed."""
+    monkeypatch.setattr(rabi_module, "rabi_amplitude", lambda **kwargs: SimpleNamespace(name="qprogram"))
+    monkeypatch.setattr(rabi_module, "StreamArray", FakeStreamArray)
+    monkeypatch.setattr(output_controller, "_initialized", True)
+    monkeypatch.setattr(output_controller, "_db_manager", object())
+    platform = FakeRabiPlatform()
+    context = RunContext(
+        platform=platform, platform_path="runcard.yml", calibration=calibration, calibration_path="calibration.yml"
+    )
+    params = {"drive_amplitude_sweep": (0.0, 1.0, 21), "averages": 1000, "relax_duration": 50_000, "drive_power": -10}
+    node = RabiNode(name="step", idx=0, targets=[Q1], parameters={Q1: params}, context=context, analysis="pi_amplitude")
+    return node, platform
+
+
+def test_a_missing_pi_pulse_fails_before_any_hardware_is_set(monkeypatch):
+    """rabi seeds no pulse: without ``pi-<point>`` it raises, naming the pulse, before touching the platform."""
+    calibration = _calibration(_rabi_file("sweet_spot"))
+    _add_played_pulses(calibration, "sweet_spot", pi=False)
+    node, platform = _executing_rabi(calibration, monkeypatch)
+
+    with pytest.raises(ValueError, match="'pi-sweet_spot' pulse on drive_q1"):
+        node.execute_node([Q1])
+
+    assert platform.calls == []
+
+
+def test_a_section_naming_another_pulse_is_rejected(monkeypatch):
+    """rabi_amplitude only plays ``pi-<point>``, so a section naming another drive pulse is a config error."""
+    calibration = _calibration(_rabi_file("sweet_spot", pulses={"drive": "pi-reset"}))
+    _add_played_pulses(calibration, "sweet_spot")
+    _add_played_pulses(calibration, "reset")  # the named pulse exists, so only rabi's own check can reject it
+    node, platform = _executing_rabi(calibration, monkeypatch)
+
+    with pytest.raises(ValueError, match="names drive pulse 'pi-reset', but rabi_amplitude plays 'pi-sweet_spot'"):
+        node.execute_node([Q1])
+
+    assert platform.calls == []
+
+
+def test_pi_amplitude_refuses_a_pi_pulse_that_is_not_a_drag(monkeypatch):
+    """The fitted amplitude only fits an ``IQDrag``; any other waveform under ``pi-<point>`` fails the step."""
+    monkeypatch.setattr(rabi_module, "RabiAmplitudeModel", FakeRabiModel)
+    calibration = _calibration(_rabi_file("sweet_spot"))
+    calibration.add_waveform(bus="drive_q1", name="pi-sweet_spot", waveform=Square(amplitude=1.0, duration=40))
+    node = _make_rabi(analysis="pi_amplitude", calibration=calibration)
+
+    with pytest.raises(AnalysisError, match="is a Square, not an IQDrag"):
+        node.apply(Q1, node.analyze(Q1, [777]))

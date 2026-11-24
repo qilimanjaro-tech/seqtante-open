@@ -17,10 +17,14 @@
 A single Rabi amplitude sweep feeds two analyses, chosen per step:
 
 - ``readout_levels`` (step ``rabi_reset``, at the ``reset`` point) writes the |0>/|1> readout levels
-  onto the operating point, tagged with the readout pulse they were taken with. A fit below the step's
-  minimum R² fails the step.
+  onto the operating point, tagged with the ``readout-<operating_point>`` pulse they were taken with. A
+  fit below the step's minimum R² fails the step.
 - ``pi_amplitude`` (step ``rabi_sweet_spot``, at the ``sweet_spot`` point) writes the fitted pi
-  amplitude into the named drive (DRAG) pulse in ``Calibration.waveforms``, not onto the point.
+  amplitude into the ``pi-<operating_point>`` DRAG pulse in ``Calibration.waveforms``, not onto the point.
+
+The pulses are the ones ``qili_qprograms``' ``rabi_amplitude`` plays, named by
+:func:`~qili_qprograms.calibration.pulse_name` (ADR-0008). Both must already exist: the node seeds
+none, they come with the manual calibration.
 
 This is the first experiment ported to a real :class:`CalibrationNode` subclass (ADR-0007); the fit
 lives in :class:`~seqtante_open.experiments.fitting.RabiAmplitudeModel` and the measurement driver in
@@ -34,6 +38,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from qili_qprograms.calibration import pulse_name
 from qili_qprograms.experiments import rabi_amplitude
 from qililab import IQDrag
 from qililab.result import StreamArray
@@ -68,14 +73,10 @@ DEFAULT_MIN_R2 = 0.9
 RABI_DEFAULTS: Mapping[str, Any] = {
     "readout_ringup_time": 0,
     "min_r2": DEFAULT_MIN_R2,
-    # Pulse names when a section does not override the role (ADR-0008).
-    "drive_pulse": "drag",
-    "readout_pulse": "readout",
-    # DRAG shape the pi pulse is built with when no drive waveform exists yet to inherit from.
-    "drive_duration": 40,
-    "drive_n_sigmas": 4.0,
-    "drive_drag": 0.0,
 }
+
+#: The pulse purposes ``rabi_amplitude`` plays, per role (ADR-0008): ``<purpose>-<operating_point>``.
+_PULSE_PURPOSES: Mapping[Role, str] = {Role.drive: "pi", Role.readout: "readout"}
 
 
 @dataclass(frozen=True)
@@ -112,6 +113,8 @@ class RabiNode(FixedFluxNode[RabiFitted]):
         """
         section = self.calibration_file.experiments[self.experiment][str(target)]
         operating_point_name = section.operating_point
+        for role in _PULSE_PURPOSES:
+            self._require_pulse(target, role)
         drive_bus = bus_alias(target, Role.drive)
         readout_bus = bus_alias(target, Role.readout)
         sweep = np.linspace(*self._param(target, "drive_amplitude_sweep"))
@@ -193,41 +196,57 @@ class RabiNode(FixedFluxNode[RabiFitted]):
         """Write the |0>/|1> levels onto the target's operating point, tagged with the readout pulse."""
         operating_point = operating_point_for(self.calibration_file, self.experiment, target)
         operating_point.readout.levels = ReadoutLevels(
-            pulse=self._readout_pulse(target),
+            pulse=self._pulse(target, Role.readout),
             level_0=Measured(nominal=fitted.level_0, std=fitted.level_0_std),
             level_1=Measured(nominal=fitted.level_1, std=fitted.level_1_std),
         )
 
     def _apply_pi_amplitude(self, target: Target, fitted: RabiFitted) -> None:
-        """Write the pi amplitude into the named drive (DRAG) pulse, keeping its other shape parameters."""
+        """Write the pi amplitude into the ``pi-<operating_point>`` DRAG pulse, keeping its other shape parameters."""
         drive_bus = bus_alias(target, Role.drive)
-        drive_pulse = self._drive_pulse(target)
-        if self.context.calibration.has_waveform(drive_bus, drive_pulse):
-            existing = self.context.calibration.get_waveform(drive_bus, drive_pulse)
-            if not isinstance(existing, IQDrag):
-                raise AnalysisError(
-                    f"{target}: drive pulse '{drive_pulse}' on {drive_bus} is a {type(existing).__name__}, "
-                    "not an IQDrag; cannot update its pi amplitude"
-                )
-            pulse = IQDrag(
-                amplitude=fitted.pi_amplitude,
-                duration=existing.duration,
-                num_sigmas=existing.num_sigmas,
-                drag_coefficient=existing.drag_coefficient,
+        drive_pulse = self._require_pulse(target, Role.drive)
+        existing = self.context.calibration.get_waveform(drive_bus, drive_pulse)
+        if not isinstance(existing, IQDrag):
+            raise AnalysisError(
+                f"{target}: drive pulse '{drive_pulse}' on {drive_bus} is a {type(existing).__name__}, "
+                "not an IQDrag; cannot update its pi amplitude"
             )
-        else:
-            pulse = IQDrag(
-                amplitude=fitted.pi_amplitude,
-                duration=self._param(target, "drive_duration"),
-                num_sigmas=self._param(target, "drive_n_sigmas"),
-                drag_coefficient=self._param(target, "drive_drag"),
-            )
+        pulse = IQDrag(
+            amplitude=fitted.pi_amplitude,
+            duration=existing.duration,
+            num_sigmas=existing.num_sigmas,
+            drag_coefficient=existing.drag_coefficient,
+        )
         self.context.calibration.add_waveform(bus=drive_bus, name=drive_pulse, waveform=pulse)
 
-    def _readout_pulse(self, target: Target) -> str:
-        section = self.calibration_file.experiments[self.experiment][str(target)]
-        return section.pulses.get(Role.readout, self._param(target, "readout_pulse"))
+    def _pulse(self, target: Target, role: Role) -> str:
+        """The pulse ``rabi_amplitude`` plays on ``role``: ``<purpose>-<operating_point>`` (ADR-0008).
 
-    def _drive_pulse(self, target: Target) -> str:
+        Raises:
+            ValueError: if the section names a different pulse for ``role``, which the shared QProgram
+                would not play.
+        """
         section = self.calibration_file.experiments[self.experiment][str(target)]
-        return section.pulses.get(Role.drive, self._param(target, "drive_pulse"))
+        played = pulse_name(_PULSE_PURPOSES[role], section.operating_point)
+        named = section.pulses.get(role, played)
+        if named != played:
+            raise ValueError(
+                f"{target}: the rabi section names {role.value} pulse '{named}', but rabi_amplitude "
+                f"plays '{played}' at operating point '{section.operating_point}'"
+            )
+        return played
+
+    def _require_pulse(self, target: Target, role: Role) -> str:
+        """:meth:`_pulse`, checked to exist on its bus, so a missing pulse fails before any hardware is set.
+
+        Raises:
+            ValueError: if the section names another pulse, or the pulse is not in ``Calibration.waveforms``.
+        """
+        name = self._pulse(target, role)
+        bus = bus_alias(target, role)
+        if not self.context.calibration.has_waveform(bus, name):
+            raise ValueError(
+                f"{target}: rabi needs the '{name}' pulse on {bus}, which is not in Calibration.waveforms; "
+                "it comes with the manual calibration"
+            )
+        return name
