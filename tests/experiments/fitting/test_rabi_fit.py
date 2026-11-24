@@ -72,6 +72,11 @@ class TestRabiAmplitudeModel(FittingTestCase):
         assert parameters[FittedParameter.RABI_AMPLITUDE.value] == pytest.approx(PI_AMPLITUDE, abs=0.03)
         assert FittedParameter.FIT_R2.value in parameters
 
+    def test_save_fitting_refuses_an_unfitted_model(self, fit_obj) -> None:
+        """Before ``fit()`` there is no pi amplitude to store, so it raises the shared ``FittingClass`` error."""
+        with pytest.raises(RuntimeError, match="RabiAmplitudeModel has no fit result"):
+            fit_obj.save_fitting()
+
     def test_flat_trace_leaves_r_squared_undefined(self, fitted, monkeypatch) -> None:
         """A flat trace (drive off, readout saturated) has no variance: R² is ``nan``, which the node rejects."""
         monkeypatch.setattr(fitted, "signal", np.ones(len(fitted.signal)))

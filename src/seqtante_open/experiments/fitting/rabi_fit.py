@@ -72,7 +72,7 @@ class RabiAmplitudeModel(FittingClass):
         self.amplitudes = np.asarray(amplitude_coord.data, dtype=float)
         self.drive_bus = amplitude_coord.attrs.get("bus", "")
         self.signal = np.real(self.rotate_iq(xarr.to_numpy()))
-        # ``results`` is populated by fit(); left unset until then, so it reads as unpopulated.
+        # ``results`` is populated by fit(), which then sets ``fitted``; until then ``_require_fit`` raises.
 
     def fit(self) -> _RabiResults:
         """Fit the undamped cosine and derive the pi amplitude and the two readout levels."""
@@ -122,6 +122,7 @@ class RabiAmplitudeModel(FittingClass):
             "level_1": float(excited),
             "level_1_std": level_std,
         }
+        self.fitted = True
         return self.results
 
     @staticmethod
@@ -182,10 +183,6 @@ class RabiAmplitudeModel(FittingClass):
         self.add_fitted_parameter(FittedParameter.RABI_AMPLITUDE, self.results["pi_amplitude"])
         self.add_fitted_parameter(FittedParameter.FIT_R2, self.results["r_squared"])
         self.save_fitting_to_database()
-
-    def _require_fit(self):
-        if not getattr(self, "results", None):
-            raise RuntimeError("No fit results available, call fit() first.")
 
     def plot(self):
         """Plot the sweep, its cosine fit, the two readout levels and the pi amplitude."""
