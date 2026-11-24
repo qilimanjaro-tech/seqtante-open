@@ -36,7 +36,7 @@ def _lorentzian(x: np.ndarray, x0: float, a: float, gamma: float, c: float) -> n
     return c + (a * gamma / 2) / np.pi / ((x - x0) ** 2 + (gamma / 2) ** 2)
 
 
-class LorentzianPeakModel(FittingClass):
+class LorentzianPeakModel(FittingClass[_LorentzianResults]):
     """Fit a Lorentzian peak to a two-tone sweep's magnitude and return the qubit IF (QHC-1807).
 
     Ported from the experimentalists' calibration script (``two_tones_lorentzian_fit_and_plot``). The
@@ -57,8 +57,6 @@ class LorentzianPeakModel(FittingClass):
             to ``"Two tone"``.
     """
 
-    results: _LorentzianResults
-
     def __init__(
         self,
         measurement_id: int,
@@ -75,7 +73,6 @@ class LorentzianPeakModel(FittingClass):
         frequency_coord = xarr[xarr.dims[0]]
         self.frequencies = np.asarray(frequency_coord.data, dtype=float)
         self.magnitude = np.abs(xarr.to_numpy())
-        # ``results`` is populated by fit(), which then sets ``fitted``; until then ``_require_fit`` raises.
 
     def fit(self) -> _LorentzianResults:
         """Fit the Lorentzian, apply the acceptance checks and record the outcome."""
@@ -112,16 +109,15 @@ class LorentzianPeakModel(FittingClass):
             else:
                 fitted_if = float(best[0])
 
-        self.results = {
-            "fitted_if": fitted_if,
-            "r_squared": r_squared,
-            "linewidth": linewidth,
-            "accepted": fitted_if is not None,
-            "quality": quality,
-            "params": params,
-        }
-        # Set even for a rejected fit: ``accepted`` and ``quality`` are its result, read by the node.
-        self.fitted = True
+        # Stored even for a rejected fit: ``accepted`` and ``quality`` are its result, read by the node.
+        self.results = _LorentzianResults(
+            fitted_if=fitted_if,
+            r_squared=r_squared,
+            linewidth=linewidth,
+            accepted=fitted_if is not None,
+            quality=quality,
+            params=params,
+        )
         return self.results
 
     @staticmethod
@@ -143,25 +139,21 @@ class LorentzianPeakModel(FittingClass):
     @property
     def fitted_if(self) -> float | None:
         """The fitted qubit IF in Hz, or ``None`` when the fit was rejected."""
-        self._require_fit()
         return self.results["fitted_if"]
 
     @property
     def r_squared(self) -> float:
-        self._require_fit()
         return self.results["r_squared"]
 
     @property
     def accepted(self) -> bool:
         """Whether the fit passed every acceptance check."""
-        self._require_fit()
         return self.results["accepted"]
 
     def save_fitting(self):
         """Write the fitted drive IF and the fit R² to the measurement entry (QHC-1497, QHC-1791)."""
         from seqtante_open.outputs import FittedParameter
 
-        self._require_fit()
         if self.results["fitted_if"] is not None:
             self.add_fitted_parameter(FittedParameter.DRIVE_IF, self.results["fitted_if"])
         self.add_fitted_parameter(FittedParameter.FIT_R2, self.results["r_squared"])
@@ -169,7 +161,6 @@ class LorentzianPeakModel(FittingClass):
 
     def plot(self):
         """Plot the sweep and, when accepted, its Lorentzian fit; save it next to the measurement."""
-        self._require_fit()
         results = self.results
         title = f"{self._plot_title} {self.target}"
         frequencies_mhz = self.frequencies * 1e-6
