@@ -50,9 +50,9 @@ T2_SIGMA_US = 0.8
 MEAS_ID = 777
 
 #: Elapsed-time sweep the step hands the node (np.linspace args) and the measurement knobs the qili QProgram reads from the file.
-ELAPSED_SWEEP = (0, 60_000, 61)
+IDLE_SWEEP = (0, 60_000, 61)
 PARAMS = {
-    "elapsed_sweep": ELAPSED_SWEEP,
+    "idle_duration_sweep": IDLE_SWEEP,
     "averages": 1000,
     "relax_duration": 50_000,
     "drive_power": DRIVE_POWER,
@@ -155,7 +155,7 @@ class FakeT2Platform(ExecutingPlatform):
 
 def _make(calibration: Calibration, thresholds, **params) -> tuple[T2Node, FakeT2Platform]:
     parameters = {**PARAMS, **params}
-    platform = FakeT2Platform(len(np.linspace(*parameters["elapsed_sweep"])))
+    platform = FakeT2Platform(len(np.linspace(*parameters["idle_duration_sweep"])))
     context = build_context(calibration, platform)
     node = T2Node(
         name="t2_sweet_spot", idx=0, targets=[Q1], parameters={Q1: parameters}, context=context, thresholds=thresholds
@@ -172,7 +172,6 @@ def _patch(monkeypatch) -> dict:
         return SimpleNamespace(name="qprogram")  # sentinel; the fake platform/stream ignore its content
 
     monkeypatch.setattr(t2_module, "t2_ramsey", fake_t2_ramsey)
-    monkeypatch.setattr(t2_module, "StreamArray", FakeStreamArray)
     monkeypatch.setattr(FakeStreamArray, "measurement_id", MEAS_ID)
     monkeypatch.setattr(t2_module, "T2Fit", FakeT2Fit)
     stub_output_and_save(monkeypatch)
@@ -200,7 +199,7 @@ def test_builds_the_qili_sweep_at_the_point_sets_the_hardware_and_scores_the_ben
     assert built["calibration"] is calibration
     assert built["averages"] == 1000
     assert built["relax_duration"] == 50_000
-    np.testing.assert_array_equal(built["idle_duration_sweep"], np.rint(np.linspace(*ELAPSED_SWEEP)).astype(int))
+    np.testing.assert_array_equal(built["idle_duration_sweep"], np.rint(np.linspace(*IDLE_SWEEP)).astype(int))
     # The node set the operating point's hardware itself (snapshotted before the run restored it):
     # drive/readout LOs, readout attenuation, drive power, and the R&S IQ modulation and RF output.
     snap = platform.values_at_execute
@@ -257,7 +256,7 @@ def test_a_rejected_fit_fails_the_target_and_is_not_saved(monkeypatch, knob, val
 
 def test_idle_durations_are_rounded_not_truncated(monkeypatch):
     built = _patch(monkeypatch)
-    node, _ = _make(_calibration(), THRESHOLDS, elapsed_sweep=(0, 1000, 7))
+    node, _ = _make(_calibration(), THRESHOLDS, idle_duration_sweep=(0, 1000, 7))
 
     node.run({})
 

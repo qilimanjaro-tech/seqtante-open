@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from seqtante_open.calibration.bus_alias import Role
-from seqtante_open.calibration.model import CalibrationFile
+from seqtante_open.calibration.model import CalibrationFile, Flux
 
 
 def test_parses_a_valid_file(valid_file: dict) -> None:
@@ -40,6 +40,23 @@ def test_flux_x_is_optional(valid_file: dict) -> None:
     del valid_file["operating_points"]["q14"]["sweet_spot"]["flux"]["x"]  # a z-only loop
     model = CalibrationFile.model_validate(valid_file)
     assert model.operating_points["q14"]["sweet_spot"].flux.x is None
+
+
+@pytest.mark.parametrize(("loop", "expected"), [("z", 0.1), ("x", -0.2)])
+def test_flux_on_reads_the_bias_of_a_loop(loop: str, expected: float) -> None:
+    assert Flux(z=0.1, x=-0.2).on(loop) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    ("flux", "loop", "match"),
+    [
+        pytest.param(Flux(z=0.1), "x", "z-only loop", id="no_x_on_a_z_only_loop"),
+        pytest.param(Flux(z=0.1, x=-0.2), "y", "must be one of", id="unknown_loop"),
+    ],
+)
+def test_flux_on_rejects_a_loop_with_no_bias(flux: Flux, loop: str, match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        flux.on(loop)
 
 
 def test_missing_required_field_errors(valid_file: dict) -> None:

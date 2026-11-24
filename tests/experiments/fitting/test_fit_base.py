@@ -197,10 +197,18 @@ def test_save_plot_writes_plot_path_when_enabled(fake_db, configure, tmp_path):
     assert os.path.isfile(expected)
 
 
-def test_save_plot_skips_db_by_default(fake_db, configure, tmp_path):
+def test_save_plot_stores_the_path_by_default(fake_db, configure, tmp_path):
+    """Every fit stores its plot's path on the measurement entry unless it opts out (QHC-1932)."""
     configure(True)
     fit = make_fit(path=str(tmp_path))
-    fit.save_plot(go.Figure(), "myplot")
+    filepath = fit.save_plot(go.Figure(), "myplot")
+    assert [call["path"] for call in fake_db.fitting_calls] == [filepath]
+
+
+def test_save_plot_skips_db_when_asked(fake_db, configure, tmp_path):
+    configure(True)
+    fit = make_fit(path=str(tmp_path))
+    fit.save_plot(go.Figure(), "myplot", save_to_db=False)
     assert fake_db.fitting_calls == []
 
 

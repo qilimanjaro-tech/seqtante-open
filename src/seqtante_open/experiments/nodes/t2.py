@@ -29,19 +29,15 @@ the restore handle (ADR-0006).
 
 from __future__ import annotations
 
-import math
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from qili_qprograms.experiments import t2_ramsey
-from qililab.result import StreamArray
 
 from seqtante_open.calibration.bus_alias import Role, bus_alias
-from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode
+from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode, write_per_point
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.fitting import T2Fit
-from seqtante_open.experiments.results import measurement_id
-from seqtante_open.outputs import output_controller
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -53,15 +49,13 @@ DECAYING_OSCILLATION = "decaying_oscillation"
 #: Stream/experiment name the T2 measurement is stored under.
 _EXPERIMENT_NAME = "t2_drag"
 
-#: Default minimum R² a T2 fit must reach to pass the step (overridable per step).
-DEFAULT_MIN_R2 = 0.8
-
-#: The node's ``defaults``; every one is overridable in the tree. ``elapsed_sweep``, ``averages`` and
+#: The node's ``defaults``; every one is overridable in the tree. ``idle_duration_sweep``, ``averages`` and
 #: ``relax_duration`` have no default, and the drive instrument decides which of ``drive_power``
 #: (Rohde & Schwarz, dBm) or ``drive_gain`` (QCM-RF, [-1, 1]) the step must set.
 T2_DEFAULTS: Mapping[str, Any] = {
     "readout_ringup_time": 0,
-    "min_r2": DEFAULT_MIN_R2,
+    # Minimum R² a T2 fit must reach to pass the step.
+    "min_r2": 0.8,
     # Maximum relative uncertainty (sigma_T2 / T2): catches a fit that clears R² but whose dephasing time
     # is ill-determined, and the ``inf`` uncertainty ``curve_fit`` returns when it cannot estimate the covariance.
     "max_rel_uncertainty": 0.5,
@@ -93,51 +87,36 @@ class T2Node(FixedFluxNode[None]):
         :meth:`~seqtante_open.controllers.calibration_node.CalibrationNode._set_operating_point_hardware`
         sets from the operating point, through the restore handle so the run undoes it (ADR-0006).
         """
-        experiment = self.experiment
-        # A registered leaf node always sets experiment (enforced in __init_subclass__); narrow for the type checker.
-        if experiment is None:
-            raise RuntimeError(f"{type(self).__name__} declares no experiment")
-        section = self.calibration_file.experiments[experiment][str(target)]
-        operating_point_name = section.operating_point
-        drive_bus = bus_alias(target, Role.drive)
-        readout_bus = bus_alias(target, Role.readout)
-        idle_sweep = np.rint(np.linspace(*self._param(target, "elapsed_sweep"))).astype(int)
+        # Round, not truncate, so the stored time axis is the one t2_ramsey plays.
+        durations_idle = np.rint(self._sweep(target, "idle_duration_sweep")).astype(int)
 
         qprogram = t2_ramsey(
             calibration=self.context.calibration,
             target=str(target),
-            operating_point=operating_point_name,
-            idle_duration_sweep=idle_sweep,
+            operating_point=self._section(target).operating_point,
+            idle_duration_sweep=durations_idle,
             averages=self._param(target, "averages"),
             relax_duration=self._param(target, "relax_duration"),
             readout_ringup_time=self._param(target, "readout_ringup_time"),
         )
 
         self._set_operating_point_hardware(target)
-
-        platform = self.context.platform
-        stream_array = StreamArray(
-            shape=(len(idle_sweep), 2),
+        # t2_ramsey unrolls the idle sweep: one acquisition per idle time.
+        return self._stream(
+            target,
+            qprogram,
+            experiment_name=_EXPERIMENT_NAME,
             loops={
                 "t2_time": {
-                    "array": idle_sweep.astype(int),
+                    "array": durations_idle,
                     "units": "ns",
-                    "bus": drive_bus,
+                    "bus": bus_alias(target, Role.drive),
                     "parameter": "t2_elapsed_time",
                 }
             },
-            platform=platform,
-            experiment_name=_EXPERIMENT_NAME,
-            db_manager=output_controller.db_manager,
-            qprogram=qprogram,
-            calibration=self.context.calibration,
-            qubit_idx=str(target),
+            shape=(len(durations_idle), 2),
+            write=write_per_point,
         )
-        with stream_array:
-            results = platform.execute_qprogram(qprogram).results
-            for idx in range(len(idle_sweep)):
-                stream_array[idx,] = results[readout_bus][idx].array.T
-        return measurement_id(stream_array)
 
     def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[None]:
         """Fit the oscillation, check it, save ``t2``/``fit_r2``, plot, and report T2 and its uncertainty in us; read-only.
@@ -159,17 +138,8 @@ class T2Node(FixedFluxNode[None]):
         if not model.is_physical_decay:
             raise AnalysisError(f"{target} T2 fit is not a decay (d {model.decay:.3e} <= 0); T2 is not physical")
 
-        min_r2 = self._param(target, "min_r2")
-        # A flat trace leaves R² NaN; reject it explicitly, since every comparison with NaN is False.
-        if math.isnan(model.r_squared) or model.r_squared < min_r2:
-            raise AnalysisError(f"{target} T2 fit R² {model.r_squared:.3f} is below the minimum {min_r2}")
-
-        max_rel_uncertainty = self._param(target, "max_rel_uncertainty")
-        relative_uncertainty = model.relative_uncertainty
-        if not math.isfinite(relative_uncertainty) or relative_uncertainty > max_rel_uncertainty:
-            raise AnalysisError(
-                f"{target} T2 relative uncertainty {relative_uncertainty:.3f} exceeds the maximum {max_rel_uncertainty}"
-            )
+        self._require_r2(target, model.r_squared)
+        self._require_rel_uncertainty(target, model.relative_uncertainty)
 
         model.save_fitting()
         plot = model.plot()
