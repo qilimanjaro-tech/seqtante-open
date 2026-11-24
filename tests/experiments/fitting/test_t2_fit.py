@@ -72,6 +72,11 @@ class TestT2Fit(FittingTestCase):
         assert recorded[FittedParameter.FIT_R2] == pytest.approx(1.0, abs=0.05)
         assert recorded["saved"] is True
 
+    def test_save_fitting_refuses_an_unfitted_model(self, fit_obj):
+        """Before ``fit()`` there is no T2 to store, so it raises the shared ``FittingClass`` error."""
+        with pytest.raises(RuntimeError, match="T2Fit has no fit result"):
+            fit_obj.save_fitting()
+
     def test_flat_trace_leaves_r_squared_undefined(self, fit_obj, monkeypatch):
         """A flat trace (drive off, readout saturated) has no variance: R² is ``nan``, not a ZeroDivisionError.
 

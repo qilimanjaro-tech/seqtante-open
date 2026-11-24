@@ -87,7 +87,21 @@ def make_fit(path=None, fitting=None):
     fit.id = 42
     fit.fitting = {} if fitting is None else dict(fitting)
     fit.path = path
+    fit.fitted = False
     return fit
+
+
+# ------------------------------- _require_fit -------------------------------
+
+
+def test_require_fit_raises_until_a_fit_succeeds():
+    """Every fit gates its results on ``fitted``, with the same error, instead of its own check."""
+    fit = make_fit()
+    with pytest.raises(RuntimeError, match="FittingClass has no fit result"):
+        fit._require_fit()
+
+    fit.fitted = True
+    fit._require_fit()
 
 
 # --------------------------- add_fitted_parameter ---------------------------
