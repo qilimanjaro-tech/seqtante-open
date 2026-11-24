@@ -1,10 +1,10 @@
 """Tests for the CalibrationNode base contract and the run context (ADR-0004)."""
 
 import pytest
+from qili_qprograms.targets import ExperimentTarget
 from qililab.qprogram.calibration import Calibration
 
 from seqtante_open.controllers.calibration_node import AnalysisResult, CalibrationNode, FluxSweepNode, RunContext
-from seqtante_open.targets import ExperimentTarget
 
 
 def _context() -> RunContext:

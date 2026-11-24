@@ -26,9 +26,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from qili_qprograms.bus_alias import Role, bus_alias
 from qili_qprograms.experiments import t1_saturation
 
-from seqtante_open.calibration.bus_alias import Role, bus_alias
 from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode, write_per_point
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.fitting import T1Fit
@@ -36,7 +36,7 @@ from seqtante_open.experiments.fitting import T1Fit
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from seqtante_open.targets import Target
+    from qili_qprograms.targets import Target
 
 EXPONENTIAL_DECAY = "exponential_decay"
 
@@ -85,6 +85,7 @@ class T1Node(FixedFluxNode[None]):
         saturation drive on the target's buses. The LOs, readout attenuation and drive source are set by
         the shared :meth:`CalibrationNode._set_operating_point_hardware`, through the restore handle.
         """
+        self._require_pulse(target, Role.readout, "readout")
         # Round, not truncate, so the stored time axis is the one t1_saturation plays.
         durations_idle = np.rint(self._sweep(target, "idle_duration_sweep")).astype(int)
 

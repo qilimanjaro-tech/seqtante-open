@@ -39,9 +39,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from qili_qprograms.bus_alias import Role, bus_alias
 from qililab.typings.enums import Parameter
 
-from seqtante_open.calibration.bus_alias import Role, bus_alias
 from seqtante_open.controllers.calibration_node import AnalysisResult
 from seqtante_open.controllers.operating_point import operating_point_for
 from seqtante_open.controllers.verdicts import AnalysisError
@@ -51,7 +51,7 @@ from seqtante_open.experiments.nodes.two_tone_saturation import TWO_TONE_SATURAT
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from seqtante_open.targets import Target
+    from qili_qprograms.targets import Target
 
 LORENTZIAN_PEAK = "lorentzian_peak"
 

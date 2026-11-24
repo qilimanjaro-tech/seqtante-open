@@ -27,17 +27,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from qili_qprograms.bus_alias import Role, bus_alias
 from qili_qprograms.experiments import two_tone_saturation
 
-from seqtante_open.calibration.bus_alias import Role, bus_alias
 from seqtante_open.controllers.calibration_node import FixedFluxNode, ResultT, write_whole
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     import numpy as np
-
-    from seqtante_open.targets import Target
+    from qili_qprograms.targets import Target
 
 #: Stream/experiment name the measurement is stored under.
 EXPERIMENT_NAME = "two_tone_saturation"
@@ -78,6 +77,7 @@ class TwoToneSaturationNode(FixedFluxNode[ResultT]):
             TypeError: if called on a node that sets no ``experiment`` (a spine, not a leaf).
         """
         operating_point = self._section(target).operating_point
+        self._require_pulse(target, Role.readout, "readout")
         qprogram = two_tone_saturation(
             calibration=self.context.calibration,
             target=str(target),

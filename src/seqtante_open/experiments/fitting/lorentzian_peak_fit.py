@@ -76,6 +76,8 @@ class LorentzianPeakModel(FittingClass[_LorentzianResults]):
 
     def fit(self) -> _LorentzianResults:
         """Fit the Lorentzian, apply the acceptance checks and record the outcome."""
+        # A refit that finds nothing must not leave the previous result readable.
+        self._results = None
         frequency, magnitude = self.frequencies, self.magnitude
         guess = self._initial_guess(frequency, magnitude)
 

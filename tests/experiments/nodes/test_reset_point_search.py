@@ -8,10 +8,8 @@ asserted without hardware, a database or a disk write.
 
 import numpy as np
 import pytest
-from qililab.qprogram.calibration import Calibration
-
-from seqtante_open.calibration.io import read_calibration_file, write_calibration_file
-from seqtante_open.calibration.model import (
+from qili_qprograms.calibration.io import read_calibration_file, write_calibration_file
+from qili_qprograms.calibration.model import (
     CalibrationFile,
     DriveFreqs,
     ExperimentSection,
@@ -19,13 +17,16 @@ from seqtante_open.calibration.model import (
     OperatingPoint,
     ReadoutFreqs,
 )
+from qili_qprograms.targets import ExperimentTarget
+from qililab import Square
+from qililab.qprogram.calibration import Calibration
+
 from seqtante_open.controllers import calibration_node as node_module
 from seqtante_open.controllers.calibration_node import RunContext
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.nodes import ResetPointSearchNode
 from seqtante_open.experiments.nodes import reset_point_search as reset_module
 from seqtante_open.experiments.nodes.reset_point_search import _SearchOutcome, next_flux_z_step
-from seqtante_open.targets import ExperimentTarget
 from tests.experiments.nodes.harness import FakePlatform, identity_crosstalk
 
 Q1 = ExperimentTarget.from_str("q1")
@@ -91,6 +92,7 @@ def _file() -> CalibrationFile:
 
 def _calibration() -> Calibration:
     calibration = Calibration()
+    calibration.add_waveform(bus="readout_q1", name="readout-reset", waveform=Square(amplitude=1.0, duration=1000))
     calibration.crosstalk_matrix = identity_crosstalk()
     write_calibration_file(calibration, _file())
     return calibration

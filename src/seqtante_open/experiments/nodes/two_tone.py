@@ -44,7 +44,7 @@ from seqtante_open.outputs import FittedParameter
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from seqtante_open.targets import Target
+    from qili_qprograms.targets import Target
 
 LORENTZIAN_PEAK = "lorentzian_peak"
 
