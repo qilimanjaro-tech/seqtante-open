@@ -47,7 +47,7 @@ from qililab.typings import ParameterValue
 
 from seqtante_open.calibration.bus_alias import Role, bus_alias
 from seqtante_open.calibration.io import read_calibration_file, save_calibration, write_calibration_file
-from seqtante_open.calibration.model import CalibrationFile
+from seqtante_open.calibration.model import CalibrationFile, OperatingPoint
 from seqtante_open.controllers.crosstalk_session import CrosstalkSession, crosstalk_session
 from seqtante_open.controllers.drive_source import drive_source_writes
 from seqtante_open.controllers.node_registry import BenchmarkSpec, Parallel, experiment_spec, register_node
@@ -287,23 +287,44 @@ class CalibrationNode(ABC, Generic[ResultT]):
             ValueError: if the readout attenuation is not a whole number of dB, or the drive instrument's
                 level is neither set in the step nor defaulted.
         """
-        experiment = self.experiment
-        if experiment is None:
-            raise TypeError(f"{type(self).__name__} sets no experiment; only a leaf node can set its hardware")
-        point = operating_point_for(self.calibration_file, experiment, target)
-        attenuation = point.readout.attenuation
-        if not float(attenuation).is_integer():
-            raise ValueError(f"{target}: readout attenuation {attenuation} dB is not a whole number of dB")
+        point = self._leaf_operating_point(target)
+        self._check_readout_attenuation(target, point.readout.attenuation)
         drive_writes = self._drive_source_writes(target)
         drive_bus = bus_alias(target, Role.drive)
-        readout_bus = bus_alias(target, Role.readout)
 
         restore = self.restore
         restore.set(drive_bus, Parameter.LO_FREQUENCY, round(point.drive.lo))
-        restore.set(readout_bus, Parameter.LO_FREQUENCY, round(point.readout.lo))
-        restore.set(readout_bus, Parameter.OUT0_ATT, int(attenuation))
+        self._set_readout_line(target)
         for parameter, value in drive_writes:
             restore.set(drive_bus, parameter, value)
+
+    def _set_readout_line(self, target: Target) -> None:
+        """Set ``target``'s readout LO and attenuation at its operating point, through the restore handle.
+
+        The readout half of :meth:`_set_operating_point_hardware`, for a node that plays no drive (the
+        ``landau_zener`` flux path) and so has no drive source to arm.
+
+        Raises:
+            TypeError: if called on a node that sets no ``experiment`` (a spine, not a leaf).
+            ValueError: if the readout attenuation is not a whole number of dB.
+        """
+        point = self._leaf_operating_point(target)
+        attenuation = point.readout.attenuation
+        self._check_readout_attenuation(target, attenuation)
+        readout_bus = bus_alias(target, Role.readout)
+        self.restore.set(readout_bus, Parameter.LO_FREQUENCY, round(point.readout.lo))
+        self.restore.set(readout_bus, Parameter.OUT0_ATT, int(attenuation))
+
+    def _leaf_operating_point(self, target: Target) -> OperatingPoint:
+        experiment = self.experiment
+        if experiment is None:
+            raise TypeError(f"{type(self).__name__} sets no experiment; only a leaf node can set its hardware")
+        return operating_point_for(self.calibration_file, experiment, target)
+
+    @staticmethod
+    def _check_readout_attenuation(target: Target, attenuation: float) -> None:
+        if not float(attenuation).is_integer():
+            raise ValueError(f"{target}: readout attenuation {attenuation} dB is not a whole number of dB")
 
     def run(self, dead_targets: dict[str, str]) -> list[str]:
         """Run the three phases for every live target and return the ones that failed (ADR-0006).

@@ -2430,16 +2430,16 @@ wheels = [
 
 [[package]]
 name = "qili-qprograms"
-version = "0.0.2.dev11+ga6a5d4a"
+version = "0.0.2.dev13+g7355271"
 source = { registry = "https://qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.com/pypi/qilimanjaro/simple" }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.com/pypi/qilimanjaro/simple/qili-qprograms/0.0.2.dev11+ga6a5d4a/qili_qprograms-0.0.2.dev11+ga6a5d4a.tar.gz", hash = "sha512:9f1a73d8ba951c2e27e4a3afaf6c4f64b65377fae9d23b182fb2ddb43da2e05a36d464303d30dd0dbb188785605631b70a765f1369d80527e3739447a26c3cb7", size = 218593, upload-time = "2026-11-23T08:00:00.337Z" }
+sdist = { url = "https://qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.com/pypi/qilimanjaro/simple/qili-qprograms/0.0.2.dev13+g7355271/qili_qprograms-0.0.2.dev13+g7355271.tar.gz", hash = "sha512:ef913a4dc4f5bfb679ba4aa75769f980eb9bab69f97b00f60fb2f5cb157fde16bd166123222f86978a83a3a59082abe87560e6046a358aaf3a3434a5d2a319b6", size = 237496, upload-time = "2026-11-24T13:21:11.339Z" }
 wheels = [
-    { url = "https://qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.com/pypi/qilimanjaro/simple/qili-qprograms/0.0.2.dev11+ga6a5d4a/qili_qprograms-0.0.2.dev11+ga6a5d4a-py3-none-any.whl", hash = "sha512:5bf924ef5f23157f477b1773170cc3a5eb267d53478d81199093764c1681519ef9753490224b3999e692aeb29fbb75929ad05ed0e64e841efc0a3a480506258d", size = 42801, upload-time = "2026-11-23T07:59:59.874Z" },
+    { url = "https://qilimanjaro-723412851021.d.codeartifact.eu-west-1.amazonaws.com/pypi/qilimanjaro/simple/qili-qprograms/0.0.2.dev13+g7355271/qili_qprograms-0.0.2.dev13+g7355271-py3-none-any.whl", hash = "sha512:04801e94777ccabc0cfe5adda644f0c7ab250bbf59a984df8dc9e5f65bc6f220530f174077a40b0c7fabda17400d9e03adf0bbecae3b09e6880c83af59154f2d", size = 56367, upload-time = "2026-11-24T13:21:10.884Z" },
 ]
 
 [[package]]
