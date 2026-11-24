@@ -76,7 +76,7 @@ IF_WINDOW = (-10e6, 10e6, 3)
 N_FLUX = FLUX_WINDOW[2]
 N_IF = IF_WINDOW[2]
 PARAMS = {
-    "loop": "z",
+    "flux_axis": "z",
     "flux_sweep": FLUX_WINDOW,
     "drive_if_sweep": IF_WINDOW,
     "averages": 100,
@@ -190,7 +190,6 @@ def calls(monkeypatch):
         return settle_override, pre_step_override
 
     monkeypatch.setattr(node_module, "two_tone_vs_flux_saturation", fake_build)
-    monkeypatch.setattr(node_module, "StreamArray", FakeStreamArray)
     monkeypatch.setattr(node_module, "FluxoniumTwoToneFluxModel", FakeFluxFit)
     monkeypatch.setattr(node_module, "qdac_step_timings", fake_timings)
     monkeypatch.setattr(node_module, "get_qdac_out_trigger", lambda platform: QDAC_TRIGGER)
@@ -201,7 +200,6 @@ def calls(monkeypatch):
     monkeypatch.setattr(FakeFluxFit, "saved_loops", [])
     monkeypatch.setattr(FakeFluxFit, "init", {})
     monkeypatch.setattr(FakeStreamArray, "measurement_id", MEAS_ID)
-    monkeypatch.setattr(FakeStreamArray, "last", None)
     return recorded
 
 
@@ -265,7 +263,7 @@ def test_sweeps_the_z_loop_around_the_point_and_stores_the_measured_bias(calls):
 def test_the_x_loop_sweeps_and_stores_the_x_bias(calls):
     calibration = _calibration()
 
-    failed = _make(calibration, loop="x").run({})
+    failed = _make(calibration, flux_axis="x").run({})
 
     assert failed == []
     assert calls["build"]["flux_axis"] == "x"
@@ -332,8 +330,8 @@ def test_a_rejected_fit_fails_the_target_and_writes_nothing(calls, monkeypatch, 
 @pytest.mark.parametrize(
     ("flux", "params", "targets"),
     [
-        pytest.param(Flux(z=FLUX_Z), {"loop": "x"}, (Q1,), id="x_loop_with_no_stored_x_bias"),
-        pytest.param(None, {"loop": "y"}, (Q1,), id="unknown_loop"),
+        pytest.param(Flux(z=FLUX_Z), {"flux_axis": "x"}, (Q1,), id="x_loop_with_no_stored_x_bias"),
+        pytest.param(None, {"flux_axis": "y"}, (Q1,), id="unknown_loop"),
         pytest.param(None, {}, (C1_2,), id="coupler_target"),
     ],
 )

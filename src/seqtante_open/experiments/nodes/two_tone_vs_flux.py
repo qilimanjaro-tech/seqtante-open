@@ -15,7 +15,7 @@
 """The ``two_tone_vs_flux`` node: the flux sweet spot of one loop, from a two-tone map (ADR-0007, QHC-1804).
 
 The second vertical slice and the root of every pipeline in the EuroQCS tree (``sweet_spot_flux``). One
-two-tone saturation map runs per target: a QDAC steps the flux of the step's ``loop`` (``z`` or ``x``)
+two-tone saturation map runs per target: a QDAC steps the flux of the step's ``flux_axis`` (``z`` or ``x``)
 across a window around the operating point's stored bias, and at every flux the drive IF is swept around
 the operating point's stored drive IF. A Lorentzian per flux and a parabola through the qubit IFs give
 the sweet spot as the parabola's vertex (``parabola_vertex``).
@@ -37,16 +37,13 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from qili_qprograms.experiments import two_tone_vs_flux_saturation
 from qililab import Parameter
-from qililab.result import StreamArray
 
 from seqtante_open.calibration.bus_alias import Role, bus_alias
 from seqtante_open.controllers.calibration_node import AnalysisResult, FluxSweepNode
 from seqtante_open.controllers.operating_point import operating_point_for
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.fitting import FluxoniumTwoToneFluxModel
-from seqtante_open.experiments.results import measurement_id
 from seqtante_open.experiments.utils.qdac_utils import get_qdac_out_trigger, qdac_step_timings
-from seqtante_open.outputs import output_controller
 from seqtante_open.targets import QubitTarget
 
 if TYPE_CHECKING:
@@ -66,7 +63,7 @@ _EXPERIMENT_NAME = "two_tone_vs_flux_saturation"
 #: default, and the drive instrument decides which of ``drive_power`` (Rohde & Schwarz, dBm) or
 #: ``drive_gain`` (QCM-RF, [-1, 1]) the step must set.
 TWO_TONE_VS_FLUX_DEFAULTS: Mapping[str, Any] = {
-    "loop": "z",
+    "flux_axis": "z",
     "drive_ringup_time": 200,
     "drive_ringdown_time": 200,
     "drive_n_sigmas": 4,
@@ -124,7 +121,7 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
                 "and the shared experiment has no readout-qubit mapping"
             )
         loop = self._loop(target)
-        section = self.calibration_file.experiments[self.experiment][str(target)]
+        section = self._section(target)
         operating_point = operating_point_for(self.calibration_file, self.experiment, target)
         fluxes = self._absolute_sweep(target, "flux_sweep", operating_point.flux.on(loop))
         drive_ifs = self._absolute_sweep(target, "drive_if_sweep", operating_point.drive.if_)
@@ -161,20 +158,25 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
         # The unswept loop and the parked neighbours sit at their stored biases; the QDAC ramps the swept one.
         self._place_operating_point(target)
         self._set_operating_point_hardware(target)
-        return self._stream(target, qprogram, fluxes, drive_ifs, loop)
+        return self._stream_map(target, qprogram, fluxes, drive_ifs, loop)
 
-    def _absolute_sweep(self, target: Target, key: str, centre: float) -> np.ndarray:
-        """The step's ``key`` window (``np.linspace`` arguments, as offsets) shifted onto ``centre``."""
-        return centre + np.linspace(*self._param(target, key))
-
-    def _stream(self, target: Target, qprogram: Any, fluxes: np.ndarray, drive_ifs: np.ndarray, loop: FluxLoop) -> int:
+    def _stream_map(
+        self, target: Target, qprogram: Any, fluxes: np.ndarray, drive_ifs: np.ndarray, loop: FluxLoop
+    ) -> int:
         """Run the map ``repetitions`` times and stream the running average; return the measurement id."""
-        platform = self.context.platform
-        readout_bus = bus_alias(target, Role.readout)
         flux_bus = bus_alias(target, Role.flux, loop)
-        repetitions = self._param(target, "repetitions")
-        stream_array = StreamArray(
-            shape=(len(fluxes), len(drive_ifs), 2),
+        total = np.zeros((len(fluxes), len(drive_ifs), 2))
+
+        def running_average(stream_array: Any, acquisitions: Any, repetition: int) -> None:
+            nonlocal total
+            # One acquisition, shaped (IQ, flux, drive IF): reorder it to the stored (flux, drive IF, IQ).
+            total = total + np.asarray(acquisitions[0].array).transpose(1, 2, 0)
+            stream_array[()] = total / (repetition + 1)
+
+        return self._stream(
+            target,
+            qprogram,
+            experiment_name=_EXPERIMENT_NAME,
             # The loop names are the ones FluxoniumTwoToneFluxModel reads back.
             loops={
                 "flux": {"array": fluxes, "units": "phi_0", "bus": flux_bus, "parameter": Parameter.FLUX.value},
@@ -185,23 +187,12 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
                     "parameter": "IF_frequency",
                 },
             },
-            platform=platform,
-            experiment_name=_EXPERIMENT_NAME,
-            db_manager=output_controller.db_manager,
-            qprogram=qprogram,
-            calibration=self.context.calibration,
+            shape=(len(fluxes), len(drive_ifs), 2),
+            write=running_average,
+            repetitions=self._param(target, "repetitions"),
             # The swept bus keeps the z and x maps of one qubit apart in the DB (ADR-0007).
             optional_identifier=flux_bus,
-            qubit_idx=str(target),
         )
-        total = np.zeros((len(fluxes), len(drive_ifs), 2))
-        with stream_array:
-            for repetition in range(repetitions):
-                results = platform.execute_qprogram(qprogram).results
-                # One acquisition, shaped (IQ, flux, drive IF): reorder it to the stored (flux, drive IF, IQ).
-                total += np.asarray(results[readout_bus][0].array).transpose(1, 2, 0)
-                stream_array[()] = total / (repetition + 1)
-        return measurement_id(stream_array)
 
     def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[SweetSpotFlux]:
         """Fit the map, check it, save ``sweet_spot_flux_<loop>``/``fit_r2``, plot, and return the vertex.
@@ -227,10 +218,7 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
         if not model.fitted:
             raise AnalysisError(f"{target} two-tone vs flux on '{loop}': no sweet spot inside the swept window")
 
-        min_r2 = self._param(target, "min_r2")
-        # Every comparison with NaN is False, so an undefined R² is rejected explicitly.
-        if math.isnan(model.r_squared) or model.r_squared < min_r2:
-            raise AnalysisError(f"{target} parabola R² {model.r_squared:.3f} is below the minimum {min_r2}")
+        self._require_r2(target, model.r_squared)
 
         model.save_fitting(loop)
         plot = model.plot()

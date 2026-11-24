@@ -22,7 +22,7 @@ pipelines:
         experiment: two_tone_vs_flux
         analysis: parabola_vertex
         operating_point: sweet_spot
-        loop: z
+        flux_axis: z
         flux_sweep: [-0.02, 0.02, 11]
       two_tone_sweet_spot:
         experiment: two_tone
