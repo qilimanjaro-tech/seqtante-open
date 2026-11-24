@@ -69,7 +69,6 @@ class FluxoniumTwoToneFluxModel(FittingClass):
         self.rotated = np.zeros((len(self.fluxes), len(self.frequencies)))
         self.fitted_if = np.full(len(self.fluxes), np.nan)
         self.mask = np.zeros(len(self.fluxes), dtype=bool)
-        self.fitted = False
 
     def _drive_lo(self) -> float:
         """Drive-bus LO frequency in Hz, taken from the runcard stored with the measurement."""
@@ -116,8 +115,7 @@ class FluxoniumTwoToneFluxModel(FittingClass):
         """
         from seqtante_open.outputs import FittedParameter
 
-        if not self.fitted:
-            raise RuntimeError("No sweet spot fitted; call fit() and check `fitted` first.")
+        self._require_fit()
         self.add_fitted_parameter(FittedParameter(f"sweet_spot_flux_{loop}"), self.center)
         self.add_fitted_parameter(FittedParameter.FIT_R2, self.r_squared)
         self.save_fitting_to_database()

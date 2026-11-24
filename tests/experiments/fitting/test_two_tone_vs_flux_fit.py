@@ -108,5 +108,5 @@ class TestFluxoniumTwoToneFluxModel(FittingTestCase):
 
     def test_save_fitting_refuses_an_unfitted_model(self, fit_obj):
         """With no sweet spot found there is nothing to store, so it raises instead of writing a stale value."""
-        with pytest.raises(RuntimeError, match="No sweet spot fitted"):
+        with pytest.raises(RuntimeError, match="no fit result"):
             fit_obj.save_fitting("z")

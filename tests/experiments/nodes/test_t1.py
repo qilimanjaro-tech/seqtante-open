@@ -157,7 +157,10 @@ def _calibration() -> Calibration:
 
 
 class FakeT1Platform(ExecutingPlatform):
-    """An :class:`ExecutingPlatform` whose execution returns one readout point per idle duration."""
+    """An :class:`ExecutingPlatform` with a Rohde & Schwarz drive whose execution returns one point per idle."""
+
+    def __init__(self) -> None:
+        super().__init__(instruments={DRIVE_BUS: "ROHDE_SCHWARZ"})
 
     def results(self) -> dict:
         return {READOUT_BUS: [SimpleNamespace(array=np.zeros((2, 1))) for _ in range(N_IDLE)]}

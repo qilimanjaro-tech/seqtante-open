@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from qili_qprograms.experiments import two_tone_vs_flux_saturation
@@ -40,7 +40,7 @@ from qililab import Parameter
 from qililab.result import StreamArray
 
 from seqtante_open.calibration.bus_alias import Role, bus_alias
-from seqtante_open.controllers.calibration_node import AnalysisResult, FluxSweepNode
+from seqtante_open.controllers.calibration_node import AnalysisResult, FluxLoop, FluxSweepNode
 from seqtante_open.controllers.operating_point import operating_point_for
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.fitting import FluxoniumTwoToneFluxModel
@@ -52,16 +52,12 @@ from seqtante_open.targets import QubitTarget
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from seqtante_open.calibration.model import OperatingPoint
     from seqtante_open.targets import Target
 
 PARABOLA_VERTEX = "parabola_vertex"
 
 #: Stream/experiment name the map is stored under.
 _EXPERIMENT_NAME = "two_tone_vs_flux_saturation"
-
-Loop = Literal["z", "x"]
-_LOOPS: tuple[Loop, ...] = ("z", "x")
 
 #: Defaults for the optional step parameters (the node's ``defaults``); every one is overridable in the
 #: tree. The measurement keys are named like the ``two_tone_vs_flux_saturation`` arguments. ``flux_sweep``,
@@ -90,7 +86,7 @@ TWO_TONE_VS_FLUX_DEFAULTS: Mapping[str, Any] = {
 class SweetSpotFlux:
     """What ``analyze`` hands ``apply``: the measured sweet-spot bias on one loop, in Φ0."""
 
-    loop: Loop
+    loop: FluxLoop
     flux: float
 
 
@@ -109,12 +105,6 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
     def execute_node(self, targets: list[Target]) -> dict[Target, list[int]]:
         """Run the two-tone map on each target around its operating point; return its measurement id."""
         return {target: [self._run_map(target)] for target in targets}
-
-    def _loop(self, target: Target) -> Loop:
-        loop = self._param(target, "loop")
-        if loop not in _LOOPS:
-            raise ValueError(f"step '{self.name}': {target} loop must be one of {_LOOPS}, not {loop!r}")
-        return loop
 
     def _run_map(self, target: Target) -> int:
         """Place the point, set its hardware, build the QDAC-ramped two-tone QProgram, run it and stream it.
@@ -172,17 +162,11 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
         self._set_operating_point_hardware(target)
         return self._stream(target, qprogram, fluxes, drive_ifs, loop)
 
-    def _stored_flux(self, target: Target, operating_point: OperatingPoint, loop: Loop) -> float:
-        flux = operating_point.flux.z if loop == "z" else operating_point.flux.x
-        if flux is None:
-            raise ValueError(f"{target}: operating point stores no '{loop}' flux to sweep around")
-        return flux
-
     def _absolute_sweep(self, target: Target, key: str, centre: float) -> np.ndarray:
         """The step's ``key`` window (``np.linspace`` arguments, as offsets) shifted onto ``centre``."""
         return centre + np.linspace(*self._param(target, key))
 
-    def _stream(self, target: Target, qprogram: Any, fluxes: np.ndarray, drive_ifs: np.ndarray, loop: Loop) -> int:
+    def _stream(self, target: Target, qprogram: Any, fluxes: np.ndarray, drive_ifs: np.ndarray, loop: FluxLoop) -> int:
         """Run the map ``repetitions`` times and stream the running average; return the measurement id."""
         platform = self.context.platform
         readout_bus = bus_alias(target, Role.readout)

@@ -123,8 +123,10 @@ class FakeFluxPlatform(ExecutingPlatform):
     Filling each map with its execution number makes the running average over repetitions checkable.
     """
 
-    def __init__(self) -> None:
-        super().__init__({(READOUT_BUS, Parameter.TIME_OF_FLIGHT): TIME_OF_FLIGHT})
+    def __init__(self, drive_instrument: str = "ROHDE_SCHWARZ") -> None:
+        super().__init__(
+            {(READOUT_BUS, Parameter.TIME_OF_FLIGHT): TIME_OF_FLIGHT}, instruments={DRIVE_BUS: drive_instrument}
+        )
 
     def results(self) -> dict:
         return {READOUT_BUS: [SimpleNamespace(array=np.full((2, N_FLUX, N_IF), float(self.executions)))]}
@@ -279,7 +281,6 @@ def test_repetitions_stream_the_running_average(calls):
 
     assert platform.executions == 3
     # Executions return maps of 1, 2, 3: the stream holds the mean after each one.
-    # Executions return maps of 1, 2, 3: the stream holds the mean after each one.
     writes = [np.asarray(value) for _, value in FakeStreamArray.last.writes]
     assert [float(write.mean()) for write in writes] == pytest.approx([1.0, 1.5, 2.0])
     assert writes[-1].shape == (N_FLUX, N_IF, 2)
@@ -291,6 +292,19 @@ def test_qdac_timing_overrides_are_passed_through(calls):
     assert calls["timings"] == (8_000, 2_000)
     assert calls["build"]["flux_settle_duration"] == 8_000
     assert calls["build"]["flux_pre_step_duration"] == 2_000
+
+
+def test_a_qcm_rf_drive_is_armed_with_the_step_gain(calls):
+    """A QCM-RF drive bus takes the sequencer gain and hardware modulation, not a source power."""
+    platform = FakeFluxPlatform(drive_instrument="QCMRF")
+
+    failed = _make(_calibration(), platform=platform, drive_gain=0.4).run({})
+
+    assert failed == []
+    snap = platform.values_at_execute
+    assert snap[DRIVE_BUS, Parameter.GAIN] == pytest.approx(0.4)
+    assert snap[DRIVE_BUS, Parameter.HARDWARE_MODULATION] is True
+    assert (DRIVE_BUS, Parameter.POWER) not in snap
 
 
 @pytest.mark.parametrize(

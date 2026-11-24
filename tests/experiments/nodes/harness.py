@@ -74,21 +74,26 @@ class FakePlatform:
 class ExecutingPlatform(FakePlatform):
     """A :class:`FakePlatform` that also answers what a node running its own QProgram calls.
 
-    ``get_element`` reports a Rohde & Schwarz drive instrument, so the drive-source writes (IQ
-    modulation, power, RF on) run. ``execute_qprogram`` counts the executions and snapshots the parameters
+    ``get_element`` answers only for the buses declared in ``instruments`` (alias to instrument name,
+    e.g. ``{"drive_q1": "ROHDE_SCHWARZ"}``) and raises for any other, so a node that asks for the wrong
+    bus fails the test instead of getting a plausible instrument back. ``execute_qprogram`` counts the
+    executions and snapshots the parameters
     set so far into :attr:`values_at_execute`, before the run restores them, then returns
     ``SimpleNamespace(results=self.results())``. A node test subclasses it and overrides :meth:`results`
     with the readout shape its QProgram produces.
     """
 
-    def __init__(self, values: dict | None = None) -> None:
+    def __init__(self, values: dict | None = None, *, instruments: dict[str, str]) -> None:
         super().__init__(values)
+        self.instruments = dict(instruments)
         self.values_at_execute: dict = {}
         self.executions = 0
 
     def get_element(self, alias: str) -> Any:
         self.calls.append(f"get_element:{alias}")
-        return SimpleNamespace(instruments=[SimpleNamespace(name=SimpleNamespace(name="ROHDE_SCHWARZ"))])
+        if alias not in self.instruments:
+            raise KeyError(f"no instrument declared for bus {alias!r}; declared: {sorted(self.instruments)}")
+        return SimpleNamespace(instruments=[SimpleNamespace(name=SimpleNamespace(name=self.instruments[alias]))])
 
     def execute_qprogram(self, qprogram: Any, **kwargs: Any) -> Any:
         self.calls.append("execute_qprogram")
