@@ -41,7 +41,7 @@ Goal: Seqtante-Open runs the EuroQCS 1q calibration tree unattended. That means 
 
 Other points settled in review:
 
-- Steps name the flux loop they sweep (`loop: z | x`).
+- Steps name the flux loop they sweep (`flux_axis: z | x`).
 - T2 joins the delivery as its own pipeline after the sweet spot: Rabi for a pi amplitude, then T2 (`t2__drag`). T1 stays the saturation version.
 - The `Calibration` is deserialised once per run, and its path becomes a CLI argument (ADR-0004).
 - **Node** is the code name for the class that runs a step; the glossary scopes it.

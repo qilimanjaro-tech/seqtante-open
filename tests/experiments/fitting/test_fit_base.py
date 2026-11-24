@@ -87,7 +87,22 @@ def make_fit(path=None, fitting=None):
     fit.id = 42
     fit.fitting = {} if fitting is None else dict(fitting)
     fit.path = path
+    fit._results = None
     return fit
+
+
+# --------------------------------- results ----------------------------------
+
+
+def test_results_refuse_to_be_read_until_a_fit_assigns_them():
+    """Every fitted value is read through ``results``, so a read before ``fit()`` raises without a per-method check."""
+    fit = make_fit()
+    with pytest.raises(RuntimeError, match="FittingClass has no fit result"):
+        _ = fit.results
+
+    fit.results = {"center": 0.1}
+
+    assert fit.results == {"center": 0.1}
 
 
 # --------------------------- add_fitted_parameter ---------------------------
@@ -182,10 +197,18 @@ def test_save_plot_writes_plot_path_when_enabled(fake_db, configure, tmp_path):
     assert os.path.isfile(expected)
 
 
-def test_save_plot_skips_db_by_default(fake_db, configure, tmp_path):
+def test_save_plot_stores_the_path_by_default(fake_db, configure, tmp_path):
+    """Every fit stores its plot's path on the measurement entry unless it opts out (QHC-1932)."""
     configure(True)
     fit = make_fit(path=str(tmp_path))
-    fit.save_plot(go.Figure(), "myplot")
+    filepath = fit.save_plot(go.Figure(), "myplot")
+    assert [call["path"] for call in fake_db.fitting_calls] == [filepath]
+
+
+def test_save_plot_skips_db_when_asked(fake_db, configure, tmp_path):
+    configure(True)
+    fit = make_fit(path=str(tmp_path))
+    fit.save_plot(go.Figure(), "myplot", save_to_db=False)
     assert fake_db.fitting_calls == []
 
 

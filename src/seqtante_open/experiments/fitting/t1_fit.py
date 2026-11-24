@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import TypedDict
+
 import numpy as np
 import plotly.graph_objects as go
 import scipy.optimize as sp
@@ -22,7 +24,21 @@ from seqtante_open.experiments.fitting.fit_base import FittingClass
 _NS_PER_US = 1_000.0
 
 
-class T1Fit(FittingClass):
+class T1Results(TypedDict):
+    """What :meth:`T1Fit.fit` produces; times in ns."""
+
+    #: ``(a, b, c)`` of ``a * exp(b * t) + c``, as ``curve_fit`` returns them.
+    params: np.ndarray
+    #: ``b``, recorded even when it is not a decay.
+    rate: float
+    #: ``-1 / rate``; NaN unless ``rate < 0``.
+    T1: float
+    t1_uncertainty: float
+    #: NaN for a flat trace.
+    r_squared: float
+
+
+class T1Fit(FittingClass[T1Results]):
     """Fit a T1 saturation decay and report the relaxation time with its uncertainty (QHC-1803).
 
     The rotated real quadrature ``Re(rotate_iq(I + iQ))`` is fit to ``a * exp(b * t) + c`` over the idle
@@ -36,16 +52,8 @@ class T1Fit(FittingClass):
         path (str | None, optional): Directory the plot is saved into; if None the plot is shown.
     """
 
-    results: np.ndarray | None
-    #: Set by :meth:`fit`; left unset until then so a missing fit is an error, not a silent default.
-    rate: float
-    T1: float
-    t1_uncertainty: float
-    r_squared: float
-
     def __init__(self, target: str, measurement_id: int, path: str | None = None):
         super().__init__(measurement_id=measurement_id, target=target, path=path)
-        self.results = None
         xarr = self.get_xarray()
         self.wait_values = xarr[xarr.dims[0]].data
         self.arr = np.real(self.rotate_iq(self.array[:, 0] + 1j * self.array[:, 1]))
@@ -58,33 +66,54 @@ class T1Fit(FittingClass):
         would give a negative lifetime, or raise on ``rate == 0``. :attr:`is_physical_decay` then reports
         the failure so ``analyze`` fails the target instead of scoring a non-physical value (QHC-1803).
         """
-        self.results, pcov = sp.curve_fit(
+        # A refit that finds nothing must not leave the previous result readable.
+        self._results = None
+        params, pcov = sp.curve_fit(
             self.exponential,
             self.wait_values,
             self.arr,
             p0=self.exponential_initial_guess(self.wait_values, self.arr),
         )
-        rate = float(self.results[1])
-        self.rate = rate
+        rate = float(params[1])
         if rate < 0.0:
-            self.T1 = -1.0 / rate
+            t1 = -1.0 / rate
             rate_std = float(np.sqrt(pcov[1, 1]))
             # T1 = -1/rate, so dT1/drate = 1/rate²; propagate the rate's standard uncertainty.
-            self.t1_uncertainty = rate_std / rate**2
+            t1_uncertainty = rate_std / rate**2
         else:
             # A non-decaying (or flat) fit has no physical T1; flag it rather than dividing.
-            self.T1 = float("nan")
-            self.t1_uncertainty = float("nan")
-        model = self.exponential(self.wait_values, *self.results)
+            t1 = float("nan")
+            t1_uncertainty = float("nan")
+        model = self.exponential(self.wait_values, *params)
         ss_res = float(np.sum((self.arr - model) ** 2))
         ss_tot = float(np.sum((self.arr - np.mean(self.arr)) ** 2))
         # A flat trace (drive off, readout saturated) has no variance to explain: R² is undefined, not a crash.
-        self.r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+        r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+        self.results = T1Results(params=params, rate=rate, T1=t1, t1_uncertainty=t1_uncertainty, r_squared=r_squared)
+
+    @property
+    def rate(self) -> float:
+        """The fitted exponent ``b`` in 1/ns."""
+        return self.results["rate"]
+
+    @property
+    def T1(self) -> float:
+        """The relaxation time in ns; NaN when the fit is not a decay."""
+        return self.results["T1"]
+
+    @property
+    def t1_uncertainty(self) -> float:
+        """The standard uncertainty on T1 in ns."""
+        return self.results["t1_uncertainty"]
+
+    @property
+    def r_squared(self) -> float:
+        """The fit's R²; NaN for a flat trace."""
+        return self.results["r_squared"]
 
     @property
     def is_physical_decay(self) -> bool:
         """Whether the fit is a real decay (``rate < 0``), so ``T1 = -1/rate`` is positive and finite."""
-        self._require_fit()
         return self.rate < 0.0
 
     @property
@@ -94,38 +123,28 @@ class T1Fit(FittingClass):
         Non-finite when ``curve_fit`` could not estimate the covariance (``inf``) or the fit is
         non-physical (``nan``); ``analyze`` rejects both.
         """
-        self._require_fit()
         return abs(self.t1_uncertainty / self.T1)
 
     @property
     def t1_us(self) -> float:
         """The relaxation time in microseconds (the benchmark's unit)."""
-        self._require_fit()
         return self.T1 / _NS_PER_US
 
     @property
     def t1_uncertainty_us(self) -> float:
         """The standard uncertainty on T1 in microseconds."""
-        self._require_fit()
         return self.t1_uncertainty / _NS_PER_US
 
     def save_fitting(self):
         """Write the fitted T1 (us) and the fit R squared to the measurement entry (QHC-1497, QHC-1791)."""
         from seqtante_open.outputs import FittedParameter
 
-        self._require_fit()
         self.add_fitted_parameter(FittedParameter.T1, self.t1_us)
         self.add_fitted_parameter(FittedParameter.FIT_R2, self.r_squared)
         self.save_fitting_to_database()
 
-    def _require_fit(self) -> np.ndarray:
-        if self.results is None:
-            raise RuntimeError("No fit results available, call fit() first.")
-        return self.results
-
     def plot(self):
         """Plot the rotated decay and the fitted exponential."""
-        results = self._require_fit()
         title = f"{self.target}_T1"
 
         fig = go.Figure(
@@ -140,7 +159,7 @@ class T1Fit(FittingClass):
         fig.add_trace(
             go.Scatter(
                 x=self.wait_values,
-                y=self.exponential(self.wait_values, *results),
+                y=self.exponential(self.wait_values, *self.results["params"]),
                 mode="lines",
                 name="Fitted exponential",
                 line={"color": "red"},
