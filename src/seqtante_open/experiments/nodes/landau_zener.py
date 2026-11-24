@@ -44,14 +44,13 @@ import copy
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
-from qili_qprograms.bus_alias import Role as QProgramRole
-from qili_qprograms.bus_alias import bus_alias as qprogram_bus_alias
+from qili_qprograms.bus_alias import Role, bus_alias
+from qili_qprograms.calibration.io import readout_levels_for
+from qili_qprograms.calibration.pulses import pulse_name
 from qili_qprograms.experiments import generalized_linear_ramps
 from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 from qililab.result import StreamArray
 
-from seqtante_open.calibration.bus_alias import Role, bus_alias
-from seqtante_open.calibration.io import readout_levels_for
 from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.fitting.landau_zener_fit import LandauZenerFit
@@ -61,10 +60,9 @@ from seqtante_open.outputs import output_controller
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from qili_qprograms.targets import Target
     from qililab import QProgram
     from qililab.qprogram.calibration import Calibration
-
-    from seqtante_open.targets import Target
 
 EXPERIMENT = "landau_zener"
 THEORY_AGREEMENT = "theory_agreement"
@@ -140,7 +138,7 @@ class LandauZenerNode(FixedFluxNode[None]):
                 "total_annealing_time": {
                     "array": annealing_times,
                     "units": "ns",
-                    "bus": qprogram_bus_alias(str(target), QProgramRole.fast_flux, "z"),
+                    "bus": bus_alias(target, Role.fast_flux, "z"),
                     "parameter": "Total_annealing_time",
                 },
             },
@@ -195,8 +193,8 @@ class LandauZenerNode(FixedFluxNode[None]):
         """
         calibration = self.context.calibration
         fast_flux_buses = [
-            qprogram_bus_alias(str(target), QProgramRole.fast_flux, "z"),
-            qprogram_bus_alias(str(target), QProgramRole.fast_flux, "x"),
+            bus_alias(target, Role.fast_flux, "z"),
+            bus_alias(target, Role.fast_flux, "x"),
         ]
         ac_crosstalk = self._param(target, "ac_crosstalk")
         if ac_crosstalk is not None:
@@ -231,7 +229,7 @@ class LandauZenerNode(FixedFluxNode[None]):
         """
         operating_point = self.calibration_file.experiments[EXPERIMENT][str(target)].operating_point
         # The pulse generalized_linear_ramps plays at its readout point, the step's operating point.
-        readout_pulse = f"readout-{operating_point}"
+        readout_pulse = pulse_name("readout", operating_point)
         try:
             levels = readout_levels_for(self.calibration_file, EXPERIMENT, str(target), readout_pulse)
         except ValueError as error:

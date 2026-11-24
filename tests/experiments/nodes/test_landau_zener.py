@@ -15,13 +15,9 @@ from typing import ClassVar
 
 import numpy as np
 import pytest
-from qililab import IQPair, Parameter, Square
-from qililab.qprogram.calibration import Calibration
-from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
-
-from seqtante_open.calibration.bus_alias import Role
-from seqtante_open.calibration.io import write_calibration_file
-from seqtante_open.calibration.model import (
+from qili_qprograms.bus_alias import Role
+from qili_qprograms.calibration.io import write_calibration_file
+from qili_qprograms.calibration.model import (
     CalibrationFile,
     DriveFreqs,
     ExperimentSection,
@@ -31,9 +27,13 @@ from seqtante_open.calibration.model import (
     ReadoutFreqs,
     ReadoutLevels,
 )
+from qili_qprograms.targets import ExperimentTarget
+from qililab import IQPair, Parameter, Square
+from qililab.qprogram.calibration import Calibration
+from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
+
 from seqtante_open.experiments.nodes import LandauZenerNode
 from seqtante_open.experiments.nodes import landau_zener as lz_module
-from seqtante_open.targets import ExperimentTarget
 from tests.experiments.nodes.harness import FakePlatform, build_context, stub_output_and_save
 
 Q1 = ExperimentTarget.from_str("q1")
