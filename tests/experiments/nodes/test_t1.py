@@ -17,7 +17,7 @@ from typing import ClassVar
 
 import numpy as np
 import pytest
-from qililab import Parameter
+from qililab import Parameter, Square
 from qililab.qprogram.calibration import Calibration
 
 from seqtante_open.calibration.io import write_calibration_file
@@ -134,6 +134,7 @@ class FakeT1Fit:
 
 def _calibration() -> Calibration:
     calibration = Calibration()
+    calibration.add_waveform(bus=READOUT_BUS, name="readout-sweet_spot", waveform=Square(amplitude=1.0, duration=1000))
     calibration.crosstalk_matrix = identity_crosstalk()
     write_calibration_file(
         calibration,

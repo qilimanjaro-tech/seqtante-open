@@ -106,6 +106,18 @@ class TestFluxoniumTwoToneFluxModel(FittingTestCase):
         assert recorded[FittedParameter.FIT_R2] > 0.99
         assert recorded["saved"] is True
 
+    def test_a_refit_that_finds_nothing_clears_the_previous_sweet_spot(self, fitted, monkeypatch):
+        """A second ``fit()`` that finds no trace must not leave the first fit's vertex readable."""
+        assert fitted.fitted
+        monkeypatch.setattr(fitted, "lorentzian_fit", lambda *_: (np.nan, None, 0.0))
+
+        fitted.fit()
+
+        assert not fitted.fitted
+        assert not fitted.mask.any()
+        with pytest.raises(RuntimeError, match="no fit result"):
+            _ = fitted.center
+
     def test_save_fitting_refuses_an_unfitted_model(self, fit_obj):
         """With no sweet spot found there is nothing to store, so it raises instead of writing a stale value."""
         with pytest.raises(RuntimeError, match="no fit result"):

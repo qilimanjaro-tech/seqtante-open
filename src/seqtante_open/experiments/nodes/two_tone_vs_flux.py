@@ -34,7 +34,6 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
 from qili_qprograms.experiments import two_tone_vs_flux_saturation
 from qililab import Parameter
 
@@ -49,7 +48,8 @@ from seqtante_open.targets import QubitTarget
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from qililab.result import MeasurementResult, StreamArray
+    import numpy as np
+    from qililab.result import StreamArray
 
     from seqtante_open.calibration.model import FluxLoop
     from seqtante_open.targets import Target
@@ -60,12 +60,12 @@ PARABOLA_VERTEX = "parabola_vertex"
 _EXPERIMENT_NAME = "two_tone_vs_flux_saturation"
 
 #: Defaults for the optional step parameters (the node's ``defaults``); every one is overridable in the
-#: tree. The measurement keys are named like the ``two_tone_vs_flux_saturation`` arguments. ``flux_sweep``,
-#: ``drive_if_sweep``, ``averages``, ``relax_duration``, ``drive_duration`` and ``drive_amplitude`` have no
-#: default, and the drive instrument decides which of ``drive_power`` (Rohde & Schwarz, dBm) or
+#: tree. The measurement keys are named like the ``two_tone_vs_flux_saturation`` arguments. ``flux_axis``,
+#: ``flux_sweep``, ``drive_if_sweep``, ``averages``, ``relax_duration``, ``drive_duration`` and
+#: ``drive_amplitude`` have no default (``flux_axis`` so a tree still on the old ``loop`` key fails rather
+#: than silently sweeping ``z``), and the drive instrument decides which of ``drive_power`` (Rohde & Schwarz, dBm) or
 #: ``drive_gain`` (QCM-RF, [-1, 1]) the step must set.
 TWO_TONE_VS_FLUX_DEFAULTS: Mapping[str, Any] = {
-    "flux_axis": "z",
     "drive_ringup_time": 200,
     "drive_ringdown_time": 200,
     "drive_n_sigmas": 4,
@@ -80,6 +80,11 @@ TWO_TONE_VS_FLUX_DEFAULTS: Mapping[str, Any] = {
     # Minimum R² the parabola through the per-flux qubit IFs must reach to pass the step.
     "min_r2": 0.8,
 }
+
+
+def _write_map(stream_array: StreamArray, averaged: Sequence[np.ndarray]) -> None:
+    """Write the averaged map, one acquisition shaped (IQ, flux, drive IF), as the stored (flux, drive IF, IQ)."""
+    stream_array[()] = averaged[0].transpose(1, 2, 0)
 
 
 @dataclass(frozen=True)
@@ -124,6 +129,7 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
             )
         loop = self._loop(target)
         section = self._section(target)
+        self._require_pulse(target, Role.readout, "readout")
         operating_point = operating_point_for(self.calibration_file, self.experiment, target)
         fluxes = self._absolute_sweep(target, "flux_sweep", operating_point.flux.on(loop))
         drive_ifs = self._absolute_sweep(target, "drive_if_sweep", operating_point.drive.if_)
@@ -167,16 +173,6 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
     ) -> int:
         """Run the map ``repetitions`` times and stream the running average; return the measurement id."""
         flux_bus = bus_alias(target, Role.flux, loop)
-        total = np.zeros((len(fluxes), len(drive_ifs), 2))
-        executions = 0
-
-        def running_average(stream_array: StreamArray, acquisitions: Sequence[MeasurementResult]) -> None:
-            nonlocal total, executions
-            executions += 1
-            # One acquisition, shaped (IQ, flux, drive IF): reorder it to the stored (flux, drive IF, IQ).
-            total = total + np.asarray(acquisitions[0].array).transpose(1, 2, 0)
-            stream_array[()] = total / executions
-
         return self._stream(
             target,
             qprogram,
@@ -192,7 +188,7 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
                 },
             },
             shape=(len(fluxes), len(drive_ifs), 2),
-            write=running_average,
+            write=_write_map,
             repetitions=self._param(target, "repetitions"),
             # The swept bus keeps the z and x maps of one qubit apart in the DB (ADR-0007).
             optional_identifier=flux_bus,

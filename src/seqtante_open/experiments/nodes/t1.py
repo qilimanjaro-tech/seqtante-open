@@ -85,6 +85,7 @@ class T1Node(FixedFluxNode[None]):
         saturation drive on the target's buses. The LOs, readout attenuation and drive source are set by
         the shared :meth:`CalibrationNode._set_operating_point_hardware`, through the restore handle.
         """
+        self._require_pulse(target, Role.readout, "readout")
         # Round, not truncate, so the stored time axis is the one t1_saturation plays.
         durations_idle = np.rint(self._sweep(target, "idle_duration_sweep")).astype(int)
 

@@ -85,6 +85,10 @@ class FluxoniumTwoToneFluxModel(FittingClass[SweetSpotResults]):
 
     def fit(self):
         """Fit the qubit IF at every flux, then the parabola whose vertex is the sweet spot."""
+        # A refit starts clean, so one that finds nothing leaves no earlier trace or sweet spot readable.
+        self._results = None
+        self.mask[:] = False
+        self.fitted_if[:] = np.nan
         for ii in range(len(self.fluxes)):
             self.rotated[ii] = np.real(self.rotate_iq(self.array[ii, :, 0] + 1j * self.array[ii, :, 1]))
             r_squared, attempts, fitted_if = 0.0, 0, np.nan

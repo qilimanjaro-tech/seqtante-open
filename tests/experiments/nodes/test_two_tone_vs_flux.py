@@ -25,7 +25,7 @@ from typing import ClassVar
 
 import numpy as np
 import pytest
-from qililab import Parameter
+from qililab import Parameter, Square
 from qililab.qprogram.calibration import Calibration
 
 from seqtante_open.calibration.io import read_calibration_file, write_calibration_file
@@ -137,8 +137,12 @@ class FakeFluxPlatform(ExecutingPlatform):
         return {READOUT_BUS: [SimpleNamespace(array=np.full((2, N_FLUX, N_IF), float(self.executions)))]}
 
 
-def _calibration(flux: Flux | None = None) -> Calibration:
+def _calibration(flux: Flux | None = None, *, readout_pulse: bool = True) -> Calibration:
     calibration = Calibration()
+    if readout_pulse:
+        calibration.add_waveform(
+            bus=READOUT_BUS, name="readout-sweet_spot", waveform=Square(amplitude=1.0, duration=1000)
+        )
     calibration.crosstalk_matrix = identity_crosstalk(CROSSTALK_BUSES)
     write_calibration_file(
         calibration,
@@ -342,6 +346,37 @@ def test_an_unmeasurable_step_fails_the_target_before_measuring(calls, flux, par
     failed = _make(calibration, platform=platform, targets=targets, **params).run({})
 
     assert failed == [str(targets[0])]
+    assert calls["build"] is None
+    assert platform.executions == 0
+
+
+def test_a_step_still_on_the_old_loop_key_fails_instead_of_sweeping_z(calls):
+    # ``flux_axis`` has no default: a tree that still says ``loop: x`` must not silently sweep and write z.
+    params = {key: value for key, value in PARAMS.items() if key != "flux_axis"}
+    calibration = _calibration()
+    platform = FakeFluxPlatform()
+    node = TwoToneVsFluxNode(
+        name="sweet_spot_flux",
+        idx=0,
+        targets=[Q1],
+        parameters={Q1: {**params, "loop": "x"}},
+        context=build_context(calibration, platform),
+    )
+
+    failed = node.run({})
+
+    assert failed == ["q1"]
+    assert calls["build"] is None
+    assert platform.executions == 0
+    assert _stored_point(calibration).flux.z == FLUX_Z
+
+
+def test_a_missing_readout_pulse_fails_the_target_before_measuring(calls):
+    platform = FakeFluxPlatform()
+
+    failed = _make(_calibration(readout_pulse=False), platform=platform).run({})
+
+    assert failed == ["q1"]
     assert calls["build"] is None
     assert platform.executions == 0
 
