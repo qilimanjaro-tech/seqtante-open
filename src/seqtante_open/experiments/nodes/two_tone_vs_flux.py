@@ -11,120 +11,226 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from copy import deepcopy
-from itertools import product
-from typing import Any
 
-import numpy as np
-from qililab.platform.platform import Platform
-from qililab.qprogram.calibration import Calibration
-from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
-from qililab.typings.enums import Parameter
-from qililab.utils.serialization import deserialize_from, serialize_to
+"""The ``two_tone_vs_flux`` node: the flux sweet spot of one loop, from a two-tone map (ADR-0007, QHC-1804).
 
-from seqtante_open.experiments.experiment_classes import two_tone__frequency_vs_flux as two_tone_vs_flux_experiment
+The second vertical slice and the root of every pipeline in the EuroQCS tree (``sweet_spot_flux``). One
+two-tone saturation map runs per target: a QDAC steps the flux of the step's ``flux_axis`` (``z`` or ``x``)
+across a window around the operating point's stored bias, and at every flux the drive IF is swept around
+the operating point's stored drive IF. A Lorentzian per flux and a parabola through the qubit IFs give
+the sweet spot as the parabola's vertex (``parabola_vertex``).
+
+``apply`` writes that vertex, as a measured flux bias, into the operating point's flux on the swept loop
+(ADR-0011). It does not touch the crosstalk matrix or its offsets. The fitted ``sweet_spot_flux_<loop>``
+and ``fit_r2`` go to the DB (QHC-1497, QHC-1791).
+
+The measurement is the shared ``two_tone_vs_flux_saturation`` experiment from ``qili-qprograms``
+(SDK-403), consumed as a dependency, as the ``t1`` node does (QHC-1803).
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+from qili_qprograms.bus_alias import Role, bus_alias
+from qili_qprograms.experiments import two_tone_vs_flux_saturation
+from qili_qprograms.targets import QubitTarget
+from qililab import Parameter
+
+from seqtante_open.controllers.calibration_node import AnalysisResult, FluxSweepNode
+from seqtante_open.controllers.operating_point import operating_point_for
+from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.fitting import FluxoniumTwoToneFluxModel
-from seqtante_open.experiments.utils import coupler_readout_qubit, get_lo_multiple_sources, x_loop_readout_flux
-from seqtante_open.outputs import output_controller
+from seqtante_open.experiments.utils.qdac_utils import get_qdac_out_trigger, qdac_step_timings
 
-_DEFAULTS = {
-    "ringup_time": 0,
-    "drive_gain": 1,
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    import numpy as np
+    from qili_qprograms.bus_alias import Axis
+    from qili_qprograms.targets import Target
+    from qililab.result import StreamArray
+
+PARABOLA_VERTEX = "parabola_vertex"
+
+#: Stream/experiment name the map is stored under.
+_EXPERIMENT_NAME = "two_tone_vs_flux_saturation"
+
+#: Defaults for the optional step parameters (the node's ``defaults``); every one is overridable in the
+#: tree. The measurement keys are named like the ``two_tone_vs_flux_saturation`` arguments. ``flux_axis``,
+#: ``flux_sweep``, ``drive_if_sweep``, ``averages``, ``relax_duration``, ``drive_duration`` and
+#: ``drive_amplitude`` have no default (``flux_axis`` so a tree still on the old ``loop`` key fails rather
+#: than silently sweeping ``z``), and the drive instrument decides which of ``drive_power`` (Rohde & Schwarz, dBm) or
+#: ``drive_gain`` (QCM-RF, [-1, 1]) the step must set.
+TWO_TONE_VS_FLUX_DEFAULTS: Mapping[str, Any] = {
+    "drive_ringup_time": 200,
+    "drive_ringdown_time": 200,
+    "drive_n_sigmas": 4,
     "overlap_time": 0,
+    "readout_ringup_time": 0,
+    # Times the whole map is measured; the stored map is the running average over them.
+    "repetitions": 1,
+    # QDAC settle wait after each step and idle time before the next, in ns. ``None`` computes them from
+    # the QDAC low-pass filters (``qdac_step_timings``); set both or neither.
+    "flux_settle_duration": None,
+    "flux_pre_step_duration": None,
+    # Minimum R² the parabola through the per-flux qubit IFs must reach to pass the step.
+    "min_r2": 0.8,
 }
 
 
-def two_tone_frequency_vs_flux_node(platform: Platform, platform_path: str, parameters: dict[str, Any]):
-    targets = parameters["targets"]
-    qubits = [target for target in targets if target.startswith("q")]
-    couplers = [target for target in targets if target.startswith("c")]
+def _write_map(stream_array: StreamArray, averaged: Sequence[np.ndarray]) -> None:
+    """Write the averaged map, one acquisition shaped (IQ, flux, drive IF), as the stored (flux, drive IF, IQ)."""
+    stream_array[()] = averaged[0].transpose(1, 2, 0)
 
-    readout_x_couplers = coupler_readout_qubit(
-        couplers=couplers, coupler_readout_overwrite=parameters.get("coupler_readout_qubit", {})
-    )
-    qubit_loops = acs.qubit_loops if (acs := platform.analog_compilation_settings) else 1
-    coupler_loops = acs.coupler_loops if acs else 1
-    db_manager = output_controller.db_manager
 
-    calibration: Calibration = deserialize_from(parameters["calibration_path"], Calibration)
-    if not isinstance(crosstalk := calibration.crosstalk_matrix, CrosstalkMatrix):
-        raise ValueError(
-            "To execute two_tone_frequency_vs_flux experiment, the Calibration needs to have a CrosstalkMatrix"
+@dataclass(frozen=True)
+class SweetSpotFlux:
+    """What ``analyze`` hands ``apply``: the measured sweet-spot bias on one loop, in Φ0."""
+
+    loop: Axis
+    flux: float
+
+
+class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
+    """A two-tone map against one flux loop, fit to a parabola whose vertex is the sweet spot (QHC-1804).
+
+    A :class:`FluxSweepNode`: ``run`` does not place the operating point, the node does, right before the
+    sweep, so the loop it does not sweep and the neighbours the point parks sit at their stored biases
+    while the QDAC ramps the swept loop.
+    """
+
+    experiment = "two_tone_vs_flux"
+    analyses = (PARABOLA_VERTEX,)
+    defaults = TWO_TONE_VS_FLUX_DEFAULTS
+
+    def execute_node(self, targets: list[Target]) -> dict[Target, list[int]]:
+        """Run the two-tone map on each target around its operating point; return its measurement id."""
+        return {target: [self._run_map(target)] for target in targets}
+
+    def _run_map(self, target: Target) -> int:
+        """Place the point, set its hardware, build the QDAC-ramped two-tone QProgram, run it and stream it.
+
+        The flux and drive-IF windows are offsets from the operating point's stored flux on the swept loop
+        and its stored drive IF, so the same tree recentres on every recalibration. The stored map holds
+        the absolute fluxes (Φ0) and drive IFs (Hz) that were played.
+
+        Raises:
+            ValueError: if the target is a coupler, the loop is not ``z``/``x``, or the operating point
+                stores no bias on the swept loop.
+        """
+        if not isinstance(target, QubitTarget):
+            raise ValueError(
+                f"{target}: two_tone_vs_flux runs on qubits only; a coupler has no drive line of its own "
+                "and the shared experiment has no readout-qubit mapping"
+            )
+        loop = self._loop(target)
+        section = self._section(target)
+        self._require_pulse(target, Role.readout, "readout")
+        operating_point = operating_point_for(self.calibration_file, self.experiment, target)
+        fluxes = self._absolute_sweep(target, "flux_sweep", operating_point.flux.on(loop))
+        drive_ifs = self._absolute_sweep(target, "drive_if_sweep", operating_point.drive.if_)
+
+        platform = self.context.platform
+        readout_bus = bus_alias(target, Role.readout)
+        settle, pre_step = qdac_step_timings(
+            platform,
+            self._param(target, "flux_settle_duration"),
+            self._param(target, "flux_pre_step_duration"),
         )
-    platform.set_crosstalk(crosstalk=crosstalk)
-
-    def _run_experiment(
-        target: str,
-        flux_bus: str,
-        drive_bus: str,
-        readout_bus: str,
-        readout_flux: tuple[str, float] | None = None,
-    ):
-        platform.set_flux_to_zero()
-        if readout_flux:
-            platform.set_parameter(readout_flux[0], Parameter.FLUX, readout_flux[1])
-        target_params = {**parameters, **parameters[target]}
-        drive_LO = get_lo_multiple_sources(bus=drive_bus, target=target, platform=platform, calibration=calibration)
-        drive_if_freq = platform.get_parameter(alias=drive_bus, parameter=Parameter.IF)
-        readout_if_freq = platform.get_parameter(alias=readout_bus, parameter=Parameter.IF)
-        freq_sweep = np.linspace(*target_params["freq_sweep"]) + drive_if_freq
-        flux_sweep = np.linspace(*target_params["flux_sweep"])
-        calibration_copy = deepcopy(calibration)
-        calibration_copy.parameters["data_folder"] = target_params["data_folder"] + flux_bus
-
-        measurement_id = two_tone_vs_flux_experiment(
-            platform=platform,
-            db_manager=db_manager,
-            readout_bus=readout_bus,
-            drive_bus=drive_bus,
-            flux_bus=flux_bus,
-            readout_if_freq=readout_if_freq,
-            drive_IF_sweep=freq_sweep,
-            flux_parameter=Parameter.FLUX,
-            flux_sweep=flux_sweep,
-            averages=target_params["averages"],
-            relax_duration=target_params["relax_duration"],
-            d_duration=target_params["drive_duration"],
-            d_amp=target_params["drive_amplitude"],
-            r_amp=target_params["readout_amplitude"],
-            r_duration=target_params["readout_duration"],
-            drive_gain=target_params.get("drive_gain", _DEFAULTS["drive_gain"]),
-            ringup_time=target_params.get("ringup_time", _DEFAULTS["ringup_time"]),
-            overlap_time=target_params.get("overlap_time", _DEFAULTS["overlap_time"]),
-            calibration=calibration_copy,
-            drive_LO=drive_LO,
-            target=target,
+        qprogram = two_tone_vs_flux_saturation(
+            calibration=self.context.calibration,
+            target=str(target),
+            operating_point=section.operating_point,
+            flux_sweep=fluxes,
+            drive_if_sweep=drive_ifs,
+            averages=self._param(target, "averages"),
+            relax_duration=self._param(target, "relax_duration"),
+            drive_duration=self._param(target, "drive_duration"),
+            drive_amplitude=self._param(target, "drive_amplitude"),
+            drive_ringup_time=self._param(target, "drive_ringup_time"),
+            flux_settle_duration=math.ceil(settle),
+            readout_time_of_flight=int(platform.get_parameter(alias=readout_bus, parameter=Parameter.TIME_OF_FLIGHT)),
+            flux_axis=loop,
+            drive_ringdown_time=self._param(target, "drive_ringdown_time"),
+            drive_n_sigmas=self._param(target, "drive_n_sigmas"),
+            overlap_time=self._param(target, "overlap_time"),
+            flux_pre_step_duration=math.ceil(pre_step),
+            qdac_trigger_channel=get_qdac_out_trigger(platform),
+            readout_ringup_time=self._param(target, "readout_ringup_time"),
         )
 
+        # The unswept loop and the parked neighbours sit at their stored biases; the QDAC ramps the swept one.
+        self._place_operating_point(target)
+        self._set_operating_point_hardware(target)
+        return self._stream_map(target, qprogram, fluxes, drive_ifs, loop)
+
+    def _stream_map(self, target: Target, qprogram: Any, fluxes: np.ndarray, drive_ifs: np.ndarray, loop: Axis) -> int:
+        """Run the map ``repetitions`` times and stream the running average; return the measurement id."""
+        flux_bus = bus_alias(target, Role.flux, loop)
+        return self._stream(
+            target,
+            qprogram,
+            experiment_name=_EXPERIMENT_NAME,
+            # The loop names are the ones FluxoniumTwoToneFluxModel reads back.
+            loops={
+                "flux": {"array": fluxes, "units": "phi_0", "bus": flux_bus, "parameter": Parameter.FLUX.value},
+                "IF_frequency": {
+                    "array": drive_ifs,
+                    "units": "Hz",
+                    "bus": bus_alias(target, Role.drive),
+                    "parameter": "IF_frequency",
+                },
+            },
+            shape=(len(fluxes), len(drive_ifs), 2),
+            write=_write_map,
+            repetitions=self._param(target, "repetitions"),
+            # The swept bus keeps the z and x maps of one qubit apart in the DB (ADR-0007).
+            optional_identifier=flux_bus,
+        )
+
+    def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[SweetSpotFlux]:
+        """Fit the map, check it, save ``sweet_spot_flux_<loop>``/``fit_r2``, plot, and return the vertex.
+
+        Fit, then the acceptance checks, then save, then plot: a rejected fit never reaches the DB.
+
+        Raises:
+            AnalysisError: when fewer than three fluxes give a qubit line, the parabola has no vertex inside
+                the swept window, or its R² is below the step's minimum or undefined. The target then
+                fails the step.
+        """
+        loop = self._loop(target)
+        operating_point = operating_point_for(self.calibration_file, self.experiment, target)
         model = FluxoniumTwoToneFluxModel(
-            measurement_id, target=target, path=target_params["data_folder"] + flux_bus, lo=drive_LO, flux_bus=flux_bus
+            measurements[-1],
+            target=str(target),
+            # The graph sets data_folder to <data_root>/<step>/<target>; None shows the plot instead.
+            path=self.parameters[target].get("data_folder"),
+            lo=operating_point.drive.lo,
+            flux_bus=bus_alias(target, Role.flux, loop),
         )
         model.fit()
-        model.plot()
-        if model.fitted:
-            crosstalk.flux_offsets[flux_bus] += float(model.offset)
+        if not model.fitted:
+            raise AnalysisError(f"{target} two-tone vs flux on '{loop}': no sweet spot inside the swept window")
 
-    try:
-        for qubit, loop in product(qubits, ["z", "x"][:qubit_loops][::-1]):
-            readout_flux = x_loop_readout_flux(qubit, qubit_loops, parameters) if loop != "x" else None
-            _run_experiment(
-                target=qubit,
-                flux_bus=f"flux_{loop}_{qubit}",
-                drive_bus=f"drive_{qubit}",
-                readout_bus=f"readout_{qubit}",
-                readout_flux=readout_flux,
-            )
+        self._require_r2(target, model.r_squared)
 
-        for coupler, loop in product(couplers, ["z", "x"][:coupler_loops][::-1]):
-            readout_qubit = readout_x_couplers[coupler]
-            _run_experiment(
-                target=coupler,
-                flux_bus=f"flux_{loop}_{coupler}",
-                drive_bus=f"drive_{readout_qubit}",  # The coupler does not have fast lines so you can't drive directly to it so you need to drive trough the qubit.
-                readout_bus=f"readout_{readout_qubit}",
-                readout_flux=x_loop_readout_flux(readout_qubit, qubit_loops, parameters),
-            )
+        model.save_fitting(loop)
+        plot = model.plot()
+        return AnalysisResult(fitted=SweetSpotFlux(loop=loop, flux=model.center), plots=(plot,) if plot else ())
 
-    finally:
-        platform.set_bias_to_zero()
-        serialize_to(calibration, parameters["calibration_path"])
+    def apply(self, target: Target, result: AnalysisResult[SweetSpotFlux]) -> None:
+        """Store the measured sweet-spot bias on the swept loop of the operating point (ADR-0011).
+
+        The crosstalk matrix and its offsets are left untouched; no other operating point moves.
+        """
+        # analyze returns a vertex or raises, so apply always has one; the guard is a type narrow.
+        if result.fitted is None:
+            return
+        operating_point = operating_point_for(self.calibration_file, self.experiment, target)
+        if result.fitted.loop == "z":
+            operating_point.flux.z = result.fitted.flux
+        else:
+            operating_point.flux.x = result.fitted.flux
