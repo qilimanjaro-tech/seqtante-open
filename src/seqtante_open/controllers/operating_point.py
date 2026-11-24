@@ -29,14 +29,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from qili_qprograms.bus_alias import Role, bus_alias
 from qililab.typings.enums import Parameter
 
-from seqtante_open.calibration.bus_alias import Role, bus_alias
-
 if TYPE_CHECKING:
-    from seqtante_open.calibration.model import CalibrationFile, Flux, OperatingPoint
+    from qili_qprograms.calibration.model import CalibrationFile, Flux, OperatingPoint
+    from qili_qprograms.targets import Target
+
     from seqtante_open.controllers.parameter_restore import ParameterRestore
-    from seqtante_open.targets import Target
 
 
 def operating_point_for(file: CalibrationFile, experiment: str, target: Target | str) -> OperatingPoint:

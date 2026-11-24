@@ -4,6 +4,8 @@ status: accepted
 
 # Sweet-spot recalibration stores the measured flux bias, not a crosstalk-offset correction
 
+> **Where this lives now (QHC-1933).** The calibration-file model, its I/O, the pulse-name grammar, bus aliases and targets are implemented in [qili-qprograms](https://github.com/qilimanjaro-tech/qili-qprograms) (`qili_qprograms.calibration`, `qili_qprograms.bus_alias`, `qili_qprograms.targets`), because its QPrograms read the calibration file. seqtante-open imports them. A change to the format is a qili-qprograms PR plus a `uv.lock` bump here.
+
 ADR-0001 proposed that sweet-spot recalibration corrects the crosstalk flux offset, so the sweet spot sits at its nominal flux and every operating point of the qubit moves with it, and noted the operators instead store the absolute flux today — leaving the choice to its own ADR. We decided to **keep the operators' approach**: sweet-spot recalibration does **not** modify the crosstalk offset. It records where the qubit's sweet spot is at that moment, as a measured flux bias, which may differ from one day to the next. Confirmed by Gonzalo Troncoso on the EuroQCS December final-design review (2026-11-02).
 
 ## The decision

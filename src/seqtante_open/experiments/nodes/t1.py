@@ -27,10 +27,10 @@ import math
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from qili_qprograms.bus_alias import Role, bus_alias
 from qili_qprograms.experiments import t1_saturation
 from qililab.result import StreamArray
 
-from seqtante_open.calibration.bus_alias import Role, bus_alias
 from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.fitting import T1Fit
@@ -40,7 +40,7 @@ from seqtante_open.outputs import output_controller
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from seqtante_open.targets import Target
+    from qili_qprograms.targets import Target
 
 EXPONENTIAL_DECAY = "exponential_decay"
 
