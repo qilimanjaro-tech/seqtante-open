@@ -22,7 +22,7 @@ the first excited-state extremum half a Rabi period on; the sweep below puts tha
 import numpy as np
 import pytest
 
-from seqtante_open.experiments.fitting.rabi_fit import RabiAmplitudeModel, _cosine
+from seqtante_open.experiments.fitting import RabiAmplitudeModel, cosfunc
 from seqtante_open.outputs import FittedParameter
 from tests.experiments.fitting.harness import FittingTestCase, as_iq, loop
 
@@ -34,7 +34,7 @@ def make_rabi_data(rng: np.random.Generator) -> tuple[np.ndarray, dict]:
     """A full Rabi oscillation: ground (|0>) at amplitude 0, the pi extremum at ``PI_AMPLITUDE``."""
     amplitudes = np.linspace(0.0, 1.0, 81)
     angular_frequency = np.pi / PI_AMPLITUDE  # half a period lands on PI_AMPLITUDE
-    signal = _cosine(amplitudes, offset=0.0, amplitude=1.0, angular_frequency=angular_frequency, phase=0.0)
+    signal = cosfunc(amplitudes, A=1.0, omega=angular_frequency, offset=0.0, phase_offset=0.0)
     results = as_iq(signal, rng, sigma=0.02)
     loops = {"drive_amplitude": loop(amplitudes, units="amp", bus="drive_q1", parameter="drive_amplitude")}
     return results, loops

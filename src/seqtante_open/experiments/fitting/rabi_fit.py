@@ -34,11 +34,6 @@ class _RabiResults(TypedDict):
     level_1_std: float
 
 
-def _cosine(x: np.ndarray, offset: float, amplitude: float, angular_frequency: float, phase: float) -> np.ndarray:
-    """An undamped cosine: ``offset + amplitude * cos(angular_frequency * x + phase)``."""
-    return offset + amplitude * np.cos(angular_frequency * x + phase)
-
-
 class RabiAmplitudeModel(FittingClass[_RabiResults]):
     """Fit a Rabi amplitude sweep (DRAG drive) and read the pi amplitude and the |0>/|1> readout levels.
 
@@ -64,11 +59,9 @@ class RabiAmplitudeModel(FittingClass[_RabiResults]):
 
     def __init__(self, measurement_id: int, target: str | None = None, path: str | None = None):
         super().__init__(measurement_id=measurement_id, target=target, path=path)
-        self.target = target
         xarr = self.get_xarray()
         amplitude_coord = xarr[xarr.dims[0]]
         self.amplitudes = np.asarray(amplitude_coord.data, dtype=float)
-        self.drive_bus = amplitude_coord.attrs.get("bus", "")
         self.signal = np.real(self.rotate_iq(xarr.to_numpy()))
 
     def fit(self) -> _RabiResults:
@@ -81,27 +74,28 @@ class RabiAmplitudeModel(FittingClass[_RabiResults]):
         amplitude_guess = float((np.max(signal) - np.min(signal)) / 2) or 1.0
         angular_frequency_guess = self._angular_frequency_guess(amplitudes, signal)
 
-        model = Model(_cosine)
-        model.set_param_hint("amplitude", value=amplitude_guess, min=0.0)
-        model.set_param_hint("angular_frequency", value=angular_frequency_guess, min=0.0)
+        # The undamped cosine ``offset + a * cos(omega * phi + phase_offset)`` every fit shares.
+        model = Model(self.cosfunc)
+        model.set_param_hint("a", value=amplitude_guess, min=0.0)
+        model.set_param_hint("omega", value=angular_frequency_guess, min=0.0)
         model.set_param_hint("offset", value=offset_guess)
-        model.set_param_hint("phase", value=0.0, min=-np.pi, max=np.pi)
+        model.set_param_hint("phase_offset", value=0.0, min=-np.pi, max=np.pi)
         params = model.make_params()
-        fit = model.fit(data=signal, params=params, x=amplitudes)
+        fit = model.fit(data=signal, params=params, phi=amplitudes)
 
         offset = fit.params["offset"].value
-        amplitude = fit.params["amplitude"].value
-        angular_frequency = fit.params["angular_frequency"].value
-        phase = fit.params["phase"].value
+        amplitude = fit.params["a"].value
+        angular_frequency = fit.params["omega"].value
+        phase = fit.params["phase_offset"].value
         offset_std = fit.params["offset"].stderr or 0.0
-        amplitude_std = fit.params["amplitude"].stderr or 0.0
+        amplitude_std = fit.params["a"].stderr or 0.0
 
         # Both levels (offset ± amplitude) carry the same std, propagated from offset and amplitude
         # ignoring their covariance -- an accepted approximation for the level uncertainty.
         level_std = float(np.hypot(offset_std, amplitude_std))
         top, bottom = offset + amplitude, offset - amplitude
         # The first sweep point is the ground state; |0> is the extremum its fitted value sits closest to.
-        first = _cosine(amplitudes[0], offset, amplitude, angular_frequency, phase)
+        first = self.cosfunc(amplitudes[0], amplitude, angular_frequency, offset, phase)
         ground, excited = (top, bottom) if abs(first - top) <= abs(first - bottom) else (bottom, top)
 
         # A flat trace (drive off, readout saturated) has no variance to explain: R² is undefined (NaN),
@@ -147,7 +141,7 @@ class RabiAmplitudeModel(FittingClass[_RabiResults]):
         if angular_frequency <= 0:
             return float(self.amplitudes[0])
         grid = np.linspace(self.amplitudes[0], self.amplitudes[-1], max(1000, 10 * len(self.amplitudes)))
-        curve = _cosine(grid, offset, amplitude, angular_frequency, phase)
+        curve = self.cosfunc(grid, amplitude, angular_frequency, offset, phase)
         # The excited extremum is reached where the fitted curve is closest to the excited level.
         reached = grid[np.argmin(np.abs(curve - excited))]
         return float(reached)
@@ -182,8 +176,8 @@ class RabiAmplitudeModel(FittingClass[_RabiResults]):
         """Plot the sweep, its cosine fit, the two readout levels and the pi amplitude."""
         results = self.results
         title = f"Rabi amplitude {self.target}"
-        curve = _cosine(
-            self.amplitudes, results["offset"], results["amplitude"], results["angular_frequency"], results["phase"]
+        curve = self.cosfunc(
+            self.amplitudes, results["amplitude"], results["angular_frequency"], results["offset"], results["phase"]
         )
 
         fig = go.Figure()

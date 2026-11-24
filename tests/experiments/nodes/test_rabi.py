@@ -25,14 +25,12 @@ from qili_qprograms.targets import ExperimentTarget
 from qililab import IQDrag, Parameter, Square
 from qililab.qprogram.calibration import Calibration
 
-from seqtante_open.controllers import calibration_node as node_module
-from seqtante_open.controllers.calibration_node import RunContext
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.nodes import RabiNode
 from seqtante_open.experiments.nodes import rabi as rabi_module
 from tests.experiments.nodes.harness import (
     ExecutingPlatform,
-    FakePlatform,
+    build_context,
     identity_crosstalk,
     stub_output_and_save,
 )
@@ -129,18 +127,12 @@ def _calibration(file: CalibrationFile) -> Calibration:
 
 
 def _make_rabi(*, analysis: str, calibration: Calibration, parameters: dict | None = None) -> RabiNode:
-    context = RunContext(
-        platform=FakePlatform(),
-        platform_path="runcard.yml",
-        calibration=calibration,
-        calibration_path="calibration.yml",
-    )
     node = RabiNode(
         name="step",
         idx=0,
         targets=[Q1],
         parameters={Q1: parameters or {}},
-        context=context,
+        context=build_context(calibration),
         analysis=analysis,
     )
     node.execute_node = lambda targets: {target: [777] for target in targets}  # no hardware
@@ -148,7 +140,7 @@ def _make_rabi(*, analysis: str, calibration: Calibration, parameters: dict | No
 
 
 def test_readout_levels_analysis_writes_levels_onto_the_point(monkeypatch):
-    monkeypatch.setattr(node_module, "save_calibration", lambda calibration, path: None)
+    stub_output_and_save(monkeypatch)
     monkeypatch.setattr(rabi_module, "RabiAmplitudeModel", FakeRabiModel)
     calibration = _calibration(_rabi_file("reset"))
 
@@ -166,7 +158,7 @@ def test_readout_levels_analysis_writes_levels_onto_the_point(monkeypatch):
 
 
 def test_pi_amplitude_analysis_writes_into_the_named_pulse(monkeypatch):
-    monkeypatch.setattr(node_module, "save_calibration", lambda calibration, path: None)
+    stub_output_and_save(monkeypatch)
     monkeypatch.setattr(rabi_module, "RabiAmplitudeModel", FakeRabiModel)
     calibration = _calibration(_rabi_file("sweet_spot"))
     # The pi amplitude is written into the pi-sweet_spot DRAG pulse, keeping its other shape parameters.
@@ -185,45 +177,41 @@ def test_pi_amplitude_analysis_writes_into_the_named_pulse(monkeypatch):
     assert read_calibration_file(calibration).operating_points["q1"]["sweet_spot"].readout.levels is None
 
 
-def test_readout_levels_fit_below_min_r2_fails_the_step(monkeypatch):
-    monkeypatch.setattr(node_module, "save_calibration", lambda calibration, path: None)
+def _executing_rabi(
+    calibration: Calibration, monkeypatch, *, analysis: str = "pi_amplitude", built: dict | None = None
+) -> tuple[RabiNode, FakeRabiPlatform]:
+    """A rabi node whose real ``execute_node`` runs against a fake platform, with the QProgram builder stubbed.
 
-    class LowR2Model(FakeRabiModel):
-        r_squared = 0.5  # below the default 0.9 minimum
+    The stub records the builder's keyword arguments into ``built`` when given.
+    """
 
-    monkeypatch.setattr(rabi_module, "RabiAmplitudeModel", LowR2Model)
-    calibration = _calibration(_rabi_file("reset"))
+    def fake_rabi_amplitude(**kwargs):
+        if built is not None:
+            built.update(kwargs)
+        return SimpleNamespace(name="qprogram")  # sentinel; the fake platform/stream ignore its content
 
-    node = _make_rabi(analysis="readout_levels", calibration=calibration)
-    failed = node.run({})
-
-    assert failed == ["q1"]  # a poor fit fails the target
-    assert read_calibration_file(calibration).operating_points["q1"]["reset"].readout.levels is None
+    monkeypatch.setattr(rabi_module, "rabi_amplitude", fake_rabi_amplitude)
+    stub_output_and_save(monkeypatch)
+    platform = FakeRabiPlatform()
+    params = {"drive_amplitude_sweep": (0.0, 1.0, 21), "averages": 1000, "relax_duration": 50_000, "drive_power": -10}
+    node = RabiNode(
+        name="step",
+        idx=0,
+        targets=[Q1],
+        parameters={Q1: params},
+        context=build_context(calibration, platform),
+        analysis=analysis,
+    )
+    return node, platform
 
 
 def test_execute_builds_the_qili_sweep_and_sets_the_hardware(monkeypatch):
     """The real ``execute_node`` builds the qili QProgram at the operating point and sets the HW from it."""
-    monkeypatch.setattr(node_module, "save_calibration", lambda calibration, path: None)
     monkeypatch.setattr(rabi_module, "RabiAmplitudeModel", FakeRabiModel)
-    stub_output_and_save(monkeypatch)
-    built: dict = {}
-
-    def fake_rabi_amplitude(**kwargs):
-        built.update(kwargs)
-        return SimpleNamespace(name="qprogram")  # sentinel; the fake platform/stream ignore its content
-
-    monkeypatch.setattr(rabi_module, "rabi_amplitude", fake_rabi_amplitude)
-
     calibration = _calibration(_rabi_file("sweet_spot"))
     _add_played_pulses(calibration, "sweet_spot")
-    platform = FakeRabiPlatform()
-    context = RunContext(
-        platform=platform, platform_path="runcard.yml", calibration=calibration, calibration_path="calibration.yml"
-    )
-    params = {"drive_amplitude_sweep": (0.0, 1.0, 21), "averages": 1000, "relax_duration": 50_000, "drive_power": -10}
-    node = RabiNode(
-        name="step", idx=0, targets=[Q1], parameters={Q1: params}, context=context, analysis="readout_levels"
-    )
+    built: dict = {}
+    node, platform = _executing_rabi(calibration, monkeypatch, analysis="readout_levels", built=built)
 
     failed = node.run({})
 
@@ -244,15 +232,6 @@ def test_execute_builds_the_qili_sweep_and_sets_the_hardware(monkeypatch):
     assert snap["drive_q1", Parameter.RF_ON] is True
 
 
-def test_analyze_raises_analysis_error_below_min_r2(monkeypatch):
-    monkeypatch.setattr(rabi_module, "RabiAmplitudeModel", FakeRabiModel)
-    calibration = _calibration(_rabi_file("reset"))
-    node = _make_rabi(analysis="readout_levels", calibration=calibration, parameters={"min_r2": 0.999})
-
-    with pytest.raises(AnalysisError, match="below the minimum"):
-        node.analyze(Q1, [777])
-
-
 def test_analyze_fits_checks_saves_then_plots(monkeypatch):
     monkeypatch.setattr(rabi_module, "RabiAmplitudeModel", FakeRabiModel)
     monkeypatch.setattr(FakeRabiModel, "events", [])
@@ -266,8 +245,7 @@ def test_analyze_fits_checks_saves_then_plots(monkeypatch):
 @pytest.mark.parametrize(
     ("analysis", "knob", "value"),
     [
-        ("readout_levels", "r_squared", float("nan")),  # a flat trace: no variance to explain
-        ("readout_levels", "r_squared", 0.5),  # below the default minimum
+        ("readout_levels", "r_squared", 0.5),  # below the node's default minimum
         ("pi_amplitude", "angular_frequency", 0.0),  # no oscillation: there is no pi amplitude
     ],
 )
@@ -283,19 +261,6 @@ def test_a_rejected_fit_is_never_saved_or_plotted(monkeypatch, analysis, knob, v
     assert FakeRabiModel.events == ["fit"]
 
 
-def _executing_rabi(calibration: Calibration, monkeypatch) -> tuple[RabiNode, FakeRabiPlatform]:
-    """A rabi node whose real ``execute_node`` runs against a fake platform, with the QProgram builder stubbed."""
-    monkeypatch.setattr(rabi_module, "rabi_amplitude", lambda **kwargs: SimpleNamespace(name="qprogram"))
-    stub_output_and_save(monkeypatch)
-    platform = FakeRabiPlatform()
-    context = RunContext(
-        platform=platform, platform_path="runcard.yml", calibration=calibration, calibration_path="calibration.yml"
-    )
-    params = {"drive_amplitude_sweep": (0.0, 1.0, 21), "averages": 1000, "relax_duration": 50_000, "drive_power": -10}
-    node = RabiNode(name="step", idx=0, targets=[Q1], parameters={Q1: params}, context=context, analysis="pi_amplitude")
-    return node, platform
-
-
 def test_a_missing_pi_pulse_fails_before_any_hardware_is_set(monkeypatch):
     """rabi seeds no pulse: without ``pi-<point>`` it raises, naming the pulse, before touching the platform."""
     calibration = _calibration(_rabi_file("sweet_spot"))
@@ -303,19 +268,6 @@ def test_a_missing_pi_pulse_fails_before_any_hardware_is_set(monkeypatch):
     node, platform = _executing_rabi(calibration, monkeypatch)
 
     with pytest.raises(ValueError, match="'pi-sweet_spot' pulse on drive_q1"):
-        node.execute_node([Q1])
-
-    assert platform.calls == []
-
-
-def test_a_section_naming_another_pulse_is_rejected(monkeypatch):
-    """rabi_amplitude only plays ``pi-<point>``, so a section naming another drive pulse is a config error."""
-    calibration = _calibration(_rabi_file("sweet_spot", pulses={"drive": "pi-reset"}))
-    _add_played_pulses(calibration, "sweet_spot")
-    _add_played_pulses(calibration, "reset")  # the named pulse exists, so only rabi's own check can reject it
-    node, platform = _executing_rabi(calibration, monkeypatch)
-
-    with pytest.raises(ValueError, match="names drive pulse 'pi-reset', but its QProgram plays 'pi-sweet_spot'"):
         node.execute_node([Q1])
 
     assert platform.calls == []

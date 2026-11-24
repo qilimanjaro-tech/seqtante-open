@@ -26,9 +26,8 @@ The pulses are the ones ``qili_qprograms``' ``rabi_amplitude`` plays, named by
 :func:`~qili_qprograms.calibration.pulse_name` (ADR-0008). Both must already exist: the node seeds
 none, they come with the manual calibration.
 
-This is the first experiment ported to a real :class:`CalibrationNode` subclass (ADR-0007); the fit
-lives in :class:`~seqtante_open.experiments.fitting.RabiAmplitudeModel` and the measurement driver in
-:func:`~seqtante_open.experiments.experiment_classes.rabi_amplitude`.
+The node is a :class:`FixedFluxNode` (ADR-0007): it builds qili's ``rabi_amplitude`` QProgram and runs
+it itself, and the fit lives in :class:`~seqtante_open.experiments.fitting.RabiAmplitudeModel`.
 """
 
 from __future__ import annotations
@@ -54,7 +53,7 @@ if TYPE_CHECKING:
 #: Stream/experiment name the measurement is stored under.
 _EXPERIMENT_NAME = "rabi_amplitude_drag"
 
-#: Analysis names (ADR-0003). The first is the default when a step names none.
+#: Analysis names (ADR-0003). ``RabiNode.analyses`` lists ``pi_amplitude`` first, so it is the default when a step names none.
 READOUT_LEVELS = "readout_levels"
 PI_AMPLITUDE = "pi_amplitude"
 
