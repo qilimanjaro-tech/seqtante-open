@@ -52,7 +52,7 @@ class TestT1Fit(FittingTestCase):
     INIT = {"measurement_id": 1, "target": "q1"}
     PLOTS = ["q1_T1.png"]
     EXPECTED = {
-        "results.1": pytest.approx(DECAY_RATE, rel=0.02),
+        "results.params.1": pytest.approx(DECAY_RATE, rel=0.02),
         "T1": pytest.approx(T1_NS, rel=0.02),
         "r_squared": pytest.approx(1.0, abs=0.05),
     }

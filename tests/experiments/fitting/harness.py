@@ -410,9 +410,12 @@ class FittingTestCase:
         """Constructs from the data, and leaves every declared output unpopulated."""
         for path in self.EXPECTED:
             name = path.split(".")[0]
-            if not hasattr(fit_obj, name):
+            try:
+                value = getattr(fit_obj, name)
+            except AttributeError:
                 continue  # not initialised at all is fine, it certainly is not populated
-            value = getattr(fit_obj, name)
+            except RuntimeError:
+                continue  # read through ``FittingClass.results``, which refuses until fit() assigns it
             assert is_unpopulated(value), (
                 f"{self.FIT_CLASS.__name__}.{name} is already {value!r} before fit() runs, "
                 f"so test_fit would pass without fit() doing anything"

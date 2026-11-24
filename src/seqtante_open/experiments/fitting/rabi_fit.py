@@ -39,7 +39,7 @@ def _cosine(x: np.ndarray, offset: float, amplitude: float, angular_frequency: f
     return offset + amplitude * np.cos(angular_frequency * x + phase)
 
 
-class RabiAmplitudeModel(FittingClass):
+class RabiAmplitudeModel(FittingClass[_RabiResults]):
     """Fit a Rabi amplitude sweep (DRAG drive) and read the pi amplitude and the |0>/|1> readout levels.
 
     The measurement sweeps the drive amplitude; the rotated readout signal oscillates as a cosine of
@@ -62,8 +62,6 @@ class RabiAmplitudeModel(FittingClass):
         path: Folder to save the plot into; if ``None`` the plot is shown.
     """
 
-    results: _RabiResults
-
     def __init__(self, measurement_id: int, target: str | None = None, path: str | None = None):
         super().__init__(measurement_id=measurement_id, target=target, path=path)
         self.target = target
@@ -72,7 +70,6 @@ class RabiAmplitudeModel(FittingClass):
         self.amplitudes = np.asarray(amplitude_coord.data, dtype=float)
         self.drive_bus = amplitude_coord.attrs.get("bus", "")
         self.signal = np.real(self.rotate_iq(xarr.to_numpy()))
-        # ``results`` is populated by fit(), which then sets ``fitted``; until then ``_require_fit`` raises.
 
     def fit(self) -> _RabiResults:
         """Fit the undamped cosine and derive the pi amplitude and the two readout levels."""
@@ -110,19 +107,18 @@ class RabiAmplitudeModel(FittingClass):
         has_variance = float(np.sum((signal - np.mean(signal)) ** 2)) > 0
         r_squared = float(fit.rsquared) if has_variance else float("nan")
 
-        self.results = {
-            "offset": offset,
-            "amplitude": amplitude,
-            "angular_frequency": angular_frequency,
-            "phase": phase,
-            "r_squared": r_squared,
-            "pi_amplitude": self._pi_amplitude(offset, amplitude, angular_frequency, phase, excited),
-            "level_0": float(ground),
-            "level_0_std": level_std,
-            "level_1": float(excited),
-            "level_1_std": level_std,
-        }
-        self.fitted = True
+        self.results = _RabiResults(
+            offset=offset,
+            amplitude=amplitude,
+            angular_frequency=angular_frequency,
+            phase=phase,
+            r_squared=r_squared,
+            pi_amplitude=self._pi_amplitude(offset, amplitude, angular_frequency, phase, excited),
+            level_0=float(ground),
+            level_0_std=level_std,
+            level_1=float(excited),
+            level_1_std=level_std,
+        )
         return self.results
 
     @staticmethod
@@ -156,13 +152,11 @@ class RabiAmplitudeModel(FittingClass):
 
     @property
     def pi_amplitude(self) -> float:
-        self._require_fit()
         return self.results["pi_amplitude"]
 
     @property
     def readout_levels(self) -> tuple[float, float, float, float]:
         """``(level_0, level_0_std, level_1, level_1_std)`` of the |0>/|1> readout response."""
-        self._require_fit()
         return (
             self.results["level_0"],
             self.results["level_0_std"],
@@ -172,21 +166,18 @@ class RabiAmplitudeModel(FittingClass):
 
     @property
     def r_squared(self) -> float:
-        self._require_fit()
         return self.results["r_squared"]
 
     def save_fitting(self):
         """Write the pi amplitude and the fit R² to the measurement entry (QHC-1497, QHC-1791)."""
         from seqtante_open.outputs import FittedParameter
 
-        self._require_fit()
         self.add_fitted_parameter(FittedParameter.RABI_AMPLITUDE, self.results["pi_amplitude"])
         self.add_fitted_parameter(FittedParameter.FIT_R2, self.results["r_squared"])
         self.save_fitting_to_database()
 
     def plot(self):
         """Plot the sweep, its cosine fit, the two readout levels and the pi amplitude."""
-        self._require_fit()
         results = self.results
         title = f"Rabi amplitude {self.target}"
         curve = _cosine(
