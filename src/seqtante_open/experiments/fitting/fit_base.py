@@ -15,7 +15,7 @@
 import os
 from abc import ABC
 from functools import cached_property
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Generic, TypeVar, cast
 
 import numpy as np
 import plotly.graph_objects as go
@@ -34,9 +34,16 @@ RENDER_FORMAT = "png"
 
 RENDER_SCALE = 2  # pixel multiplier on the figure's layout size
 
+#: What a fit's :meth:`FittingClass.fit` produces, per subclass (usually a ``TypedDict``).
+ResultsT = TypeVar("ResultsT")
 
-class FittingClass(ABC):
-    """Base class for all fittings."""
+
+class FittingClass(ABC, Generic[ResultsT]):
+    """Base class for all fittings.
+
+    A subclass's :meth:`fit` assigns :attr:`results`, and every fitted value is read through it. Reading
+    :attr:`results` before a successful fit raises, so no method has to remember to check first.
+    """
 
     def __init__(
         self,
@@ -61,6 +68,7 @@ class FittingClass(ABC):
         self.fitting: dict[str, float] = {}
         self.path = path
         self.target = target
+        self._results: ResultsT | None = None
 
     @cached_property
     def platform(self) -> "Platform":
@@ -74,6 +82,21 @@ class FittingClass(ABC):
 
     def plot(self):
         """Plots the fitted data. if a folder is given, it saves ther plot, else it shows it."""
+
+    @property
+    def results(self) -> ResultsT:
+        """What :meth:`fit` produced.
+
+        Raises:
+            RuntimeError: before :meth:`fit` has assigned a result, or after a fit that found none.
+        """
+        if self._results is None:
+            raise RuntimeError(f"{type(self).__name__} has no fit result: call fit() first.")
+        return self._results
+
+    @results.setter
+    def results(self, value: ResultsT) -> None:
+        self._results = value
 
     def fit_and_plot(self):
         """Sequentially does the fit and the plot functions."""
@@ -118,7 +141,7 @@ class FittingClass(ABC):
             return
         output_controller.db_manager.add_fitting(id=self.id, path=filepath)
 
-    def save_plot(self, fig: go.Figure, title: str, save_to_db: bool = False) -> str | None:
+    def save_plot(self, fig: go.Figure, title: str, save_to_db: bool = True) -> str | None:
         """Write ``fig`` under :attr:`path`, or show it when there is no path.
 
         Args:
@@ -126,7 +149,8 @@ class FittingClass(ABC):
             title (str): Basename for the file. Newlines are stripped, so a plot
                 title broken across lines can be passed straight in.
             save_to_db (bool, optional): Store the written path as the fit's representative plot with
-                :meth:`save_fitting_path_to_database`. Defaults to False.
+                :meth:`save_fitting_path_to_database`, so the measurement entry points at it. Defaults to True
+                (QHC-1932): every fit stores its plot's path.
 
         Returns:
             str | None: Path written, or None when the figure was shown instead.

@@ -38,7 +38,8 @@ from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, S
 # hint, instead of surfacing only when the first plot is drawn as a generic report failure.
 
 if TYPE_CHECKING:
-    from seqtante_open.calibration.model import OperatingPoint
+    from qili_qprograms.calibration.model import OperatingPoint
+
     from seqtante_open.run_results import BenchmarkRow, RunResults
 
 _VERDICT_COLOR = {"passed": colors.green, "warning": colors.orange, "failed": colors.red}

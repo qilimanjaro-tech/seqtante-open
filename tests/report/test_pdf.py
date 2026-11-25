@@ -4,11 +4,11 @@ import re
 from datetime import datetime
 
 from PIL import Image
+from qili_qprograms.calibration.model import DriveFreqs, Flux, OperatingPoint, ReadoutFreqs
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Image as PlatypusImage
 from reportlab.platypus import Paragraph
 
-from seqtante_open.calibration.model import DriveFreqs, Flux, OperatingPoint, ReadoutFreqs
 from seqtante_open.controllers.verdicts import BenchmarkDirection, Verdict
 from seqtante_open.report import write_report
 from seqtante_open.report.pdf import _benchmark_row_cells, _plot

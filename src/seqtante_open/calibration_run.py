@@ -23,20 +23,19 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 from qcodes.utils.deprecate import QCoDeSDeprecationWarning
+from qili_qprograms.calibration.io import read_calibration_file
 from qililab.data_management import build_platform
 from qililab.utils.serialization import deserialize_from
 from ruamel.yaml import YAML
 
-from seqtante_open.calibration.io import read_calibration_file
 from seqtante_open.controllers import CalibrationGraph, CalibrationParser, Pipeline, RunContext, experiment_spec
 from seqtante_open.outputs import output_controller
 from seqtante_open.run_results import BenchmarkRow, RunResults, StepOutcome
 
 if TYPE_CHECKING:
+    from qili_qprograms.calibration.model import CalibrationFile
     from qililab.platform.platform import Platform
     from qililab.qprogram.calibration import Calibration
-
-    from seqtante_open.calibration.model import CalibrationFile
 
 
 def _package_version(package: str) -> str:

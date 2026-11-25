@@ -16,10 +16,9 @@
 import re
 from typing import Any
 
+from qili_qprograms.bus_alias import Axis, Role, bus_alias
+from qili_qprograms.targets import CouplerTarget
 from qililab.platform.platform import Platform
-
-from seqtante_open.calibration.bus_alias import Role, bus_alias
-from seqtante_open.targets import CouplerTarget
 
 
 def apply_flux_filters(
@@ -32,7 +31,7 @@ def apply_flux_filters(
         targets = [t for t in targets if t.startswith("q")]
     if "c" in filters:
         targets = [t for t in targets if t.startswith("c")]
-    req = set()
+    req: set[Axis] = set()
     if "flux_x" in filters:
         req.add("x")
     if "flux_z" in filters:
@@ -72,15 +71,15 @@ def get_all_flux_buses(platform: Platform) -> list[str]:
     return apply_flux_filters(targets=targets, qubit_loops=qubit_loops, coupler_loops=coupler_loops)
 
 
-def _axes_for_loops(num_loops: int):
+def _axes_for_loops(num_loops: int) -> tuple[Axis, ...]:
     return ("z",) if num_loops == 1 else ("x", "z")
 
 
-def _ch_qubit(q: int, axis: str) -> str:
+def _ch_qubit(q: int, axis: Axis) -> str:
     return bus_alias(f"q{q}", Role.flux, axis)
 
 
-def _ch_coupler(a: int, b: int, axis: str) -> str:
+def _ch_coupler(a: int, b: int, axis: Axis) -> str:
     return bus_alias(CouplerTarget.between(a, b), Role.flux, axis)
 
 

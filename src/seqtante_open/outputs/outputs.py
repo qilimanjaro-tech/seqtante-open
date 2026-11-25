@@ -90,8 +90,9 @@ class FittedParameter(StrEnum):
     DRAG_COEFFICIENT = "drag_coefficient"
     CZ_AMPLITUDE = "cz_amplitude"
     FLUX_OFFSET = "flux_offset"
-    SWEET_SPOT_FLUX_OFFSET_Z = "sweet_spot_flux_offset_z"
-    SWEET_SPOT_FLUX_OFFSET_X = "sweet_spot_flux_offset_x"
+    # The measured sweet-spot bias, in phi_0 (ADR-0011), not a correction to the crosstalk offset.
+    SWEET_SPOT_FLUX_Z = "sweet_spot_flux_z"
+    SWEET_SPOT_FLUX_X = "sweet_spot_flux_x"
     THERMAL_POPULATION = "thermal_population"
     FIT_R2 = "fit_r2"
     FIT_REDCHI = "fit_redchi"

@@ -31,7 +31,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from datetime import datetime
 
-    from seqtante_open.calibration.model import OperatingPoint
+    from qili_qprograms.calibration.model import OperatingPoint
+
     from seqtante_open.controllers.verdicts import BenchmarkDirection, Verdict
 
 
