@@ -17,7 +17,8 @@
 import numpy as np
 import pytest
 
-from seqtante_open.experiments.fitting.lorentzian_peak_fit import LorentzianPeakModel, _lorentzian
+from seqtante_open.experiments.fitting.fit_base import FittingClass
+from seqtante_open.experiments.fitting.lorentzian_peak_fit import LorentzianPeakModel
 from seqtante_open.outputs import FittedParameter
 from tests.experiments.fitting.harness import FittingTestCase, as_iq, loop
 
@@ -29,11 +30,11 @@ FREQ_STEP = 0.4e6
 
 
 def make_lorentzian_data(rng: np.random.Generator) -> tuple[np.ndarray, dict]:
-    """A single qubit peak: a Lorentzian in the two-tone magnitude, centred on ``QUBIT_IF``."""
+    """A single qubit peak: a Lorentzian on one quadrature, centred on ``QUBIT_IF``."""
     frequencies = np.arange(-1.3e8, -0.7e8 + 1, int(FREQ_STEP))
     linewidth = 4.0e6
-    # _lorentzian(x, x0, a, gamma, c): a positive peak of linewidth gamma on a flat baseline.
-    signal = _lorentzian(frequencies, QUBIT_IF, 0.8 * np.pi * linewidth, linewidth, 0.2)
+    # A peak of height 0.4 and FWHM linewidth on a flat baseline.
+    signal = FittingClass.lorentzian(frequencies, 0.4, QUBIT_IF, linewidth, 0.2)
     results = as_iq(signal, rng, sigma=0.002)
     loops = {"IF_frequency": loop(frequencies, units="Hz", bus="drive_q1", parameter="IF_frequency")}
     return results, loops
@@ -67,19 +68,33 @@ class TestLorentzianPeakModel(FittingTestCase):
     def test_flat_trace_is_rejected_with_an_undefined_r_squared(self, fitted, monkeypatch) -> None:
         """A flat trace has no variance: R² is ``nan``, not a division by zero, and the fit is rejected.
 
-        Every comparison with ``nan`` is False, so without the explicit check a flat trace whose fitted
-        centre lands inside the sweep would be accepted. ``curve_fit`` is stubbed so the branch does not
-        depend on the optimiser.
+        Every comparison with ``nan`` is False, so without the explicit check a flat trace could be accepted.
         """
-        from seqtante_open.experiments.fitting import lorentzian_peak_fit as module
-
-        monkeypatch.setattr(fitted, "magnitude", np.ones(len(fitted.frequencies)))
-        linewidth = 4 * FREQ_STEP
-        monkeypatch.setattr(
-            module, "curve_fit", lambda *args, **kwargs: (np.array([QUBIT_IF, 1.0, linewidth, 1.0]), np.eye(4))
-        )
+        monkeypatch.setattr(fitted, "signal", np.ones(len(fitted.frequencies)))
         fitted.fit()
 
         assert np.isnan(fitted.r_squared)
         assert not fitted.accepted
         assert fitted.fitted_if is None
+
+    @pytest.mark.parametrize("stored_if", [0.0, -3e8])
+    @pytest.mark.parametrize(("height", "scale"), [(1.0, 1.0), (-1.0, 1e-3)], ids=["peak", "small_dip"])
+    def test_the_line_is_found_wherever_the_window_sits_and_at_any_scale(
+        self, fitted, monkeypatch, stored_if, height, scale
+    ) -> None:
+        """The start comes from the data, not the window's position or a fixed amplitude (Ely's #45 review).
+
+        The script's start took the width from the sum of the sweep ends, so a window centred on IF 0
+        started at zero width and never fit.
+        """
+        frequencies = stored_if + np.linspace(-5e6, 5e6, 101)
+        centre = stored_if + 1.3e6
+        noise = np.random.default_rng(0).normal(0.0, scale / 50, frequencies.size)
+        signal = scale * (0.5 + FittingClass.lorentzian(frequencies, height, centre, 0.6e6, 0.0)) + noise
+        monkeypatch.setattr(fitted, "frequencies", frequencies)
+        monkeypatch.setattr(fitted, "signal", signal)
+
+        fitted.fit()
+
+        assert fitted.accepted
+        assert fitted.fitted_if == pytest.approx(centre, abs=50e3)

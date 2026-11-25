@@ -276,3 +276,35 @@ def test_oscillation_initial_guess_of_a_window_with_no_range_has_no_frequency():
     guess = FittingClass.oscillation_initial_guess(np.full(5, 0.3), np.arange(5.0))
 
     assert guess == {"a": 0.0, "omega": 0.0, "offset": 2.0, "phase_offset": 0.0}
+
+
+# ------------------------------ fit_lorentzian ------------------------------
+
+
+@pytest.mark.parametrize("height", [1.0, -1.0], ids=["peak", "dip"])
+def test_the_lorentzian_start_is_read_off_the_trace(height):
+    x = np.linspace(-5e6, 5e6, 101)
+    guess = FittingClass.lorentzian_initial_guess(x, FittingClass.lorentzian(x, height, 1e6, 0.8e6, 0.5))
+
+    assert guess["center"] == pytest.approx(1e6)
+    assert guess["offset"] == pytest.approx(0.5, abs=0.05)
+    assert guess["amplitude"] == pytest.approx(height, rel=0.05)
+    assert guess["width"] == pytest.approx(0.8e6, rel=0.25)
+
+
+def test_fit_lorentzian_reports_the_line():
+    x = 7e6 + np.linspace(-5e6, 5e6, 101)
+    y = FittingClass.lorentzian(x, -2.0, 6.2e6, 0.5e6, 3.0) + np.random.default_rng(1).normal(0, 0.02, x.size)
+
+    fit = FittingClass.fit_lorentzian(x, y)
+
+    assert fit["center"] == pytest.approx(6.2e6, abs=20e3)
+    assert fit["width"] == pytest.approx(0.5e6, rel=0.1)
+    assert fit["amplitude"] == pytest.approx(-2.0, rel=0.1)
+    assert fit["r_squared"] > 0.95
+
+
+def test_fit_lorentzian_of_a_flat_trace_is_nan():
+    fit = FittingClass.fit_lorentzian(np.linspace(0, 1, 11), np.ones(11))
+
+    assert all(np.isnan(value) for value in fit.values())

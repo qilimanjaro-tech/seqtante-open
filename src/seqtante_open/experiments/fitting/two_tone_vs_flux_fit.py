@@ -22,7 +22,6 @@ from .fit_base import FittingClass
 
 # Fit logic constants
 _MIN_TRACE_R_SQUARED = 0.9
-_MAX_TRACE_ATTEMPTS = 20
 _MIN_TRACES_FOR_PARABOLA = 3
 
 
@@ -91,10 +90,8 @@ class FluxoniumTwoToneFluxModel(FittingClass[SweetSpotResults]):
         self.fitted_if[:] = np.nan
         for ii in range(len(self.fluxes)):
             self.rotated[ii] = np.real(self.rotate_iq(self.array[ii, :, 0] + 1j * self.array[ii, :, 1]))
-            r_squared, attempts, fitted_if = 0.0, 0, np.nan
-            while r_squared < _MIN_TRACE_R_SQUARED and attempts < _MAX_TRACE_ATTEMPTS:
-                fitted_if, _, r_squared = self.lorentzian_fit(self.rotated[ii], self.frequencies)
-                attempts += 1
+            # The shared fit is deterministic (QHC-1932 item 5), so a poor trace is not refit.
+            fitted_if, _, r_squared = self.lorentzian_fit(self.rotated[ii], self.frequencies)
             if r_squared >= _MIN_TRACE_R_SQUARED:
                 self.mask[ii] = True
                 self.fitted_if[ii] = fitted_if
