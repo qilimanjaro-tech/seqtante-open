@@ -387,7 +387,8 @@ class CalibrationNode(ABC, Generic[ResultT]):
 
     def _operating_point(self, target: Target) -> OperatingPoint:
         """``target``'s operating point for this step (:meth:`_operating_point_name`)."""
-        point = self._operating_point_name(target)  # first: a spine fails here, before the file is read
+        # Resolved first, so a spine fails here before the calibration file is read.
+        point = self._operating_point_name(target)
         return operating_point_for(self.calibration_file, target, point)
 
     def _pulse(self, target: Target, role: Role, purpose: PulsePurpose) -> str:
@@ -800,7 +801,8 @@ class CalibrationNode(ABC, Generic[ResultT]):
         return self._thresholds.get(target)
 
     def _place_operating_point(self, target: Target) -> None:
-        point = self._operating_point_name(target)  # first: a spine fails here, before the file is read
+        # Resolved first, so a spine fails here before the calibration file is read.
+        point = self._operating_point_name(target)
         apply_operating_point(self.calibration_file, target, point, self.restore)
 
     def _save_calibration(self) -> None:

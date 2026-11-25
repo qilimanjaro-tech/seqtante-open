@@ -56,8 +56,9 @@ def test_operating_point_for_resolves_the_named_point():
 
 
 def test_operating_point_for_names_the_points_a_target_has():
+    file = _file()
     with pytest.raises(KeyError, match="q1 has no operating point 'reset' \\(it has: sweet\\)"):
-        operating_point_for(_file(), "q1", "reset")
+        operating_point_for(file, "q1", "reset")
 
 
 def test_sets_target_and_parked_fluxes():
