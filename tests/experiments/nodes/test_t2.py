@@ -121,8 +121,10 @@ class FakeT2Fit:
 
 
 def _calibration() -> Calibration:
+    """q1 has a sweet_spot and a reset point; its one ``t2`` section names sweet_spot."""
     calibration = Calibration()
     calibration.add_waveform(bus="readout_q1", name="readout-sweet_spot", waveform=Square(amplitude=1.0, duration=1000))
+    calibration.add_waveform(bus="readout_q1", name="readout-reset", waveform=Square(amplitude=1.0, duration=1000))
     calibration.crosstalk_matrix = identity_crosstalk()
     write_calibration_file(
         calibration,
@@ -134,7 +136,12 @@ def _calibration() -> Calibration:
                         flux=Flux(z=0.6),
                         drive=DriveFreqs(lo=DRIVE_LO, if_=DRIVE_IF),
                         readout=ReadoutFreqs(lo=READOUT_LO, if_=READOUT_IF, attenuation=READOUT_ATT),
-                    )
+                    ),
+                    "reset": OperatingPoint(
+                        flux=Flux(z=0.2),
+                        drive=DriveFreqs(lo=3e9, if_=DRIVE_IF),
+                        readout=ReadoutFreqs(lo=READOUT_LO, if_=READOUT_IF, attenuation=READOUT_ATT),
+                    ),
                 }
             },
             experiments={"t2": {"q1": ExperimentSection(operating_point="sweet_spot")}},
@@ -272,3 +279,34 @@ def test_the_fit_plots_into_the_step_data_folder(monkeypatch, tmp_path):
     node.run({})
 
     assert FakeT2Fit.path_seen == str(tmp_path)
+
+
+def test_a_step_naming_a_point_builds_and_runs_there_not_at_the_section_s(monkeypatch):
+    built = _patch(monkeypatch)
+    node, platform = _make(_calibration(), THRESHOLDS, operating_point="reset")
+
+    assert node.run({}) == []
+
+    assert built["operating_point"] == "reset"
+    assert platform.values_at_execute["drive_q1", Parameter.LO_FREQUENCY] == int(3e9)
+
+
+def test_a_stored_pi_half_pulse_is_warned_about(monkeypatch, warnings_log):
+    """t2_ramsey plays a stored pi_half pulse over half the pi pulse, and rabi recalibrates only the pi pulse."""
+    _patch(monkeypatch)
+    calibration = _calibration()
+    calibration.add_waveform(bus="drive_q1", name="pi_half-sweet_spot", waveform=Square(amplitude=0.5, duration=40))
+    node, _ = _make(calibration, THRESHOLDS)
+
+    assert node.run({}) == []
+
+    assert any("plays the stored 'pi_half-sweet_spot' pulse" in message for message in warnings_log)
+
+
+def test_no_pi_half_pulse_no_warning(monkeypatch, warnings_log):
+    _patch(monkeypatch)
+    node, _ = _make(_calibration(), THRESHOLDS)
+
+    assert node.run({}) == []
+
+    assert not any("pi_half" in message for message in warnings_log)

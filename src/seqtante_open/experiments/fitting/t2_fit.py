@@ -78,26 +78,32 @@ class T2Fit(FittingClass[T2Results]):
         return amplitude, frequency, 0.0, decay, offset
 
     def fit(self):
-        """Fit the damped cosine, then record the decay, T2 (ns), its uncertainty (ns) and the fit R².
+        """Fit the trace as a damped cosine and as a plain exponential decay, keep the better, and record T2.
+
+        A Ramsey trace with no detuning does not oscillate, and the rFFT guess then seeds a frequency from
+        the noise: the damped cosine settles in a local minimum that misreads T2. So the trace is also fit
+        to ``a * exp(-t / d) + f`` (the damped cosine at ``b = 0``), and the model with the lower BIC is kept,
+        which charges the damped cosine for its two extra parameters. A non-oscillating result is recorded
+        as the damped cosine's parameters with ``b = c = 0``.
 
         ``T2 = d`` is physical only for a decaying envelope (``d > 0``). The raw ``d`` is always recorded,
         but T2 and its uncertainty are left non-finite when ``d <= 0`` (a growing or flat envelope):
         :attr:`is_physical_decay` then reports the failure so ``analyze`` fails the target instead of
         scoring a non-physical value, as for T1 (QHC-1803).
+
+        Raises:
+            RuntimeError: if neither model converges.
         """
         # A refit that finds nothing must not leave the previous result readable.
         self._results = None
-        params, pcov = sp.curve_fit(
-            self.sinus_exp,
-            self.wait_values,
-            self.arr,
-            p0=self._initial_guess(),
-            maxfev=10_000,
-        )
+        candidates = [fit for fit in (self._fit_damped_cosine(), self._fit_exponential_decay()) if fit is not None]
+        if not candidates:
+            raise RuntimeError(f"{self.target}: the T2 fit converged neither as a damped cosine nor as a decay")
+        params, decay_variance, _ = min(candidates, key=lambda fit: fit[2])
         decay = float(params[3])
         if decay > 0.0:
             t2 = decay
-            t2_uncertainty = float(np.sqrt(pcov[3, 3]))
+            t2_uncertainty = float(np.sqrt(decay_variance))
         else:
             # A growing or flat envelope has no physical T2; flag it rather than reporting |d|.
             t2 = float("nan")
@@ -108,6 +114,42 @@ class T2Fit(FittingClass[T2Results]):
         # A flat trace (drive off, readout saturated) has no variance to explain: R² is undefined, not a crash.
         r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
         self.results = T2Results(params=params, decay=decay, T2=t2, t2_uncertainty=t2_uncertainty, r_squared=r_squared)
+
+    def _bic(self, params: np.ndarray, model, n_parameters: int) -> float:
+        """The Bayesian information criterion of ``model`` at ``params``: lower is better."""
+        n = len(self.arr)
+        ss_res = float(np.sum((self.arr - model(self.wait_values, *params)) ** 2))
+        return n * np.log(max(ss_res, np.finfo(float).tiny) / n) + n_parameters * np.log(n)
+
+    def _fit_damped_cosine(self) -> tuple[np.ndarray, float, float] | None:
+        """``(params, var(d), BIC)`` of the damped cosine from the rFFT guess; None if it does not converge."""
+        try:
+            params, pcov = sp.curve_fit(
+                self.sinus_exp, self.wait_values, self.arr, p0=self._initial_guess(), maxfev=10_000
+            )
+        except RuntimeError:
+            return None
+        return params, float(pcov[3, 3]), self._bic(params, self.sinus_exp, 5)
+
+    def _fit_exponential_decay(self) -> tuple[np.ndarray, float, float] | None:
+        """``(params, var(d), BIC)`` of ``a * exp(b * t) + f``, as damped-cosine params; None if it does not converge.
+
+        ``d = -1 / b``, so its variance is ``var(b) / b**4``.
+        """
+        try:
+            (a, rate, offset), pcov = sp.curve_fit(
+                self.exponential,
+                self.wait_values,
+                self.arr,
+                p0=self.exponential_initial_guess(self.wait_values, self.arr),
+                maxfev=10_000,
+            )
+        except RuntimeError:
+            return None
+        bic = self._bic(np.array([a, rate, offset]), self.exponential, 3)
+        decay = -1.0 / rate if rate != 0 else float("inf")
+        decay_variance = float(pcov[1, 1]) / rate**4 if rate != 0 else float("inf")
+        return np.array([a, 0.0, 0.0, decay, offset]), decay_variance, bic
 
     @property
     def decay(self) -> float:
@@ -179,7 +221,7 @@ class T2Fit(FittingClass[T2Results]):
                 x=self.wait_values,
                 y=self.sinus_exp(self.wait_values, *self.results["params"]),
                 mode="lines",
-                name="Fitted damped cosine",
+                name="Fit",
                 line={"color": "red"},
             )
         )

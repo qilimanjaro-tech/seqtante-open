@@ -32,7 +32,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from loguru import logger
 from qili_qprograms.bus_alias import Role, bus_alias
+from qili_qprograms.calibration import pulse_name
 from qili_qprograms.experiments import t2_ramsey
 
 from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode, write_per_point
@@ -88,13 +90,15 @@ class T2Node(FixedFluxNode[None]):
         sets from the operating point, through the restore handle so the run undoes it (ADR-0006).
         """
         self._require_pulse(target, Role.readout, "readout")
+        operating_point = self._operating_point_name(target)
+        self._warn_if_pi_half_is_stored(target, operating_point)
         # Round, not truncate, so the stored time axis is the one t2_ramsey plays.
         durations_idle = np.rint(self._sweep(target, "idle_duration_sweep")).astype(int)
 
         qprogram = t2_ramsey(
             calibration=self.context.calibration,
             target=str(target),
-            operating_point=self._section(target).operating_point,
+            operating_point=operating_point,
             idle_duration_sweep=durations_idle,
             averages=self._param(target, "averages"),
             relax_duration=self._param(target, "relax_duration"),
@@ -118,6 +122,25 @@ class T2Node(FixedFluxNode[None]):
             shape=(len(durations_idle), 2),
             write=write_per_point,
         )
+
+    def _warn_if_pi_half_is_stored(self, target: Target, operating_point: str) -> None:
+        """Warn when ``pi_half-<operating_point>`` is stored, since ``t2_ramsey`` then plays it instead of half the pi pulse.
+
+        The calibration tree recalibrates only ``pi-<operating_point>`` (rabi), so a stored pi-half pulse is not
+        kept in step with it and can rotate by other than pi/2 once rabi has moved the pi amplitude. A wrong
+        rotation lowers the Ramsey contrast rather than the decay time, and a badly wrong one fails the R²
+        check, so the step still runs.
+        """
+        pi_half = pulse_name("pi_half", operating_point)
+        if self.context.calibration.has_waveform(bus_alias(target, Role.drive), pi_half):
+            logger.warning(
+                "Node <i>{node}</i>: <r>{target}</r> plays the stored '{pi_half}' pulse, which the calibration tree "
+                "does not recalibrate, instead of '{pi}' at half amplitude",
+                node=self.name,
+                target=str(target),
+                pi_half=pi_half,
+                pi=pulse_name("pi", operating_point),
+            )
 
     def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[None]:
         """Fit the oscillation, check it, save ``t2``/``fit_r2``, plot, and report T2 and its uncertainty in us; read-only.

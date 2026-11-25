@@ -45,6 +45,16 @@ def make_t2_data(rng: np.random.Generator) -> tuple[np.ndarray, dict]:
     return results, {"wait": loop(wait, units="ns", bus="drive_q1", parameter="t2_elapsed_time")}
 
 
+def _curve_fit_returning(damped_cosine: list[float], exponential: list[float]):
+    """A ``curve_fit`` stub that returns fixed parameters, and an identity covariance, for each of T2Fit's two models."""
+
+    def curve_fit(model, *args, **kwargs):
+        params = damped_cosine if model is FittingClass.sinus_exp else exponential
+        return np.array(params), np.eye(len(params))
+
+    return curve_fit
+
+
 class TestT2Fit(FittingTestCase):
     FIT_CLASS = T2Fit
     DATA = make_t2_data
@@ -87,7 +97,7 @@ class TestT2Fit(FittingTestCase):
 
         monkeypatch.setattr(fit_obj, "arr", np.ones(len(fit_obj.arr)))
         monkeypatch.setattr(
-            t2_fit_module.sp, "curve_fit", lambda *args, **kwargs: (np.array([0.0, 1e-4, 0.0, 1e4, 1.0]), np.eye(5))
+            t2_fit_module.sp, "curve_fit", _curve_fit_returning([0.0, 1e-4, 0.0, 1e4, 1.0], [0.0, -1e-4, 1.0])
         )
         fit_obj.fit()
 
@@ -97,11 +107,35 @@ class TestT2Fit(FittingTestCase):
         """``d <= 0`` is a growing envelope: T2 and its uncertainty are left ``nan`` instead of reporting ``|d|``."""
         from seqtante_open.experiments.fitting import t2_fit as t2_fit_module
 
+        # Both models grow: the damped cosine has d < 0 and the exponential a positive rate.
         monkeypatch.setattr(
-            t2_fit_module.sp, "curve_fit", lambda *args, **kwargs: (np.array([0.1, 1e-4, 0.0, -1e4, 0.0]), np.eye(5))
+            t2_fit_module.sp, "curve_fit", _curve_fit_returning([0.1, 1e-4, 0.0, -1e4, 0.0], [0.1, 1e-4, 0.0])
         )
         fit_obj.fit()
 
         assert not fit_obj.is_physical_decay
         assert np.isnan(fit_obj.T2)
         assert np.isnan(fit_obj.relative_uncertainty)
+
+    def test_a_trace_with_no_detuning_is_fit_as_a_plain_decay(self, fit_obj, monkeypatch):
+        """With no detuning the rFFT seeds a frequency from the noise and the damped cosine misreads T2.
+
+        On this trace (noise 0.05) the damped cosine alone put T2 within 20% in 59% of 200 seeds; choosing
+        by BIC puts it there in 98%. The rest are noise the cosine fits marginally better.
+        """
+        wait = np.linspace(0, 60_000, 61)
+        monkeypatch.setattr(fit_obj, "wait_values", wait)
+        within, plain = 0, 0
+        for seed in range(100):
+            noise = np.random.default_rng(seed).normal(0.0, 0.05, wait.size)
+            monkeypatch.setattr(fit_obj, "arr", np.exp(-wait / T2_NS) + noise)
+            fit_obj.fit()
+            within += abs(fit_obj.T2 / T2_NS - 1) < 0.2
+            # The plain decay is recorded with b set to exactly 0.
+            plain += not fit_obj.results["params"][1]
+
+        assert within >= 90
+        assert plain >= 90
+
+    def test_a_detuned_trace_keeps_the_damped_cosine(self, fitted):
+        assert fitted.results["params"][1] == pytest.approx(FRINGE_FREQ, rel=0.05)
