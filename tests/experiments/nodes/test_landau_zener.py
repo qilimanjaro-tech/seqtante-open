@@ -127,7 +127,10 @@ def _calibration(readout_levels_pulse: str = READOUT_PULSE) -> Calibration:
         CalibrationFile(
             operating_points_version=1,
             operating_points={
-                "q1": {"reset": _point(IDLE, readout_levels_pulse), "sweet_spot": _point(SWEET_SPOT)},
+                "q1": {
+                    "reset": _point(IDLE, readout_levels_pulse),
+                    "sweet_spot": _point(SWEET_SPOT, "readout-sweet_spot"),
+                },
             },
             experiments={
                 "landau_zener": {"q1": ExperimentSection(operating_point="reset", pulses={Role.readout: READOUT_PULSE})}
@@ -277,3 +280,34 @@ def test_refuses_readout_levels_taken_with_a_different_pulse(builds):
     assert failed == ["q1"]  # the target fails the step; no benchmark is recorded
     assert FakeLandauZenerFit.last == {}
     assert node.benchmark_results == ()
+
+
+def test_a_step_naming_another_point_idles_reads_out_and_normalises_there(builds):
+    """The section names ``reset``; a step naming ``sweet_spot`` runs there (QHC-1936)."""
+    calibration = _calibration()
+    calibration.add_waveform(
+        READOUT_BUS,
+        "readout-sweet_spot",
+        IQPair(I=Square(amplitude=0.1, duration=1000), Q=Square(amplitude=0.0, duration=1000)),
+    )
+
+    failed = _make(calibration, LandauZenerPlatform(), operating_point="sweet_spot").run({})
+
+    assert failed == []
+    assert [(build["idle_operating_point"], build["readout_point"]) for build in builds] == [
+        ("sweet_spot", "sweet_spot"),
+        ("sweet_spot", "sweet_spot"),
+    ]
+    # Normalised with sweet_spot's levels, tagged readout-sweet_spot; reset's (readout-reset) would be refused.
+    assert FakeLandauZenerFit.last["level_1"] == LEVEL_1
+
+
+def test_a_missing_readout_pulse_fails_the_target_before_measuring(builds):
+    platform = LandauZenerPlatform()
+
+    # No readout-sweet_spot pulse is stored.
+    failed = _make(_calibration(), platform, operating_point="sweet_spot").run({})
+
+    assert failed == ["q1"]
+    assert builds == []
+    assert platform.executions == 0

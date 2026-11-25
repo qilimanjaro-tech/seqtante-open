@@ -41,12 +41,10 @@ Where the inputs come from:
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from qili_qprograms.bus_alias import Role, bus_alias
-from qili_qprograms.calibration.io import readout_levels_for
-from qili_qprograms.calibration.pulses import pulse_name
 from qili_qprograms.experiments import generalized_linear_ramps
 from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 from qililab.result import StreamArray
@@ -64,7 +62,6 @@ if TYPE_CHECKING:
     from qililab.qprogram.calibration import Calibration
     from qililab.result import AutocalMeasurement, Measurement
 
-EXPERIMENT = "landau_zener"
 THEORY_AGREEMENT = "theory_agreement"
 
 #: Stream/experiment name the sweep is stored under.
@@ -93,8 +90,8 @@ class LandauZenerNode(FixedFluxNode[None]):
     reports no value, so the run leaves the benchmark "Not evaluated".
     """
 
-    experiment: ClassVar[str | None] = EXPERIMENT
-    analyses: ClassVar[tuple[str, ...]] = (THEORY_AGREEMENT,)
+    experiment = "landau_zener"
+    analyses = (THEORY_AGREEMENT,)
     defaults = LANDAU_ZENER_DEFAULTS
 
     def execute_node(self, targets: list[Target]) -> dict[Target, list[int]]:
@@ -124,7 +121,9 @@ class LandauZenerNode(FixedFluxNode[None]):
                 "have one entry per sweep point"
             )
 
-        operating_point = self._section(target).operating_point
+        # Before any hardware: the readout pulse the QProgram plays must be stored.
+        self._require_pulse(target, Role.readout, "readout")
+        operating_point = self._operating_point_name(target)
         reset_point = self._param(target, "reset_point") or operating_point
         calibration = self._with_ac_crosstalk(target)
         qprograms = [self._build(target, operating_point, reset_point, path) for path in flux_paths]
@@ -229,16 +228,16 @@ class LandauZenerNode(FixedFluxNode[None]):
             AnalysisError: when the operating point stores no readout levels, or stores them for another
                 readout pulse.
         """
-        operating_point = self._section(target).operating_point
+        point_name = self._operating_point_name(target)
         # The pulse generalized_linear_ramps plays at its readout point, the step's operating point.
-        readout_pulse = pulse_name("readout", operating_point)
-        try:
-            levels = readout_levels_for(self.calibration_file, EXPERIMENT, str(target), readout_pulse)
-        except ValueError as error:
-            raise AnalysisError(str(error)) from error
+        readout_pulse = self._pulse(target, Role.readout, "readout")
+        levels = self._operating_point(target).readout.levels
         if levels is None:
+            raise AnalysisError(f"{target}: operating point '{point_name}' stores no readout levels to normalise with")
+        if levels.pulse != readout_pulse:
             raise AnalysisError(
-                f"{target}: the '{EXPERIMENT}' operating point stores no readout levels to normalise with"
+                f"{target}: the readout levels at operating point '{point_name}' were taken with pulse "
+                f"'{levels.pulse}', but the QProgram plays '{readout_pulse}'; refusing to use them"
             )
 
         model = LandauZenerFit(
