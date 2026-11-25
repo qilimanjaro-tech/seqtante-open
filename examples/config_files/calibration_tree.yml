@@ -87,7 +87,8 @@ pipelines:
       reset_flux:
         experiment: reset_point_search
         operating_point: reset
-        target_frequency: [2.79e9, 2.81e9]
+        target_freq_min: 2.79e9
+        target_freq_max: 2.81e9
       rabi_reset:
         experiment: rabi
         analysis: readout_levels
