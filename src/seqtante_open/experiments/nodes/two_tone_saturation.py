@@ -76,7 +76,7 @@ class TwoToneSaturationNode(FixedFluxNode[ResultT]):
         Raises:
             TypeError: if called on a node that sets no ``experiment`` (a spine, not a leaf).
         """
-        operating_point = self._section(target).operating_point
+        operating_point = self._operating_point_name(target)
         self._require_pulse(target, Role.readout, "readout")
         qprogram = two_tone_saturation(
             calibration=self.context.calibration,
