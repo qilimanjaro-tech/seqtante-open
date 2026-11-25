@@ -473,7 +473,7 @@ class FittingClass(ABC, Generic[ResultsT]):
         offset, cosine = float(best_coefficients[0]), float(best_coefficients[1])
         if not free_phase:
             return {"a": cosine, "omega": best_omega, "offset": offset, "phase_offset": 0.0}
-        # a*cos(wx + p) = a*cos(p)*cos(wx) - a*sin(p)*sin(wx)
+        # The cosine and sine coefficients are a·cos(phase) and -a·sin(phase).
         sine = float(best_coefficients[2])
         return {
             "a": float(np.hypot(cosine, sine)),
