@@ -105,6 +105,20 @@ def _rabi_file(point_name: str, pulses: dict | None = None) -> CalibrationFile:
     )
 
 
+def _two_point_file() -> CalibrationFile:
+    """q1 has a reset and a sweet_spot point, and its one ``rabi`` section names sweet_spot, as in the example tree."""
+    reset = OperatingPoint(
+        flux=Flux(z=0.4),
+        drive=DriveFreqs(lo=3e9, if_=1e8),
+        readout=ReadoutFreqs(lo=7e9, if_=1e8, attenuation=20.0),
+    )
+    return CalibrationFile(
+        operating_points_version=1,
+        operating_points={"q1": {"sweet_spot": _operating_point(), "reset": reset}},
+        experiments={"rabi": {"q1": ExperimentSection(operating_point="sweet_spot")}},
+    )
+
+
 def _add_played_pulses(calibration: Calibration, point_name: str, *, pi: bool = True) -> None:
     """Store the ``readout-<point>`` and (unless ``pi`` is False) ``pi-<point>`` pulses rabi_amplitude plays."""
     calibration.add_waveform(
@@ -335,3 +349,39 @@ def test_a_qcm_rf_drive_gain_other_than_1_fails_before_any_hardware(monkeypatch)
         node.execute_node([Q1])
 
     assert platform.calls == ["get_element:drive_q1"]  # it read which instrument drives q1, and set nothing
+
+
+# ------------- rabi_reset and rabi_sweet_spot share one section (QHC-1936) -------------
+
+
+def test_rabi_reset_measures_at_and_writes_the_reset_point_not_the_section_s(monkeypatch):
+    """A step naming ``reset`` builds, sets the hardware and writes ``pi-reset`` there; ``pi-sweet_spot`` is untouched."""
+    monkeypatch.setattr(rabi_module, "RabiAmplitudeModel", FakeRabiModel)
+    calibration = _calibration(_two_point_file())
+    _add_played_pulses(calibration, "reset")
+    _add_played_pulses(calibration, "sweet_spot")
+    built: dict = {}
+    node, platform = _executing_rabi(calibration, monkeypatch, built=built)
+    node.parameters[Q1]["operating_point"] = "reset"
+
+    assert node.run({}) == []
+
+    assert built["operating_point"] == "reset"
+    assert platform.values_at_execute["drive_q1", Parameter.LO_FREQUENCY] == int(3e9)
+    assert platform.values_at_execute["readout_q1", Parameter.OUT0_ATT] == 20
+    assert calibration.get_waveform(bus="drive_q1", name="pi-reset").amplitude == pytest.approx(FAKE_PI)
+    assert calibration.get_waveform(bus="drive_q1", name="pi-sweet_spot").amplitude == pytest.approx(1.0)
+
+
+def test_rabi_reset_writes_the_readout_levels_onto_the_reset_point(monkeypatch):
+    stub_output_and_save(monkeypatch)
+    monkeypatch.setattr(rabi_module, "RabiAmplitudeModel", FakeRabiModel)
+    calibration = _calibration(_two_point_file())
+
+    node = _make_rabi(analysis="readout_levels", calibration=calibration, parameters={"operating_point": "reset"})
+
+    assert node.run({}) == []
+    points = read_calibration_file(calibration).operating_points["q1"]
+    assert points["reset"].readout.levels.pulse == "readout-reset"
+    assert points["reset"].readout.levels.level_0.nominal == pytest.approx(FAKE_L0)
+    assert points["sweet_spot"].readout.levels is None

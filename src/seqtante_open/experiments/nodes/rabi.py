@@ -43,7 +43,6 @@ from qili_qprograms.waveforms import scaled, unit_amplitude
 from qililab import Parameter
 
 from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode, write_whole
-from seqtante_open.controllers.operating_point import operating_point_for
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.fitting import RabiAmplitudeModel
 
@@ -110,7 +109,7 @@ class RabiNode(FixedFluxNode[RabiFitted]):
         qprogram = rabi_amplitude(
             calibration=self.context.calibration,
             target=str(target),
-            operating_point=self._section(target).operating_point,
+            operating_point=self._operating_point_name(target),
             drive_amplitude_sweep=sweep,
             averages=self._param(target, "averages"),
             relax_duration=self._param(target, "relax_duration"),
@@ -213,7 +212,7 @@ class RabiNode(FixedFluxNode[RabiFitted]):
 
     def _apply_readout_levels(self, target: Target, fitted: RabiFitted) -> None:
         """Write the |0>/|1> levels onto the target's operating point, tagged with the readout pulse."""
-        operating_point = operating_point_for(self.calibration_file, self.experiment, target)
+        operating_point = self._operating_point(target)
         operating_point.readout.levels = ReadoutLevels(
             pulse=self._pulse(target, Role.readout, "readout"),
             level_0=Measured(nominal=fitted.level_0, std=fitted.level_0_std),
