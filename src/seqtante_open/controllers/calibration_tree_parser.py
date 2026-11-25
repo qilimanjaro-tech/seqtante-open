@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 
 from loguru import logger
+from qili_qprograms.bus_alias import Role
 from qili_qprograms.targets import CouplerTarget, ExperimentTarget, QubitTarget, Target
 from qililab import Platform
 
@@ -225,6 +226,7 @@ class CalibrationParser:
 
         own = {key: value for key, value in raw.items() if key not in _STEP_KEYS}
         _check_settable(own, path)
+        _check_point_and_pulses(own, path)
         own = _with_thresholds(own, experiment, spec, path)
         overrides = self._overrides(raw.get("overrides", []), targets, experiment, spec, path)
 
@@ -279,6 +281,7 @@ class CalibrationParser:
                 )
             values = {key: value for key, value in entry.items() if key != "targets"}
             _check_settable(values, entry_path)
+            _check_point_and_pulses(values, entry_path)
             overrides.append(_Override(targets=kept, values=_with_thresholds(values, experiment, spec, entry_path)))
         return overrides
 
@@ -293,6 +296,7 @@ class CalibrationParser:
             if not isinstance(values, Mapping):
                 raise TreeParseError(f"{path}: must be a mapping of parameters.")
             _check_settable(values, path)
+            _check_point_and_pulses(values, path)
             spec = experiment_spec(experiment)
             defaults[experiment] = dict(values) if spec is None else _with_thresholds(values, experiment, spec, path)
         return defaults
@@ -370,6 +374,27 @@ def _check_settable(values: Mapping[str, Any], path: str) -> None:
         found = sorted(keys.intersection(values))
         if found:
             raise TreeParseError(f"{path}: {found} {reason}.")
+
+
+def _check_point_and_pulses(values: Mapping[str, Any], path: str) -> None:
+    """Rejects an ``operating_point`` that is not a name and ``pulses`` that are not a role -> pulse-name mapping.
+
+    The roles are the closed set an experiment section's ``pulses`` takes (ADR-0008), so a misspelt role fails at
+    load time instead of being ignored by the step.
+    """
+    if "operating_point" in values and not isinstance(values["operating_point"], str):
+        raise TreeParseError(f"{path}.operating_point: must be the name of an operating point.")
+    if "pulses" not in values:
+        return
+    pulses = values["pulses"]
+    if not isinstance(pulses, Mapping):
+        raise TreeParseError(f"{path}.pulses: must be a mapping of roles to pulse names.")
+    roles = {role.value for role in Role}
+    for role, pulse in pulses.items():
+        if role not in roles:
+            raise TreeParseError(f"{path}.pulses: unknown role {role!r}. Known: {', '.join(sorted(roles))}.")
+        if not isinstance(pulse, str):
+            raise TreeParseError(f"{path}.pulses.{role}: must be a pulse name.")
 
 
 def _with_thresholds(values: Mapping[str, Any], experiment: str, spec: ExperimentSpec, path: str) -> dict[str, Any]:

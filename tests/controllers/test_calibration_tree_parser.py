@@ -740,6 +740,47 @@ class TestDataFolder:
             parse(tree, platform)
 
 
+def set_everywhere(key: str, value: object) -> list[Any]:
+    """Trees setting ``key`` to ``value`` on the step, in ``defaults`` and in an override, with the path each error names."""
+    return [
+        pytest.param(single_step_tree(make_step(**{key: value})), r"^pipelines\.p\.steps\.s", id="step"),
+        pytest.param(make_tree(defaults={"two_tone": {key: value}}), r"^defaults\.two_tone", id="defaults"),
+        pytest.param(
+            single_step_tree(make_step(overrides=[{"targets": ["q1"], key: value}])),
+            r"^pipelines\.p\.steps\.s\.overrides\[0\]",
+            id="override",
+        ),
+    ]
+
+
+class TestOperatingPointAndPulses:
+    """A step's ``operating_point`` and ``pulses`` are checked wherever they are set: step, defaults or override."""
+
+    @pytest.mark.parametrize(("tree", "path"), set_everywhere("operating_point", ["reset"]))
+    def test_an_operating_point_must_be_a_name(self, platform, tree, path):
+        with pytest.raises(TreeParseError, match=path + r"\.operating_point: must be the name of an operating point"):
+            parse(tree, platform)
+
+    @pytest.mark.parametrize(("tree", "path"), set_everywhere("pulses", "readout-reset"))
+    def test_pulses_must_be_a_mapping(self, platform, tree, path):
+        with pytest.raises(TreeParseError, match=path + r"\.pulses: must be a mapping of roles to pulse names"):
+            parse(tree, platform)
+
+    @pytest.mark.parametrize(("tree", "path"), set_everywhere("pulses", {"drvie": "pi-sweet_spot"}))
+    def test_pulses_take_only_known_roles(self, platform, tree, path):
+        with pytest.raises(TreeParseError, match=path + r"\.pulses: unknown role 'drvie'\. Known: drive, fast_flux"):
+            parse(tree, platform)
+
+    def test_a_pulse_must_be_named(self, platform):
+        tree = single_step_tree(make_step(pulses={"drive": 1}))
+        with pytest.raises(TreeParseError, match=r"steps\.s\.pulses\.drive: must be a pulse name"):
+            parse(tree, platform)
+
+    def test_a_named_point_and_pulses_are_kept(self, platform):
+        step = only_step(single_step_tree(make_step(operating_point="reset", pulses={"drive": "pi-reset"})), platform)
+        assert step.parameters[QubitTarget(1)] == {"operating_point": "reset", "pulses": {"drive": "pi-reset"}}
+
+
 # ------------------------- Benchmark thresholds -------------------------
 
 
