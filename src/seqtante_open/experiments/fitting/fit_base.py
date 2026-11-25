@@ -441,7 +441,7 @@ class FittingClass(ABC, Generic[ResultsT]):
     ) -> dict[str, float]:
         """A starting point for fitting :meth:`cosfunc` to an oscillating trace, keyed by its parameter names.
 
-        Scans angular frequencies from a quarter of a period over the window up to the sampling's Nyquist
+        Scans angular frequencies from an eighth of a period over the window up to the sampling's Nyquist
         limit and, at each, fits the offset and the cosine (and the sine, with ``free_phase``) by linear
         least squares, keeping the frequency with the smallest residual. An FFT peak cannot do this for a
         trace holding one or two periods: its bins are a whole period per window apart, and a local fit

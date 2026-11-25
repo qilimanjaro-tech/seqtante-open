@@ -139,6 +139,27 @@ class TestRabiAmplitudeModel(FittingTestCase):
         assert fitted.pi_amplitude == pytest.approx(pi, abs=0.02)
         assert fitted.r_squared > 0.8
 
+    def test_each_level_s_std_follows_its_own_spread(self, fitted, monkeypatch) -> None:
+        """offset and a are correlated, so |0> and |1> get different stds; each matches the spread over seeds.
+
+        The window starts late and ends at pi, so |0> is extrapolated and |1> is measured: one shared
+        std (offset and a added in quadrature) read 0.077 for both against spreads of about 0.10 and 0.036.
+        """
+        pi = 0.48
+        amplitudes = np.linspace(0.2, 0.5, 40)
+        levels, stds = [], []
+        for seed in range(200):
+            noise = np.random.default_rng(seed).normal(0.0, 0.1, amplitudes.size)
+            self._refit(fitted, monkeypatch, amplitudes, np.cos(np.pi * amplitudes / pi) + noise)
+            level_0, level_0_std, level_1, level_1_std = fitted.readout_levels
+            levels.append((level_0, level_1))
+            stds.append((level_0_std, level_1_std))
+
+        spread = np.std(levels, axis=0)
+        reported = np.mean(stds, axis=0)
+        assert reported == pytest.approx(spread, rel=0.15)
+        assert reported[0] > 2 * reported[1]
+
     def test_a_fit_without_a_covariance_has_undefined_uncertainties(self, fitted, monkeypatch) -> None:
         """When lmfit cannot estimate the covariance the uncertainties are NaN, never a fake 0."""
         from lmfit import Model
@@ -150,6 +171,7 @@ class TestRabiAmplitudeModel(FittingTestCase):
                 result = super().fit(*args, **kwargs)
                 for parameter in result.params.values():
                     parameter.stderr = None
+                result.covar = None
                 return result
 
         monkeypatch.setattr(rabi_fit, "Model", NoCovarianceModel)

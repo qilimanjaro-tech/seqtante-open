@@ -51,6 +51,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from qili_qprograms.targets import Target
+    from qililab.typings import ParameterValue
 
 #: Stream/experiment name the measurement is stored under.
 _EXPERIMENT_NAME = "rabi_amplitude_drag"
@@ -61,7 +62,7 @@ PI_AMPLITUDE = "pi_amplitude"
 
 #: The node's ``defaults``; every one is overridable in the tree. ``drive_amplitude_sweep``, ``averages``
 #: and ``relax_duration`` have no default. A Rohde & Schwarz drive needs the step's ``drive_power`` (dBm);
-#: a QCM-RF drive runs at ``drive_gain`` 1, the only value the node accepts (see :meth:`RabiNode._require_unit_drive_gain`).
+#: a QCM-RF drive runs at ``drive_gain`` 1, the only value the node accepts (see :meth:`RabiNode._drive_source_writes`).
 RABI_DEFAULTS: Mapping[str, Any] = {
     "readout_ringup_time": 0,
     "drive_gain": 1.0,
@@ -104,7 +105,6 @@ class RabiNode(FixedFluxNode[RabiFitted]):
         """
         self._require_pulse(target, Role.drive, "pi")
         self._require_pulse(target, Role.readout, "readout")
-        self._require_unit_drive_gain(target)
         sweep = self._sweep(target, "drive_amplitude_sweep")
 
         qprogram = rabi_amplitude(
@@ -135,23 +135,29 @@ class RabiNode(FixedFluxNode[RabiFitted]):
             write=write_whole,
         )
 
-    def _require_unit_drive_gain(self, target: Target) -> None:
-        """Refuse a QCM-RF ``drive_gain`` other than 1, before any hardware is set.
+    def _drive_source_writes(self, target: Target) -> list[tuple[Parameter, ParameterValue]]:
+        """The base's drive-source writes, refusing a QCM-RF ``drive_gain`` other than 1.
 
-        Qblox multiplies the sequencer's static gain into the ``set_awg_gain`` the QProgram sweeps, so at
-        ``drive_gain`` g the hardware plays g times the swept gain and the fit would read the pi amplitude
-        divided by g. The node writes the fitted value as the pulse's amplitude, which a consumer plays at
-        gain 1.
+        rabi sweeps the drive gain itself (the QProgram's ``set_awg_gain``), and writes the fitted pi
+        amplitude as the pulse's amplitude for a consumer that plays it at gain 1. A static sequencer gain
+        other than 1 has no place in that: Qblox documents the path gain as multiplying ``set_awg_gain``,
+        which would scale the sweep, and if the sweep replaces it instead, the step's ``drive_gain`` would
+        silently do nothing. Either way the tree would not run what it says, so the step fails.
+        :meth:`_set_operating_point_hardware` takes these writes before its first hardware write, so the
+        refusal leaves the line untouched, and the platform is asked for the drive instrument only once.
 
         Raises:
-            ValueError: if the drive is a QCM-RF and the step sets ``drive_gain`` to anything but 1.
+            ValueError: if the drive is a QCM-RF and the step sets ``drive_gain`` to anything but 1, or the
+                drive instrument's level is neither set in the step nor defaulted.
         """
-        for parameter, value in self._drive_source_writes(target):
+        writes = super()._drive_source_writes(target)
+        for parameter, value in writes:
             if parameter == Parameter.GAIN and value != 1:
                 raise ValueError(
-                    f"step '{self.name}': {target} drive_gain {value} would scale the swept gain, so the pi "
-                    "amplitude would not hold at gain 1; rabi runs a QCM-RF drive at drive_gain 1"
+                    f"step '{self.name}': {target} drive_gain {value} is not 1; rabi sweeps the drive gain "
+                    "itself, so it runs a QCM-RF drive at drive_gain 1"
                 )
+        return writes
 
     def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[RabiFitted]:
         """Fit the sweep, check it, save the fit to the DB, plot, and return the pi amplitude and readout levels.

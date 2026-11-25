@@ -310,7 +310,7 @@ def test_pi_amplitude_writes_the_played_pulse_at_the_fitted_gain(monkeypatch, st
 
 
 def test_a_qcm_rf_drive_runs_at_unit_gain_by_default(monkeypatch):
-    """Qblox multiplies the static gain into the swept one, so the pi amplitude holds only at gain 1."""
+    """rabi sweeps the drive gain itself, so it arms a QCM-RF drive at static gain 1."""
     monkeypatch.setattr(rabi_module, "RabiAmplitudeModel", FakeRabiModel)
     calibration = _calibration(_rabi_file("sweet_spot"))
     _add_played_pulses(calibration, "sweet_spot")
@@ -320,6 +320,8 @@ def test_a_qcm_rf_drive_runs_at_unit_gain_by_default(monkeypatch):
 
     assert node.run({}) == []
     assert platform.values_at_execute["drive_q1", Parameter.GAIN] == 1
+    # The drive instrument is looked up once per target, so an unknown one is warned about once.
+    assert platform.calls.count("get_element:drive_q1") == 1
 
 
 def test_a_qcm_rf_drive_gain_other_than_1_fails_before_any_hardware(monkeypatch):
@@ -329,7 +331,7 @@ def test_a_qcm_rf_drive_gain_other_than_1_fails_before_any_hardware(monkeypatch)
         calibration, monkeypatch, platform=FakeRabiPlatform(drive_instrument="QCMRF"), drive_level={"drive_gain": 0.5}
     )
 
-    with pytest.raises(ValueError, match=r"drive_gain 0\.5 would scale the swept gain"):
+    with pytest.raises(ValueError, match=r"drive_gain 0\.5 is not 1; rabi sweeps the drive gain itself"):
         node.execute_node([Q1])
 
     assert platform.calls == ["get_element:drive_q1"]  # it read which instrument drives q1, and set nothing

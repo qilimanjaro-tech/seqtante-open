@@ -83,12 +83,8 @@ class RabiAmplitudeModel(FittingClass[_RabiResults]):
         fit = model.fit(data=signal, params=model.make_params(a=guess["a"], offset=guess["offset"]), phi=amplitudes)
 
         offset, amplitude, angular_frequency = (fit.params[name].value for name in ("offset", "a", "omega"))
-        offset_std, amplitude_std, angular_frequency_std = (
-            self._stderr(fit.params[name]) for name in ("offset", "a", "omega")
-        )
-        # Both levels carry the same std, propagated from offset and amplitude ignoring their covariance --
-        # an accepted approximation for the level uncertainty.
-        level_std = float(np.hypot(offset_std, amplitude_std))
+        angular_frequency_std = self._stderr(fit.params["omega"])
+        level_0_std, level_1_std = self._level_stds(fit)
         has_oscillation = angular_frequency > 0
         pi_amplitude = np.pi / angular_frequency if has_oscillation else float("nan")
         pi_amplitude_std = pi_amplitude * angular_frequency_std / angular_frequency if has_oscillation else float("nan")
@@ -106,11 +102,25 @@ class RabiAmplitudeModel(FittingClass[_RabiResults]):
             pi_amplitude=float(pi_amplitude),
             pi_amplitude_std=float(pi_amplitude_std),
             level_0=float(offset + amplitude),
-            level_0_std=level_std,
+            level_0_std=level_0_std,
             level_1=float(offset - amplitude),
-            level_1_std=level_std,
+            level_1_std=level_1_std,
         )
         return self.results
+
+    @staticmethod
+    def _level_stds(fit) -> tuple[float, float]:
+        """The standard errors of |0> = offset + a and |1> = offset - a, from the fit's covariance.
+
+        ``offset`` and ``a`` are correlated, most when the window holds little of a period, so each level
+        gets its own: Var(offset ± a) = Var(offset) + Var(a) ± 2·Cov(offset, a). NaN (never 0) when lmfit
+        could not estimate the covariance.
+        """
+        if fit.covar is None or any(fit.params[name].stderr is None for name in ("offset", "a")):
+            return float("nan"), float("nan")
+        i, j = fit.var_names.index("offset"), fit.var_names.index("a")
+        variance, covariance = fit.covar[i, i] + fit.covar[j, j], fit.covar[i, j]
+        return float(np.sqrt(variance + 2 * covariance)), float(np.sqrt(variance - 2 * covariance))
 
     @staticmethod
     def _stderr(parameter) -> float:
