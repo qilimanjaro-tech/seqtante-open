@@ -40,6 +40,7 @@ from qili_qprograms.bus_alias import Role, bus_alias
 from qili_qprograms.calibration.model import Measured, ReadoutLevels
 from qili_qprograms.experiments import rabi_amplitude
 from qili_qprograms.waveforms import scaled, unit_amplitude
+from qililab import Parameter
 
 from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode, write_whole
 from seqtante_open.controllers.operating_point import operating_point_for
@@ -59,10 +60,11 @@ READOUT_LEVELS = "readout_levels"
 PI_AMPLITUDE = "pi_amplitude"
 
 #: The node's ``defaults``; every one is overridable in the tree. ``drive_amplitude_sweep``, ``averages``
-#: and ``relax_duration`` have no default, and the drive instrument decides which of ``drive_power``
-#: (Rohde & Schwarz, dBm) or ``drive_gain`` (QCM-RF, [-1, 1]) the step must set.
+#: and ``relax_duration`` have no default. A Rohde & Schwarz drive needs the step's ``drive_power`` (dBm);
+#: a QCM-RF drive runs at ``drive_gain`` 1, the only value the node accepts (see :meth:`RabiNode._require_unit_drive_gain`).
 RABI_DEFAULTS: Mapping[str, Any] = {
     "readout_ringup_time": 0,
+    "drive_gain": 1.0,
     # Minimum R² the cosine fit must reach to pass the step.
     "min_r2": 0.9,
 }
@@ -102,6 +104,7 @@ class RabiNode(FixedFluxNode[RabiFitted]):
         """
         self._require_pulse(target, Role.drive, "pi")
         self._require_pulse(target, Role.readout, "readout")
+        self._require_unit_drive_gain(target)
         sweep = self._sweep(target, "drive_amplitude_sweep")
 
         qprogram = rabi_amplitude(
@@ -131,6 +134,24 @@ class RabiNode(FixedFluxNode[RabiFitted]):
             shape=(len(sweep), 2),
             write=write_whole,
         )
+
+    def _require_unit_drive_gain(self, target: Target) -> None:
+        """Refuse a QCM-RF ``drive_gain`` other than 1, before any hardware is set.
+
+        Qblox multiplies the sequencer's static gain into the ``set_awg_gain`` the QProgram sweeps, so at
+        ``drive_gain`` g the hardware plays g times the swept gain and the fit would read the pi amplitude
+        divided by g. The node writes the fitted value as the pulse's amplitude, which a consumer plays at
+        gain 1.
+
+        Raises:
+            ValueError: if the drive is a QCM-RF and the step sets ``drive_gain`` to anything but 1.
+        """
+        for parameter, value in self._drive_source_writes(target):
+            if parameter == Parameter.GAIN and value != 1:
+                raise ValueError(
+                    f"step '{self.name}': {target} drive_gain {value} would scale the swept gain, so the pi "
+                    "amplitude would not hold at gain 1; rabi runs a QCM-RF drive at drive_gain 1"
+                )
 
     def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[RabiFitted]:
         """Fit the sweep, check it, save the fit to the DB, plot, and return the pi amplitude and readout levels.

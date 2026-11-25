@@ -26,7 +26,7 @@ defaults:
     averages: 10000
   rabi:
     drive_amplitude_sweep: [0.02, 0.8, 40]
-    drive_power: -20  # dBm, for a Rohde & Schwarz drive source; a QCM-RF drive takes drive_gain in [-1, 1]
+    drive_power: -20  # dBm, for a Rohde & Schwarz drive source; a QCM-RF drive runs at drive_gain 1, the only value rabi accepts
     relax_duration: 500000
     averages: 2000
   t1:

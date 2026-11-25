@@ -35,7 +35,7 @@ class _RabiResults(TypedDict):
 
 
 class RabiAmplitudeModel(FittingClass[_RabiResults]):
-    """Fit a Rabi amplitude sweep (DRAG drive) and read the pi amplitude and the |0>/|1> readout levels.
+    """Fit a Rabi amplitude sweep and read the pi amplitude and the |0>/|1> readout levels.
 
     The measurement sweeps the drive amplitude. The rotation angle is linear in it and zero at zero
     drive, where the qubit sits in |0>, so the rotated readout signal is the undamped cosine
@@ -74,17 +74,13 @@ class RabiAmplitudeModel(FittingClass[_RabiResults]):
         self._results = None
         amplitudes, signal = self.amplitudes, self.signal
 
-        half_range = float((np.max(signal) - np.min(signal)) / 2) or 1.0
+        # A Rabi rotation starts from |0> at zero drive: the phase is 0, not a free parameter. The signed
+        # amplitude covers |0> being the top or the bottom of the rotated trace.
+        guess = self.oscillation_initial_guess(amplitudes, signal, free_phase=False)
         model = Model(self.cosfunc)
-        model.set_param_hint("omega", value=self._angular_frequency_guess(amplitudes, signal), min=0.0)
-        model.set_param_hint("offset", value=float(np.mean(signal)))
-        # A Rabi rotation starts from |0> at zero drive: the phase is 0, not a free parameter.
+        model.set_param_hint("omega", value=guess["omega"], min=0.0)
         model.set_param_hint("phase_offset", value=0.0, vary=False)
-        # |0> may be the top or the bottom of the rotated trace, so start from both signs and keep the better fit.
-        fit = min(
-            (model.fit(data=signal, params=model.make_params(a=sign * half_range), phi=amplitudes) for sign in (1, -1)),
-            key=lambda result: result.chisqr,
-        )
+        fit = model.fit(data=signal, params=model.make_params(a=guess["a"], offset=guess["offset"]), phi=amplitudes)
 
         offset, amplitude, angular_frequency = (fit.params[name].value for name in ("offset", "a", "omega"))
         offset_std, amplitude_std, angular_frequency_std = (
@@ -120,18 +116,6 @@ class RabiAmplitudeModel(FittingClass[_RabiResults]):
     def _stderr(parameter) -> float:
         """A fitted parameter's standard error, NaN (never 0) when lmfit could not estimate the covariance."""
         return float(parameter.stderr) if parameter.stderr is not None else float("nan")
-
-    @staticmethod
-    def _angular_frequency_guess(amplitudes: np.ndarray, signal: np.ndarray) -> float:
-        """Estimate the oscillation's angular frequency from the FFT of the (centred) signal."""
-        step = float(np.mean(np.diff(amplitudes)))
-        if step == 0:
-            return 1.0
-        spectrum = np.abs(np.fft.rfft(signal - np.mean(signal)))
-        frequencies = np.fft.rfftfreq(len(signal), d=abs(step))
-        peak = int(np.argmax(spectrum[1:]) + 1) if len(spectrum) > 1 else 0
-        dominant = frequencies[peak] if peak else 1.0 / (abs(step) * len(signal))
-        return float(2 * np.pi * dominant)
 
     @property
     def pi_amplitude(self) -> float:

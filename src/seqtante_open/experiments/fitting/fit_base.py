@@ -434,3 +434,50 @@ class FittingClass(ABC, Generic[ResultsT]):
     @staticmethod
     def cosfunc(phi, a, omega, offset, phase_offset):
         return offset + a * np.cos(omega * phi + phase_offset)
+
+    @staticmethod
+    def oscillation_initial_guess(
+        x_array: np.typing.ArrayLike, y_array: np.typing.ArrayLike, *, free_phase: bool = True
+    ) -> dict[str, float]:
+        """A starting point for fitting :meth:`cosfunc` to an oscillating trace, keyed by its parameter names.
+
+        Scans angular frequencies from a quarter of a period over the window up to the sampling's Nyquist
+        limit and, at each, fits the offset and the cosine (and the sine, with ``free_phase``) by linear
+        least squares, keeping the frequency with the smallest residual. An FFT peak cannot do this for a
+        trace holding one or two periods: its bins are a whole period per window apart, and a local fit
+        started from the wrong bin settles in a neighbouring minimum.
+
+        Args:
+            x_array: The swept values.
+            y_array: The trace.
+            free_phase: Fit the phase as well. Without it ``phase_offset`` is 0 and ``a`` is signed.
+
+        Returns:
+            ``a``, ``omega``, ``offset`` and ``phase_offset``. ``omega`` is 0 when ``x_array`` spans no range.
+        """
+        x = np.asarray(x_array, dtype=float)
+        y = np.asarray(y_array, dtype=float)
+        span = float(np.ptp(x))
+        if span == 0:
+            return {"a": 0.0, "omega": 0.0, "offset": float(np.mean(y)), "phase_offset": 0.0}
+        step = span / (len(x) - 1)
+        best_residual, best_omega, best_coefficients = np.inf, 0.0, np.zeros(3)
+        # 10 frequencies per FFT bin over the scanned range.
+        for omega in np.linspace(np.pi / (4 * span), np.pi / step, 10 * len(x)):
+            columns = [np.ones_like(x), np.cos(omega * x)] + ([np.sin(omega * x)] if free_phase else [])
+            basis = np.column_stack(columns)
+            coefficients = np.linalg.lstsq(basis, y, rcond=None)[0]
+            residual = float(np.sum((basis @ coefficients - y) ** 2))
+            if residual < best_residual:
+                best_residual, best_omega, best_coefficients = residual, float(omega), coefficients
+        offset, cosine = float(best_coefficients[0]), float(best_coefficients[1])
+        if not free_phase:
+            return {"a": cosine, "omega": best_omega, "offset": offset, "phase_offset": 0.0}
+        # a*cos(wx + p) = a*cos(p)*cos(wx) - a*sin(p)*sin(wx)
+        sine = float(best_coefficients[2])
+        return {
+            "a": float(np.hypot(cosine, sine)),
+            "omega": best_omega,
+            "offset": offset,
+            "phase_offset": float(np.arctan2(-sine, cosine)),
+        }

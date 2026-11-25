@@ -128,6 +128,17 @@ class TestRabiAmplitudeModel(FittingTestCase):
         assert fitted.r_squared > 0.99
         assert fitted.pi_amplitude > amplitudes.max()
 
+    @pytest.mark.parametrize("seed", range(20))
+    def test_a_noisy_trace_of_under_two_periods_finds_the_right_frequency(self, fitted, monkeypatch, seed) -> None:
+        """The example tree's window holds ~1.4 periods for pi = 0.28: an FFT-peak guess sat a bin too high."""
+        pi = 0.28
+        amplitudes = np.linspace(0.02, 0.8, 40)
+        noise = np.random.default_rng(seed).normal(0.0, 0.15, amplitudes.size)
+        self._refit(fitted, monkeypatch, amplitudes, np.cos(np.pi * amplitudes / pi) + noise)
+
+        assert fitted.pi_amplitude == pytest.approx(pi, abs=0.02)
+        assert fitted.r_squared > 0.8
+
     def test_a_fit_without_a_covariance_has_undefined_uncertainties(self, fitted, monkeypatch) -> None:
         """When lmfit cannot estimate the covariance the uncertainties are NaN, never a fake 0."""
         from lmfit import Model

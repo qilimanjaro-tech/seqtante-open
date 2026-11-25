@@ -44,10 +44,10 @@ FAKE_L1, FAKE_L1_STD = 1.5, 0.04
 
 
 class FakeRabiPlatform(ExecutingPlatform):
-    """An :class:`ExecutingPlatform` with a Rohde & Schwarz drive whose one execution returns the whole sweep."""
+    """An :class:`ExecutingPlatform` (a Rohde & Schwarz drive by default) whose one execution returns the whole sweep."""
 
-    def __init__(self) -> None:
-        super().__init__(instruments={"drive_q1": "ROHDE_SCHWARZ"})
+    def __init__(self, drive_instrument: str = "ROHDE_SCHWARZ") -> None:
+        super().__init__(instruments={"drive_q1": drive_instrument})
 
     def results(self) -> dict:
         return {"readout_q1": [SimpleNamespace(array=np.zeros((2, 2)))]}
@@ -177,11 +177,18 @@ def test_pi_amplitude_analysis_writes_into_the_named_pulse(monkeypatch):
 
 
 def _executing_rabi(
-    calibration: Calibration, monkeypatch, *, analysis: str = "pi_amplitude", built: dict | None = None
+    calibration: Calibration,
+    monkeypatch,
+    *,
+    analysis: str = "pi_amplitude",
+    built: dict | None = None,
+    platform: FakeRabiPlatform | None = None,
+    drive_level: dict | None = None,
 ) -> tuple[RabiNode, FakeRabiPlatform]:
     """A rabi node whose real ``execute_node`` runs against a fake platform, with the QProgram builder stubbed.
 
-    The stub records the builder's keyword arguments into ``built`` when given.
+    The stub records the builder's keyword arguments into ``built`` when given. ``drive_level`` replaces
+    the step's ``drive_power`` for the Rohde & Schwarz default ``platform``.
     """
 
     def fake_rabi_amplitude(**kwargs):
@@ -191,8 +198,9 @@ def _executing_rabi(
 
     monkeypatch.setattr(rabi_module, "rabi_amplitude", fake_rabi_amplitude)
     stub_output_and_save(monkeypatch)
-    platform = FakeRabiPlatform()
-    params = {"drive_amplitude_sweep": (0.0, 1.0, 21), "averages": 1000, "relax_duration": 50_000, "drive_power": -10}
+    platform = platform or FakeRabiPlatform()
+    params = {"drive_amplitude_sweep": (0.0, 1.0, 21), "averages": 1000, "relax_duration": 50_000}
+    params |= {"drive_power": -10} if drive_level is None else drive_level
     node = RabiNode(
         name="step",
         idx=0,
@@ -299,3 +307,29 @@ def test_pi_amplitude_writes_the_played_pulse_at_the_fitted_gain(monkeypatch, st
     assert type(pulse) is type(stored)
     assert pulse.amplitude == pytest.approx(written)
     assert pulse.duration == 40
+
+
+def test_a_qcm_rf_drive_runs_at_unit_gain_by_default(monkeypatch):
+    """Qblox multiplies the static gain into the swept one, so the pi amplitude holds only at gain 1."""
+    monkeypatch.setattr(rabi_module, "RabiAmplitudeModel", FakeRabiModel)
+    calibration = _calibration(_rabi_file("sweet_spot"))
+    _add_played_pulses(calibration, "sweet_spot")
+    node, platform = _executing_rabi(
+        calibration, monkeypatch, platform=FakeRabiPlatform(drive_instrument="QCMRF"), drive_level={}
+    )
+
+    assert node.run({}) == []
+    assert platform.values_at_execute["drive_q1", Parameter.GAIN] == 1
+
+
+def test_a_qcm_rf_drive_gain_other_than_1_fails_before_any_hardware(monkeypatch):
+    calibration = _calibration(_rabi_file("sweet_spot"))
+    _add_played_pulses(calibration, "sweet_spot")
+    node, platform = _executing_rabi(
+        calibration, monkeypatch, platform=FakeRabiPlatform(drive_instrument="QCMRF"), drive_level={"drive_gain": 0.5}
+    )
+
+    with pytest.raises(ValueError, match=r"drive_gain 0\.5 would scale the swept gain"):
+        node.execute_node([Q1])
+
+    assert platform.calls == ["get_element:drive_q1"]  # it read which instrument drives q1, and set nothing
