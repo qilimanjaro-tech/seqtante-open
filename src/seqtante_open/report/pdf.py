@@ -26,17 +26,23 @@ import os
 from typing import TYPE_CHECKING
 from xml.sax.saxutils import escape
 
+from PIL import Image as PILImage
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+# ``PIL`` is imported eagerly (it is part of the report extra, and reportlab needs it to draw PNGs) so
+# that a missing pillow fails the report import with ``name == "PIL"`` and the run prints the install
+# hint, instead of surfacing only when the first plot is drawn as a generic report failure.
+
 if TYPE_CHECKING:
     from seqtante_open.calibration.model import OperatingPoint
     from seqtante_open.run_results import BenchmarkRow, RunResults
 
 _VERDICT_COLOR = {"passed": colors.green, "warning": colors.orange, "failed": colors.red}
+_NOT_EVALUATED = "Not evaluated"
 _PLOT_WIDTH = 15 * cm
 
 #: Shared header/grid styling for every table, so the benchmark and outcome tables cannot drift apart.
@@ -66,6 +72,7 @@ _VERDICT_CELL_STYLE = {
     verdict: ParagraphStyle(name=f"Cell-{verdict}", parent=_CELL_STYLE, textColor=color)
     for verdict, color in _VERDICT_COLOR.items()
 }
+_NOT_EVALUATED_CELL_STYLE = ParagraphStyle(name="Cell-not-evaluated", parent=_CELL_STYLE, textColor=colors.grey)
 
 
 def write_report(results: RunResults, path: str) -> None:
@@ -93,8 +100,8 @@ def write_report(results: RunResults, path: str) -> None:
         story.extend(
             [
                 Paragraph(
-                    "<b>This run was aborted before it finished.</b> It ended with an error, so the results "
-                    "below are partial: any step after the failure never ran and is not listed.",
+                    "<b>This run was stopped before it finished</b> (an error or a manual interrupt), so the "
+                    "results below are partial: any step after the stop never ran and is not listed.",
                     styles["Abort"],
                 ),
                 Spacer(1, 0.4 * cm),
@@ -124,10 +131,25 @@ def _benchmarks_section(story: list, results: RunResults, styles) -> None:
                 [
                     Paragraph(f"<b>{escape(row.target)} · {escape(row.experiment)}</b>", styles["Normal"]),
                     Spacer(1, 0.1 * cm),
-                    Image(row.plot, width=_PLOT_WIDTH, height=_PLOT_WIDTH * 0.5, kind="proportional"),
+                    _plot(row.plot, styles),
                     Spacer(1, 0.4 * cm),
                 ]
             )
+
+
+def _plot(path: str, styles) -> Image | Paragraph:
+    """The plot at ``path`` as an image, or a placeholder line when the file cannot be read.
+
+    reportlab reads an ``Image`` lazily, only when the document is built, so a truncated or corrupt PNG
+    (kaleido crashing mid-write) would raise inside ``doc.build`` and cost the whole report. Decoding it
+    with PIL first moves that failure here, where it costs only this one plot.
+    """
+    try:
+        with PILImage.open(path) as image:
+            image.load()
+    except Exception:  # ruff: ignore[blind-except] -- one unreadable plot must not cost the whole report
+        return Paragraph(f"<i>Plot could not be read: {escape(os.path.basename(path))}</i>", styles["Meta"])
+    return Image(path, width=_PLOT_WIDTH, height=_PLOT_WIDTH * 0.5, kind="proportional")
 
 
 def _cell(text: object) -> Paragraph:
@@ -136,19 +158,31 @@ def _cell(text: object) -> Paragraph:
 
 
 def _verdict_cell(verdict: object) -> Paragraph:
-    """The verdict cell, coloured by verdict (the colour cannot come from the shared ``TableStyle``)."""
+    """The verdict cell, coloured by verdict (the colour cannot come from the shared ``TableStyle``).
+
+    ``None`` is a benchmark that was measured but could not be scored, shown greyed as "Not evaluated".
+    """
+    if verdict is None:
+        return Paragraph(_NOT_EVALUATED, _NOT_EVALUATED_CELL_STYLE)
     style = _VERDICT_CELL_STYLE.get(str(verdict), _CELL_STYLE)
     return Paragraph(escape(str(verdict).capitalize()), style)
 
 
 def _benchmark_row_cells(row: BenchmarkRow) -> list[Paragraph]:
     unit = f" {row.unit}" if row.unit else ""
-    value = f"{row.value:.4g}"
-    if row.uncertainty is not None:
-        value += f" ± {row.uncertainty:.2g}"
-    value += unit
-    better = "higher is better" if str(row.direction) == "higher_is_better" else "lower is better"
-    thresholds = f"passed {row.passed:g}{unit}, warning {row.warning:g}{unit} ({better})"
+    if row.value is None:
+        value = "—"
+    else:
+        value = f"{row.value:.4g}"
+        if row.uncertainty is not None:
+            value += f" ± {row.uncertainty:.2g}"
+        value += unit
+    if row.passed is None or row.warning is None:
+        # Not evaluated: the thresholds column says why instead (no thresholds set, no measured value).
+        thresholds = row.note or "—"
+    else:
+        better = "higher is better" if str(row.direction) == "higher_is_better" else "lower is better"
+        thresholds = f"passed {row.passed:g}{unit}, warning {row.warning:g}{unit} ({better})"
     return [_cell(row.target), _cell(row.experiment), _cell(value), _verdict_cell(row.verdict), _cell(thresholds)]
 
 
@@ -156,7 +190,7 @@ def _outcomes_section(story: list, results: RunResults, styles) -> None:
     story.append(Paragraph("Failed and skipped steps", styles["Heading2"]))
     if not results.outcomes:
         message = (
-            "No step failed or was skipped before the run was aborted."
+            "No step failed or was skipped before the run was stopped."
             if results.aborted
             else "Every target completed every step it ran."
         )
@@ -172,21 +206,29 @@ def _outcomes_section(story: list, results: RunResults, styles) -> None:
 
 
 def _targets_section(story: list, results: RunResults, styles) -> None:
-    story.extend([PageBreak(), Paragraph("Per target", styles["Heading2"])])
     if not results.targets:
-        story.extend([Paragraph("No per-target details for this run.", styles["Normal"]), Spacer(1, 0.4 * cm)])
+        # No page break here: a second page that only says "nothing to show" is noise.
+        story.extend(
+            [
+                Paragraph("Per target", styles["Heading2"]),
+                Paragraph("No per-target details for this run.", styles["Normal"]),
+                Spacer(1, 0.4 * cm),
+            ]
+        )
         return
+    story.extend([PageBreak(), Paragraph("Per target", styles["Heading2"])])
     for name in sorted(results.targets):
         target = results.targets[name]
         story.extend(
             [
                 Paragraph(escape(name), styles["Heading3"]),
+                # Escaped as a whole: bus names in the parked-flux list are free text.
                 Paragraph(
-                    f"<b>Operating point before:</b> {_format_operating_point(target.operating_point_before)}",
+                    f"<b>Operating point before:</b> {escape(_format_operating_point(target.operating_point_before))}",
                     styles["Normal"],
                 ),
                 Paragraph(
-                    f"<b>Operating point after:</b> {_format_operating_point(target.operating_point_after)}",
+                    f"<b>Operating point after:</b> {escape(_format_operating_point(target.operating_point_after))}",
                     styles["Normal"],
                 ),
             ]
@@ -196,12 +238,7 @@ def _targets_section(story: list, results: RunResults, styles) -> None:
             story.extend(Paragraph(f"• {escape(move)}", styles["Normal"]) for move in target.reset_point_moves)
         for plot in target.fit_plots:
             if os.path.exists(plot):
-                story.extend(
-                    [
-                        Spacer(1, 0.2 * cm),
-                        Image(plot, width=_PLOT_WIDTH, height=_PLOT_WIDTH * 0.5, kind="proportional"),
-                    ]
-                )
+                story.extend([Spacer(1, 0.2 * cm), _plot(plot, styles)])
         story.append(Spacer(1, 0.5 * cm))
 
 

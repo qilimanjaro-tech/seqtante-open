@@ -2,24 +2,37 @@
 
 import importlib.abc
 import sys
+import time
 from datetime import datetime
+from unittest.mock import MagicMock
 
+import pytest
 from loguru import logger
 
 from seqtante_open import calibration_run as cr_module
 from seqtante_open.calibration_run import CalibrationRun
-from seqtante_open.controllers.verdicts import BenchmarkDirection, BenchmarkResult, BenchmarkThresholds, Verdict
+from seqtante_open.controllers.verdicts import (
+    BenchmarkDirection,
+    BenchmarkResult,
+    BenchmarkThresholds,
+    UnscoredBenchmark,
+    Verdict,
+)
 from seqtante_open.run_results import RunResults
 
 
 class _FakeNode:
     """A graph node stub carrying only what ``_collect_benchmarks`` reads."""
 
-    def __init__(self, name, experiment, benchmark_results=(), analysis_plots=None):
+    def __init__(
+        self, name, experiment, benchmark_results=(), analysis_plots=None, unscored_benchmarks=(), is_benchmark=True
+    ):
         self.name = name
         self.experiment = experiment
         self.benchmark_results = benchmark_results
+        self.unscored_benchmarks = unscored_benchmarks
         self.analysis_plots = analysis_plots or {}
+        self.is_benchmark = is_benchmark
 
 
 class _FakeNxGraph:
@@ -38,6 +51,10 @@ class _FakeOutputController:
     def __init__(self, storage_path, run_id=7):
         self.storage_path = storage_path
         self.run_id = run_id
+        self.end_run_calls: list[dict] = []
+
+    def end_run(self, **kwargs):
+        self.end_run_calls.append(kwargs)
 
 
 def _run(
@@ -95,6 +112,39 @@ def test_collect_results_builds_benchmark_rows_from_the_nodes(monkeypatch):
     assert row.unit == "ns"  # carried on the scored thresholds (QHC-1848)
     assert row.direction is BenchmarkDirection.higher_is_better
     assert row.plot == "/tmp/fit.png"
+
+
+def test_collect_results_lists_an_unscored_benchmark_as_not_evaluated(monkeypatch):
+    # T1 thresholds set for q1 but not q2: q2 is measured and fitted but cannot be scored. It must
+    # still reach the report, as a "Not evaluated" row, rather than vanish from both tables.
+    unscored = UnscoredBenchmark(target="q2", value=9e-6, uncertainty=None, reason="no thresholds")
+    node = _FakeNode("t1 step", "t1", unscored_benchmarks=(unscored,), analysis_plots={"q2": ("/tmp/q2.png",)})
+    run = _run(monkeypatch, graph_nodes={0: node})
+
+    results = run._collect_results()
+
+    assert len(results.benchmarks) == 1
+    row = results.benchmarks[0]
+    assert (row.target, row.experiment, row.value, row.verdict) == ("q2", "t1", 9e-6, None)
+    assert (row.passed, row.warning, row.direction) == (None, None, None)
+    assert row.note == "no thresholds"
+    assert row.plot == "/tmp/q2.png"
+
+
+def test_collect_results_puts_recalibration_fit_plots_on_their_targets(monkeypatch):
+    # A recalibration node's fit plots go to the per-target section, in graph order; a benchmark's
+    # plot is already shown with its benchmark row, so it is not repeated there.
+    two_tone = _FakeNode("two_tone", "two_tone", analysis_plots={"q1": ("/tmp/tt.png",)}, is_benchmark=False)
+    rabi = _FakeNode(
+        "rabi", "rabi", analysis_plots={"q1": ("/tmp/rabi.png",), "q2": ("/tmp/r2.png",)}, is_benchmark=False
+    )
+    t1 = _FakeNode("t1", "t1", analysis_plots={"q1": ("/tmp/t1.png",)})
+    run = _run(monkeypatch, graph_nodes={0: two_tone, 1: rabi, 2: t1})
+
+    results = run._collect_results()
+
+    assert results.targets["q1"].fit_plots == ["/tmp/tt.png", "/tmp/rabi.png"]
+    assert results.targets["q2"].fit_plots == ["/tmp/r2.png"]
 
 
 def test_collect_results_leaves_benchmarks_empty_without_a_graph(monkeypatch):
@@ -185,3 +235,41 @@ def test_a_report_failure_is_swallowed(monkeypatch, tmp_path):
         logger.remove(handle)
 
     assert any("report failed" in str(m).lower() for m in messages)
+
+
+def test_a_non_import_error_while_importing_the_report_does_not_escape(monkeypatch, tmp_path):
+    # pdf.py builds its styles at import time; a later reportlab could raise e.g. a TypeError there.
+    # _write_report runs in the run's ``finally``, so such an error must be logged, never raised: it
+    # would end a clean run with a traceback, or replace an aborted run's real error.
+    import reportlab.lib.styles
+
+    run = _run(monkeypatch, storage_path=str(tmp_path))
+    _force_reimport_report(monkeypatch)
+
+    def incompatible_style(*args, **kwargs):
+        raise TypeError("ParagraphStyle() got an unexpected keyword argument 'leading'")
+
+    monkeypatch.setattr(reportlab.lib.styles, "ParagraphStyle", incompatible_style)
+
+    messages, handle = _capture_warnings()
+    try:
+        run._write_report()  # must not raise
+    finally:
+        logger.remove(handle)
+
+    assert not any("seqtante_open[report]" in str(m) for m in messages)
+    assert any("not a missing extra" in str(m) for m in messages)
+    assert list(tmp_path.glob("report_*.pdf")) == []
+
+
+@pytest.mark.parametrize(("abort_traceback"), [None, "Traceback: flux conflict"])
+def test_end_calibration_passes_the_abort_traceback_to_the_run_entry(monkeypatch, abort_traceback):
+    # Without the traceback qililab saves an aborted run as completed, so qompass shows it as clean.
+    run = _run(monkeypatch, report=False)
+    run.platform = MagicMock()
+    run.start = time.time()
+    run.abort_traceback = abort_traceback
+
+    run._end_calibration()
+
+    assert cr_module.output_controller.end_run_calls == [{"traceback": abort_traceback}]

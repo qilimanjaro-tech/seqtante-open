@@ -16,6 +16,7 @@
 
 import os
 import time
+import traceback
 import warnings
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -27,7 +28,7 @@ from qililab.utils.serialization import deserialize_from
 from ruamel.yaml import YAML
 
 from seqtante_open.calibration.io import read_calibration_file
-from seqtante_open.controllers import CalibrationGraph, CalibrationParser, Pipeline, RunContext
+from seqtante_open.controllers import CalibrationGraph, CalibrationParser, Pipeline, RunContext, experiment_spec
 from seqtante_open.outputs import output_controller
 from seqtante_open.run_results import BenchmarkRow, RunResults, StepOutcome
 
@@ -92,8 +93,10 @@ class CalibrationRun:
         self.platform_path: str = platform_path
         self.config_path: str = config_path
         self.report: bool = report
-        # Set when the run raises, so the close-out can tell the report the results are partial.
+        # Set when the run raises, so the close-out can tell the report the results are partial and
+        # end the database entry as not completed (with the traceback) instead of as a clean run.
         self.aborted: bool = False
+        self.abort_traceback: str | None = None
 
         self.start = time.time()
         self.started_at = datetime.now()
@@ -147,6 +150,7 @@ class CalibrationRun:
             # not an Exception, so it is caught here and re-raised). Record it so the report says so
             # rather than reporting a clean run.
             self.aborted = True
+            self.abort_traceback = traceback.format_exc()
             raise
         finally:
             self._end_calibration()
@@ -188,10 +192,14 @@ class CalibrationRun:
         """
         self._display_time()
         self._safely("zero the bias", self.platform.set_bias_to_zero)
-        self._safely("end the run entry", output_controller.end_run)
+        # Pass the abort's traceback on, so qililab records the run as not completed (it marks a run
+        # completed only when no traceback is given) and qompass does not show an aborted run as clean.
+        self._safely(
+            "end the run entry", lambda: output_controller.end_run(traceback=getattr(self, "abort_traceback", None))
+        )
         self._safely("disconnect the platform", self.platform.disconnect)
         if self.report:
-            self._write_report()
+            self._safely("write the PDF report", self._write_report)
 
     @staticmethod
     def _safely(what: str, action):
@@ -205,7 +213,8 @@ class CalibrationRun:
         """Gather the run's in-memory results for the report (ADR-0009).
 
         The timestamp, versions and run id; whether the run was aborted; every benchmark result the
-        nodes collected (value, uncertainty, verdict, thresholds and a fit plot); and every target that
+        nodes collected (value, uncertainty, verdict, thresholds and a fit plot), including benchmarks
+        measured but not scored; each recalibration node's fit plots, per target; and every target that
         failed or was skipped with its reason (from the graph). Operating points and the reset-point
         move log join this record as the remaining experiment nodes are ported; the report renders
         whatever is present.
@@ -219,6 +228,7 @@ class CalibrationRun:
             aborted=getattr(self, "aborted", False),
         )
         self._collect_benchmarks(results)
+        self._collect_fit_plots(results)
         for target, step, reason in self.graph.report:
             results.outcomes.append(StepOutcome(target=target, step=step, reason=reason))
         return results
@@ -230,16 +240,14 @@ class CalibrationRun:
         target on :attr:`~seqtante_open.controllers.calibration_node.CalibrationNode.benchmark_results`
         as it runs. The value, uncertainty, verdict, thresholds and unit all come from the result (the
         run scored it against the thresholds, whose unit #38 checks against the experiment's spec); the
-        fit plot, when one was produced, from the node's ``analysis_plots``. Legacy function nodes carry
-        no benchmark results and contribute nothing.
+        fit plot, when one was produced, from the node's ``analysis_plots``. A benchmark target measured
+        but not scored (no thresholds, no value) becomes a "Not evaluated" row rather than dropping out.
+        Legacy function nodes carry no benchmark results and contribute nothing.
         """
-        graph = getattr(self.graph, "graph", None)
-        if graph is None:
-            return
-        for node_idx in sorted(graph.nodes):
-            node = graph.nodes[node_idx]["data"]
+        for node in self._graph_nodes():
             benchmark_results = getattr(node, "benchmark_results", ())
-            if not benchmark_results:
+            unscored = getattr(node, "unscored_benchmarks", ())
+            if not benchmark_results and not unscored:
                 continue
             experiment = getattr(node, "experiment", None)
             plots_by_target = getattr(node, "analysis_plots", {})
@@ -259,6 +267,43 @@ class CalibrationRun:
                         plot=plots[0] if plots else None,
                     )
                 )
+            for skipped in unscored:
+                plots = plots_by_target.get(skipped.target, ())
+                spec = experiment_spec(experiment) if experiment is not None else None
+                results.benchmarks.append(
+                    BenchmarkRow(
+                        target=skipped.target,
+                        experiment=experiment or node.name,
+                        value=skipped.value,
+                        uncertainty=skipped.uncertainty,
+                        verdict=None,
+                        passed=None,
+                        warning=None,
+                        unit=spec.benchmark.unit if spec is not None and spec.benchmark is not None else None,
+                        direction=None,
+                        plot=plots[0] if plots else None,
+                        note=skipped.reason,
+                    )
+                )
+
+    def _collect_fit_plots(self, results: RunResults) -> None:
+        """Put each recalibration node's fit plots on its targets' per-target section (ADR-0009).
+
+        A benchmark's plot is already shown with its row in the benchmark table, so only non-benchmark
+        nodes contribute here, in graph order, so a target's plots read in the order its steps ran.
+        """
+        for node in self._graph_nodes():
+            if getattr(node, "is_benchmark", False):
+                continue
+            for target, plots in getattr(node, "analysis_plots", {}).items():
+                results.target(target).fit_plots.extend(plots)
+
+    def _graph_nodes(self) -> list:
+        """The graph's node objects in order, or none when the graph has not been built."""
+        graph = getattr(self.graph, "graph", None)
+        if graph is None:
+            return []
+        return [graph.nodes[node_idx]["data"] for node_idx in sorted(graph.nodes)]
 
     def _write_report(self) -> None:
         """Write the PDF report, if the ``seqtante_open[report]`` extra is installed (ADR-0009).
@@ -266,14 +311,17 @@ class CalibrationRun:
         Called after the database entry and the calibration file are saved, so a report failure never
         costs the run its results. A genuinely missing extra (``reportlab`` or ``PIL`` not importable)
         logs a warning naming the install and the run finishes normally; any other import failure -- a
-        bug in ``pdf.py`` or a platypus symbol that has moved -- logs its traceback instead of wrongly
-        telling the user to install an extra they already have. Any other report error is logged and
-        swallowed for the same reason.
+        bug in ``pdf.py``, a platypus symbol that has moved, or a newer reportlab raising e.g. a
+        ``TypeError`` while ``pdf.py`` builds its styles -- logs its traceback instead of wrongly telling
+        the user to install an extra they already have. It is caught as ``Exception``, not only
+        ``ImportError``: this runs in the run's ``finally``, where an escaping error would end a clean
+        run with a traceback or replace an aborted run's real error. Any other report error is logged
+        and swallowed for the same reason.
         """
         try:
             from seqtante_open.report import write_report
-        except ImportError as exc:
-            if exc.name in {"reportlab", "PIL"}:
+        except Exception as exc:  # ruff: ignore[blind-except] -- see the docstring: must not escape the close-out
+            if isinstance(exc, ImportError) and exc.name in {"reportlab", "PIL"}:
                 logger.opt(colors=True).warning(
                     'The PDF report needs the report extra. Install it with: pip install "seqtante_open[report]"'
                 )

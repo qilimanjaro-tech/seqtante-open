@@ -195,12 +195,13 @@ def test_benchmark_results_are_collected():
 
 
 def test_a_benchmark_without_thresholds_is_not_scored(warnings_log):
-    # With no thresholds the run cannot score, so it reports no result and logs that it was left
-    # unscored. A proper "not evaluated" verdict for this case is a QHC-1848 follow-up.
+    # With no thresholds the run cannot score, so it reports no verdict and logs that it was left
+    # unscored -- but it records the target as unscored so the report can list it as "Not evaluated".
     node = _make(ScriptedNode, targets=[Q1], thresholds=None)
     failed = node.run({})
     assert failed == []  # an unscored benchmark is not a step failure
     assert node.benchmark_results == ()
+    assert [(u.target, u.value, u.reason) for u in node.unscored_benchmarks] == [("q1", PASS, "no thresholds")]
     assert any("left unscored" in message for message in warnings_log)
 
 

@@ -1,12 +1,17 @@
 """Tests for the PDF report rendering (ADR-0009)."""
 
+import re
 from datetime import datetime
 
 from PIL import Image
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import Image as PlatypusImage
+from reportlab.platypus import Paragraph
 
 from seqtante_open.calibration.model import DriveFreqs, Flux, OperatingPoint, ReadoutFreqs
 from seqtante_open.controllers.verdicts import BenchmarkDirection, Verdict
 from seqtante_open.report import write_report
+from seqtante_open.report.pdf import _benchmark_row_cells, _plot
 from seqtante_open.run_results import BenchmarkRow, RunResults, StepOutcome
 
 
@@ -137,4 +142,109 @@ def test_write_report_handles_an_empty_run(tmp_path):
     )
     path = tmp_path / "report.pdf"
     write_report(empty, str(path))  # no benchmarks, outcomes or targets -> sections say so, no crash
+    assert path.read_bytes().startswith(b"%PDF-")
+
+
+def _page_count(path) -> int:
+    return len(re.findall(rb"/Type /Page\b(?!s)", path.read_bytes()))
+
+
+def test_an_empty_run_has_no_near_empty_second_page(tmp_path):
+    empty = RunResults(timestamp=datetime(2026, 11, 10), seqtante_open_version="1", qililab_version="1")
+    path = tmp_path / "report.pdf"
+    write_report(empty, str(path))
+    assert _page_count(path) == 1  # "No per-target details" stays on page 1
+
+
+def test_a_run_with_targets_starts_them_on_a_new_page(tmp_path):
+    path = tmp_path / "report.pdf"
+    write_report(_results(), str(path))
+    assert _page_count(path) == 2
+
+
+def test_an_unreadable_plot_becomes_a_placeholder_not_a_lost_report(tmp_path):
+    # kaleido crashing mid-write leaves a truncated PNG; reportlab only reads it in doc.build, where it
+    # would raise and lose the whole report. It must cost only that one plot.
+    good = tmp_path / "good.png"
+    Image.new("RGB", (40, 30), "white").save(good)
+    truncated = tmp_path / "truncated.png"
+    truncated.write_bytes(good.read_bytes()[: good.stat().st_size // 2])
+    junk = tmp_path / "junk.png"
+    junk.write_bytes(b"not a png")
+
+    styles = {"Meta": getSampleStyleSheet()["Normal"]}
+    assert isinstance(_plot(str(good), styles), PlatypusImage)
+    for bad in (truncated, junk):
+        placeholder = _plot(str(bad), styles)
+        assert isinstance(placeholder, Paragraph)
+        assert "could not be read" in placeholder.getPlainText()
+
+    results = _results()
+    results.target("q1").fit_plots = [str(truncated), str(good)]
+    results.benchmarks.append(
+        BenchmarkRow(
+            target="q2",
+            experiment="t1",
+            value=1.0,
+            uncertainty=None,
+            verdict=Verdict.passed,
+            passed=1.0,
+            warning=0.5,
+            unit=None,
+            direction=BenchmarkDirection.higher_is_better,
+            plot=str(junk),
+        )
+    )
+    path = tmp_path / "report.pdf"
+    write_report(results, str(path))
+    assert path.read_bytes().startswith(b"%PDF-")
+
+
+def test_a_not_evaluated_benchmark_renders_with_its_reason(tmp_path):
+    row = BenchmarkRow(
+        target="q2",
+        experiment="t1",
+        value=9e-6,
+        uncertainty=None,
+        verdict=None,
+        passed=None,
+        warning=None,
+        unit="s",
+        direction=None,
+        note="no thresholds",
+    )
+    cells = [cell.getPlainText() for cell in _benchmark_row_cells(row)]
+    assert cells == ["q2", "t1", "9e-06 s", "Not evaluated", "no thresholds"]
+
+    results = _results()
+    results.benchmarks.append(row)
+    results.benchmarks.append(
+        BenchmarkRow(
+            target="q3",
+            experiment="t1",
+            value=None,
+            uncertainty=None,
+            verdict=None,
+            passed=None,
+            warning=None,
+            unit="s",
+            direction=None,
+            note="no measured value",
+        )
+    )
+    path = tmp_path / "report.pdf"
+    write_report(results, str(path))
+    assert path.read_bytes().startswith(b"%PDF-")
+
+
+def test_parked_bus_names_are_escaped(tmp_path):
+    # model_construct skips the target-name validation, standing in for any parked name with markup.
+    base = _operating_point()
+    point = OperatingPoint.model_construct(
+        flux=base.flux, drive=base.drive, readout=base.readout, parked_flux={"q2 <&> bus": Flux(z=0.3)}
+    )
+    results = _results()
+    results.target("q1").operating_point_after = point
+    path = tmp_path / "report.pdf"
+    write_report(results, str(path))  # an unescaped '<' or '&' would make the paragraph parser raise
     assert path.read_bytes().startswith(b"%PDF-")

@@ -42,27 +42,31 @@ class BenchmarkRow:
     Args:
         target (str): The target the benchmark ran on.
         experiment (str): The experiment that produced it.
-        value (float): The measured value, in ``unit``.
+        value (float | None): The measured value, in ``unit``; ``None`` when the analysis gave none.
         uncertainty (float | None): The standard uncertainty on ``value``, or ``None`` when the
             analysis gives none.
-        verdict (Verdict): Passed / Warning / Failed against the tree's thresholds.
-        passed (float): The Passed threshold, in ``unit``.
-        warning (float): The Warning threshold, in ``unit``.
+        verdict (Verdict | None): Passed / Warning / Failed against the tree's thresholds, or ``None``
+            when the benchmark was measured but could not be scored ("Not evaluated").
+        passed (float | None): The Passed threshold, in ``unit``; ``None`` when not evaluated.
+        warning (float | None): The Warning threshold, in ``unit``; ``None`` when not evaluated.
         unit (str | None): The unit of the value and thresholds, ``None`` when dimensionless.
-        direction (BenchmarkDirection): Whether a higher or a lower value is better.
+        direction (BenchmarkDirection | None): Whether a higher or a lower value is better; ``None``
+            when not evaluated.
         plot (str | None): Path to the benchmark's plot, when one was produced.
+        note (str | None): Why a not-evaluated benchmark has no verdict (e.g. "no thresholds").
     """
 
     target: str
     experiment: str
-    value: float
+    value: float | None
     uncertainty: float | None
-    verdict: Verdict
-    passed: float
-    warning: float
+    verdict: Verdict | None
+    passed: float | None
+    warning: float | None
     unit: str | None
-    direction: BenchmarkDirection
+    direction: BenchmarkDirection | None
     plot: str | None = None
+    note: str | None = None
 
 
 @dataclass(frozen=True)

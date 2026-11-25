@@ -228,12 +228,18 @@ class Outputs:
             case _:
                 assert_never(schema)
 
-    def end_run(self):
-        """End the run entry and save it to the database if one has been started"""
+    def end_run(self, traceback: str | None = None):
+        """End the run entry and save it to the database if one has been started.
+
+        Args:
+            traceback (str | None): The traceback of the error that aborted the run, or ``None`` for a
+                run that finished. qililab marks the entry completed only when no traceback is given, so
+                an aborted run is recorded as not completed.
+        """
         if isinstance(self.run, SequenceRun):
-            self.run.end_sequence(self.db_manager.session)
+            self.run.end_sequence(self.db_manager.session, traceback=traceback)
         elif isinstance(self.run, CalibrationRun):
-            self.run.end_calibration(self.db_manager.session)
+            self.run.end_calibration(self.db_manager.session, traceback=traceback)
 
     @property
     def run_id(self) -> int:

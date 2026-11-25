@@ -40,6 +40,7 @@ from .verdicts import (
     BenchmarkDirection,
     BenchmarkResult,
     BenchmarkThresholds,
+    UnscoredBenchmark,
     Verdict,
     verdict_for,
 )
@@ -68,6 +69,7 @@ __all__ = [
     "RunContext",
     "Step",
     "TreeParseError",
+    "UnscoredBenchmark",
     "Verdict",
     "apply_operating_point",
     "crosstalk_session",

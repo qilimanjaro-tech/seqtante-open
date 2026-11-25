@@ -49,7 +49,13 @@ from seqtante_open.controllers.crosstalk_session import CrosstalkSession, crosst
 from seqtante_open.controllers.node_registry import BenchmarkSpec, Parallel, experiment_spec, register_node
 from seqtante_open.controllers.operating_point import apply_operating_point, operating_point_flux_writes
 from seqtante_open.controllers.parameter_restore import ParameterRestore, restoring_parameters
-from seqtante_open.controllers.verdicts import AnalysisError, BenchmarkResult, BenchmarkThresholds, verdict_for
+from seqtante_open.controllers.verdicts import (
+    AnalysisError,
+    BenchmarkResult,
+    BenchmarkThresholds,
+    UnscoredBenchmark,
+    verdict_for,
+)
 from seqtante_open.targets import Target
 
 #: The node-specific fitted payload an ``analyze`` hands its ``apply`` (a frequency, a pi amplitude,
@@ -184,6 +190,9 @@ class CalibrationNode(ABC, Generic[ResultT]):
         self.context = context
         self._thresholds: dict[Target, BenchmarkThresholds] = thresholds or {}
         self.benchmark_results: tuple[BenchmarkResult, ...] = ()
+        # Benchmark targets measured this run but not scored (no thresholds or no value), so the report
+        # can list them as "Not evaluated" instead of dropping them (ADR-0002, QHC-1848).
+        self.unscored_benchmarks: tuple[UnscoredBenchmark, ...] = ()
         # Fit plots produced this run, keyed by target, so the report can show a benchmark's plot and
         # (later) the per-target fit plots. Populated in ``_collect`` and reset at the start of ``run``.
         self.analysis_plots: dict[str, tuple[str, ...]] = {}
@@ -236,7 +245,8 @@ class CalibrationNode(ABC, Generic[ResultT]):
         targets as one group: their points are placed together and ``execute_node`` is called once with
         the whole group (:attr:`parallel`). Either way a target whose phase raises -- a failed fit
         (``AnalysisError``) or any other error -- fails that target alone and the node moves on (D17);
-        benchmark results are collected on :attr:`benchmark_results`.
+        benchmark results are collected on :attr:`benchmark_results`, and benchmark targets that could
+        not be scored on :attr:`unscored_benchmarks`.
 
         Args:
             dead_targets (dict[str, str]): Targets already stopped by an earlier node, mapped to the
@@ -247,13 +257,14 @@ class CalibrationNode(ABC, Generic[ResultT]):
         """
         # Reset before the early return below, so a re-run of this node keeps no stale verdicts or plots.
         self.benchmark_results = ()
+        self.unscored_benchmarks = ()
         self.analysis_plots = {}
         live = [target for target in self.targets if str(target) not in dead_targets]
         if not live:
             return []
 
         failed: list[str] = []
-        benchmarks: list[BenchmarkResult] = []
+        benchmarks: list[BenchmarkResult | UnscoredBenchmark] = []
         platform = self.context.platform
         with crosstalk_session(platform, self.context.calibration) as crosstalk:
             self._crosstalk = crosstalk
@@ -267,10 +278,13 @@ class CalibrationNode(ABC, Generic[ResultT]):
             finally:
                 self._crosstalk, self._file = None, None
 
-        self.benchmark_results = tuple(benchmarks)
+        self.benchmark_results = tuple(b for b in benchmarks if isinstance(b, BenchmarkResult))
+        self.unscored_benchmarks = tuple(b for b in benchmarks if isinstance(b, UnscoredBenchmark))
         return failed
 
-    def _run_one_at_a_time(self, live: list[Target], failed: list[str], benchmarks: list[BenchmarkResult]) -> bool:
+    def _run_one_at_a_time(
+        self, live: list[Target], failed: list[str], benchmarks: list[BenchmarkResult | UnscoredBenchmark]
+    ) -> bool:
         """Run each target in its own operating-point and restore scope (``forbidden`` parallel)."""
         platform = self.context.platform
         applied = False
@@ -292,7 +306,9 @@ class CalibrationNode(ABC, Generic[ResultT]):
                 self._restore = None
         return applied
 
-    def _run_as_group(self, live: list[Target], failed: list[str], benchmarks: list[BenchmarkResult]) -> bool:
+    def _run_as_group(
+        self, live: list[Target], failed: list[str], benchmarks: list[BenchmarkResult | UnscoredBenchmark]
+    ) -> bool:
         """Place every target's point and measure the whole group in one call (``allowed``/``required``)."""
         platform = self.context.platform
         applied = False
@@ -372,7 +388,11 @@ class CalibrationNode(ABC, Generic[ResultT]):
                 planned[bus] = (str(target), value)
 
     def _collect(
-        self, target: Target, measurements: list[int], failed: list[str], benchmarks: list[BenchmarkResult]
+        self,
+        target: Target,
+        measurements: list[int],
+        failed: list[str],
+        benchmarks: list[BenchmarkResult | UnscoredBenchmark],
     ) -> bool:
         """Analyze and apply one target, isolating its failure; return whether ``apply`` ran (D17).
 
@@ -415,28 +435,31 @@ class CalibrationNode(ABC, Generic[ResultT]):
                 )
                 failed.append(str(target))
                 return False
-            if scored is not None:
-                benchmarks.append(scored)
+            benchmarks.append(scored)
         return True
 
-    def _score(self, target: Target, result: AnalysisResult[ResultT]) -> BenchmarkResult | None:
+    def _score(self, target: Target, result: AnalysisResult[ResultT]) -> BenchmarkResult | UnscoredBenchmark:
         """Score one benchmark target's measured value against its thresholds (QHC-1848, ADR-0002, D17).
 
-        Returns the :class:`~seqtante_open.controllers.verdicts.BenchmarkResult`, or ``None`` when the
-        benchmark cannot be scored -- no measured value or no thresholds -- which is logged and left
-        unscored (a proper "not evaluated" verdict is a QHC-1848 follow-up). Raises
+        Returns the :class:`~seqtante_open.controllers.verdicts.BenchmarkResult`, or an
+        :class:`~seqtante_open.controllers.verdicts.UnscoredBenchmark` when the benchmark cannot be
+        scored -- no measured value or no thresholds -- which is logged and reported as "Not evaluated"
+        rather than as a step failure. Raises
         :class:`~seqtante_open.controllers.verdicts.AnalysisError` when the value is non-finite or the
         thresholds do not match the benchmark's unit/direction, so the target fails the step.
         """
         thresholds = self._thresholds_for(target)
         if result.value is None or thresholds is None:
+            missing = "measured value" if result.value is None else "thresholds"
             logger.warning(
                 "Node <i>{node}</i>: <r>{target}</r> has no {missing}; benchmark left unscored",
                 node=self.name,
                 target=str(target),
-                missing="measured value" if result.value is None else "thresholds",
+                missing=missing,
             )
-            return None
+            return UnscoredBenchmark(
+                target=str(target), value=result.value, uncertainty=result.uncertainty, reason=f"no {missing}"
+            )
         if not math.isfinite(result.value):
             raise AnalysisError(f"{target}: benchmark value {result.value} is not finite")
         self._check_scoring_units(thresholds)
