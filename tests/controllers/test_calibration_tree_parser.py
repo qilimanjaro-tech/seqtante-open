@@ -772,8 +772,9 @@ class TestOperatingPointAndPulses:
             parse(tree, platform)
 
     def test_a_pulse_must_be_named(self, platform):
+        tree = single_step_tree(make_step(pulses={"drive": 1}))
         with pytest.raises(TreeParseError, match=r"steps\.s\.pulses\.drive: must be a pulse name"):
-            parse(single_step_tree(make_step(pulses={"drive": 1})), platform)
+            parse(tree, platform)
 
     def test_a_named_point_and_pulses_are_kept(self, platform):
         step = only_step(single_step_tree(make_step(operating_point="reset", pulses={"drive": "pi-reset"})), platform)
