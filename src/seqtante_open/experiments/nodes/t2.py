@@ -19,8 +19,8 @@ fit gives the dephasing time with its uncertainty, and ``analyze`` reports that 
 never a verdict: the run scores it against the tree's thresholds (QHC-1848). T2 is higher-is-better.
 ``apply`` writes nothing, as a benchmark does (ADR-0002). The fitted ``t2`` and ``fit_r2`` go to the DB
 (QHC-1497, QHC-1791). Operationally the T2 pipeline runs after a calibrated pi pulse (rabi), but this
-node's code does not depend on the rabi node: the QProgram reads the pi-half pulse from the calibration
-file (or the pi pulse at half amplitude).
+node's code does not depend on the rabi node: the QProgram plays the calibration file's pi pulse at half
+amplitude, and a stored pi-half pulse, which the tree does not recalibrate, fails the target.
 
 The T2 (Ramsey) QProgram is the shared ``qili_qprograms`` experiment (QHC-1928): the node builds it and
 runs it directly -- no ``experiment_class`` driver layer -- setting the operating point's hardware through
@@ -32,7 +32,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from loguru import logger
 from qili_qprograms.bus_alias import Role, bus_alias
 from qili_qprograms.calibration import pulse_name
 from qili_qprograms.experiments import t2_ramsey
@@ -82,16 +81,17 @@ class T2Node(FixedFluxNode[None]):
     def _run_ramsey_sweep(self, target: Target) -> int:
         """Build the T2 (Ramsey) QProgram, set the operating point's hardware, run the sweep and stream it.
 
-        The QProgram is the shared ``qili_qprograms`` experiment: it plays the calibrated ``pi_half-<op>``
-        pulse (or ``pi-<op>`` at half amplitude) twice around an idle wait and reads the ``readout-<op>``
-        pulse, its weights and the drive/readout IFs from the calibration file. What it does not set -- the
+        The QProgram is the shared ``qili_qprograms`` experiment: it plays ``pi-<op>`` at half amplitude (a
+        stored ``pi_half-<op>`` fails the target, see :meth:`_reject_stored_pi_half`) twice around an idle
+        wait and reads the ``readout-<op>`` pulse, its weights and the drive/readout IFs from the calibration
+        file. What it does not set -- the
         drive/readout LOs, the readout attenuation and the drive source -- the shared
         :meth:`~seqtante_open.controllers.calibration_node.CalibrationNode._set_operating_point_hardware`
         sets from the operating point, through the restore handle so the run undoes it (ADR-0006).
         """
         self._require_pulse(target, Role.readout, "readout")
         operating_point = self._operating_point_name(target)
-        self._warn_if_pi_half_is_stored(target, operating_point)
+        self._reject_stored_pi_half(target, operating_point)
         # Round, not truncate, so the stored time axis is the one t2_ramsey plays.
         durations_idle = np.rint(self._sweep(target, "idle_duration_sweep")).astype(int)
 
@@ -123,23 +123,23 @@ class T2Node(FixedFluxNode[None]):
             write=write_per_point,
         )
 
-    def _warn_if_pi_half_is_stored(self, target: Target, operating_point: str) -> None:
-        """Warn when ``pi_half-<operating_point>`` is stored, since ``t2_ramsey`` then plays it instead of half the pi pulse.
+    def _reject_stored_pi_half(self, target: Target, operating_point: str) -> None:
+        """Fail the target when ``pi_half-<operating_point>`` is stored, since ``t2_ramsey`` would play it over half the pi pulse.
 
         The calibration tree recalibrates only ``pi-<operating_point>`` (rabi), so a stored pi-half pulse is not
-        kept in step with it and can rotate by other than pi/2 once rabi has moved the pi amplitude. A wrong
-        rotation lowers the Ramsey contrast rather than the decay time, and a badly wrong one fails the R²
-        check, so the step still runs.
+        kept in step with it and can rotate by other than pi/2 once rabi has moved the pi amplitude. The check
+        runs before any hardware is set.
+
+        Raises:
+            ValueError: if ``pi_half-<operating_point>`` is in ``Calibration.waveforms`` on the drive bus.
         """
         pi_half = pulse_name("pi_half", operating_point)
-        if self.context.calibration.has_waveform(bus_alias(target, Role.drive), pi_half):
-            logger.warning(
-                "Node <i>{node}</i>: <r>{target}</r> plays the stored '{pi_half}' pulse, which the calibration tree "
-                "does not recalibrate, instead of '{pi}' at half amplitude",
-                node=self.name,
-                target=str(target),
-                pi_half=pi_half,
-                pi=pulse_name("pi", operating_point),
+        drive_bus = bus_alias(target, Role.drive)
+        if self.context.calibration.has_waveform(drive_bus, pi_half):
+            raise ValueError(
+                f"{target}: {self.experiment} found a stored '{pi_half}' pulse on {drive_bus}, which t2_ramsey would "
+                f"play instead of '{pulse_name('pi', operating_point)}' at half amplitude; the calibration tree does "
+                f"not recalibrate it, so remove it from Calibration.waveforms"
             )
 
     def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[None]:

@@ -291,22 +291,24 @@ def test_a_step_naming_a_point_builds_and_runs_there_not_at_the_section_s(monkey
     assert platform.values_at_execute["drive_q1", Parameter.LO_FREQUENCY] == int(3e9)
 
 
-def test_a_stored_pi_half_pulse_is_warned_about(monkeypatch, warnings_log):
-    """t2_ramsey plays a stored pi_half pulse over half the pi pulse, and rabi recalibrates only the pi pulse."""
-    _patch(monkeypatch)
+def test_a_stored_pi_half_pulse_fails_the_target_before_any_hardware_is_set(monkeypatch):
+    """t2_ramsey would play a stored pi_half pulse over half the pi pulse, and rabi recalibrates only the pi pulse."""
+    built = _patch(monkeypatch)
     calibration = _calibration()
     calibration.add_waveform(bus="drive_q1", name="pi_half-sweet_spot", waveform=Square(amplitude=0.5, duration=40))
     node, _ = _make(calibration, THRESHOLDS)
 
-    assert node.run({}) == []
+    assert node.run({}) == ["q1"]
 
-    assert any("plays the stored 'pi_half-sweet_spot' pulse" in message for message in warnings_log)
+    assert built == {}  # the QProgram is never built
+    assert node.benchmark_results == ()
+    assert FakeT2Fit.events == []
 
 
-def test_no_pi_half_pulse_no_warning(monkeypatch, warnings_log):
+def test_a_pi_half_pulse_at_another_point_does_not_fail_the_target(monkeypatch):
     _patch(monkeypatch)
-    node, _ = _make(_calibration(), THRESHOLDS)
+    calibration = _calibration()
+    calibration.add_waveform(bus="drive_q1", name="pi_half-reset", waveform=Square(amplitude=0.5, duration=40))
+    node, _ = _make(calibration, THRESHOLDS)
 
     assert node.run({}) == []
-
-    assert not any("pi_half" in message for message in warnings_log)
