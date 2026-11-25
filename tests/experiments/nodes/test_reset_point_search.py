@@ -74,7 +74,7 @@ class FakeLorentzian:
         return 0.95
 
 
-def _file() -> CalibrationFile:
+def _file(section_point: str = "reset") -> CalibrationFile:
     return CalibrationFile(
         operating_points_version=1,
         operating_points={
@@ -83,29 +83,36 @@ def _file() -> CalibrationFile:
                     flux=Flux(z=0.6),
                     drive=DriveFreqs(lo=DRIVE_LO, if_=-0.08e9),
                     readout=ReadoutFreqs(lo=7e9, if_=1e8, attenuation=50.0),
-                )
+                ),
+                "sweet_spot": OperatingPoint(
+                    flux=Flux(z=0.1),
+                    drive=DriveFreqs(lo=DRIVE_LO, if_=-0.05e9),
+                    readout=ReadoutFreqs(lo=7e9, if_=1e8, attenuation=50.0),
+                ),
             }
         },
-        experiments={"reset_point_search": {"q1": ExperimentSection(operating_point="reset")}},
+        experiments={"reset_point_search": {"q1": ExperimentSection(operating_point=section_point)}},
     )
 
 
-def _calibration() -> Calibration:
+def _calibration(section_point: str = "reset") -> Calibration:
     calibration = Calibration()
     calibration.add_waveform(bus="readout_q1", name="readout-reset", waveform=Square(amplitude=1.0, duration=1000))
     calibration.crosstalk_matrix = identity_crosstalk()
-    write_calibration_file(calibration, _file())
+    write_calibration_file(calibration, _file(section_point))
     return calibration
 
 
-def _make(calibration: Calibration) -> ResetPointSearchNode:
+def _make(calibration: Calibration, parameters: dict | None = None) -> ResetPointSearchNode:
     context = RunContext(
         platform=FakePlatform(),
         platform_path="runcard.yml",
         calibration=calibration,
         calibration_path="calibration.yml",
     )
-    return ResetPointSearchNode(name="reset_flux", idx=0, targets=[Q1], parameters={Q1: {}}, context=context)
+    return ResetPointSearchNode(
+        name="reset_flux", idx=0, targets=[Q1], parameters={Q1: parameters or {}}, context=context
+    )
 
 
 def _patch(monkeypatch):
@@ -141,6 +148,19 @@ def test_loop_moves_flux_into_the_window_and_writes_the_point(monkeypatch):
     assert written.drive.if_ == pytest.approx(IF_INSIDE)  # drive IF taken from the final fit
     # The flux move went through the platform (via the restore handle).
     assert "set:flux_z_q1" in node.context.platform.calls
+
+
+def test_the_search_writes_the_point_the_step_names_not_the_section_s(monkeypatch):
+    """A step naming ``reset`` searches from and writes the reset point, even when the section names another."""
+    _patch(monkeypatch)
+    calibration = _calibration(section_point="sweet_spot")
+    node = _make(calibration, {"operating_point": "reset"})
+
+    assert node.run({}) == []
+
+    points = read_calibration_file(calibration).operating_points["q1"]
+    assert points["reset"].flux.z == pytest.approx(0.6 - 0.0005)
+    assert points["sweet_spot"].flux.z == pytest.approx(0.1)
 
 
 def test_a_rejected_final_fit_fails_the_target_and_is_not_saved(monkeypatch):
