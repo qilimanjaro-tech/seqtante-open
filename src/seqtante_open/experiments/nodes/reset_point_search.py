@@ -43,7 +43,6 @@ from qili_qprograms.bus_alias import Role, bus_alias
 from qililab.typings.enums import Parameter
 
 from seqtante_open.controllers.calibration_node import AnalysisResult
-from seqtante_open.controllers.operating_point import operating_point_for
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.fitting import LorentzianPeakModel
 from seqtante_open.experiments.nodes.two_tone_saturation import TWO_TONE_SATURATION_DEFAULTS, TwoToneSaturationNode
@@ -154,7 +153,7 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
         return measurements
 
     def _search_one(self, target: Target) -> list[int]:
-        operating_point = operating_point_for(self.calibration_file, self.experiment, target)
+        operating_point = self._operating_point(target)
         drive_lo = operating_point.drive.lo
         flux_z_bus = bus_alias(target, Role.flux, "z")
 
@@ -274,6 +273,6 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
         """Write the reset point's absolute ``flux.z`` and drive IF (ADR-0011); the only writer."""
         # reset_point_search always fits a point, so result.fitted is set here; the guard is defensive.
         if result.fitted is not None:
-            operating_point = operating_point_for(self.calibration_file, self.experiment, target)
+            operating_point = self._operating_point(target)
             operating_point.flux.z = result.fitted.flux_z
             operating_point.drive.if_ = result.fitted.drive_if

@@ -72,7 +72,12 @@ def _calibration(pulses: dict | None = None) -> Calibration:
                         flux=Flux(z=0.1),
                         drive=DriveFreqs(lo=4e9, if_=1e8),
                         readout=ReadoutFreqs(lo=7e9, if_=1e8, attenuation=10.0),
-                    )
+                    ),
+                    "reset": OperatingPoint(
+                        flux=Flux(z=0.4),
+                        drive=DriveFreqs(lo=3e9, if_=1e8),
+                        readout=ReadoutFreqs(lo=7e9, if_=1e8, attenuation=10.0),
+                    ),
                 }
             },
             experiments={
@@ -174,7 +179,10 @@ def test_a_section_naming_another_pulse_is_rejected():
     calibration.add_waveform(bus="drive_q1", name="pi-reset", waveform=Square(amplitude=1.0, duration=40))
     node = _node(calibration=calibration)
 
-    with pytest.raises(ValueError, match=r"names drive pulse 'pi-reset', but its QProgram plays 'pi-sweet_spot'"):
+    with pytest.raises(
+        ValueError,
+        match=r"drive pulse 'pi-reset', from the helpers_example section, is not the 'pi-sweet_spot' its QProgram plays",
+    ):
         node._pulse(Q1, Role.drive, "pi")
 
 
@@ -190,6 +198,78 @@ def test_a_required_pulse_must_be_stored():
         waveform=IQDrag(amplitude=1.0, duration=40, num_sigmas=4, drag_coefficient=0),
     )
     assert node._require_pulse(Q1, Role.drive, "pi") == "pi-sweet_spot"
+
+
+# ------------------------------ operating point ------------------------------
+
+
+def test_a_step_naming_no_point_runs_at_its_section_s():
+    node = _node()
+
+    assert node._operating_point_name(Q1) == "sweet_spot"
+    assert node._operating_point(Q1).flux.z == pytest.approx(0.1)
+
+
+def test_two_steps_of_one_experiment_run_each_at_the_point_it_names():
+    """``rabi_reset`` and ``rabi_sweet_spot`` share one section; each runs and names pulses at its own point."""
+    reset, sweet_spot = _node({"operating_point": "reset"}), _node({"operating_point": "sweet_spot"})
+
+    assert reset._operating_point(Q1).flux.z == pytest.approx(0.4)
+    assert reset._pulse(Q1, Role.drive, "pi") == "pi-reset"
+    assert sweet_spot._operating_point(Q1).flux.z == pytest.approx(0.1)
+    assert sweet_spot._pulse(Q1, Role.drive, "pi") == "pi-sweet_spot"
+
+
+def test_a_step_is_placed_at_the_point_it_names():
+    node = _node({"operating_point": "reset"})
+    writes: list = []
+    node._restore = SimpleNamespace(set=lambda alias, parameter, value: writes.append((alias, value)))
+
+    node._place_operating_point(Q1)
+
+    assert writes == [("flux_z_q1", pytest.approx(0.4))]
+
+
+def test_a_step_naming_a_point_the_target_lacks_is_rejected():
+    node = _node({"operating_point": "idle"})
+
+    with pytest.raises(
+        ValueError, match=r"operating_point 'idle' is not one of its operating points \(reset, sweet_spot\)"
+    ):
+        node._operating_point_name(Q1)
+
+
+def test_a_step_naming_another_pulse_is_rejected():
+    node = _node({"operating_point": "reset", "pulses": {"drive": "pi-sweet_spot"}})
+
+    # The pulses may come from defaults or an override, so the error names the step's resolved pulses.
+    with pytest.raises(
+        ValueError,
+        match=r"drive pulse 'pi-sweet_spot', from the pulses of step 'step' \(defaults, the step or an override\), "
+        r"is not the 'pi-reset' its QProgram plays at operating point 'reset'",
+    ):
+        node._pulse(Q1, Role.drive, "pi")
+
+
+def test_the_section_s_pulse_is_checked_when_the_step_names_one_at_its_point():
+    """A step naming the played pulse does not hide a section that names another one at the same point."""
+    calibration = _calibration({"drive": "drag"})
+    calibration.add_waveform(bus="drive_q1", name="drag", waveform=Square(amplitude=1.0, duration=40))
+    node = _node({"pulses": {"drive": "pi-sweet_spot"}}, calibration=calibration)
+
+    with pytest.raises(
+        ValueError, match=r"drive pulse 'drag', from the helpers_example section, is not the 'pi-sweet_spot'"
+    ):
+        node._pulse(Q1, Role.drive, "pi")
+
+
+def test_the_section_s_pulses_do_not_apply_at_another_point():
+    """The section names its pulses for its own point; a step at another point plays that point's pulse."""
+    calibration = _calibration({"drive": "pi-sweet_spot"})
+    calibration.add_waveform(bus="drive_q1", name="pi-sweet_spot", waveform=Square(amplitude=1.0, duration=40))
+    node = _node({"operating_point": "reset"}, calibration=calibration)
+
+    assert node._pulse(Q1, Role.drive, "pi") == "pi-reset"
 
 
 # ---------------------------------- stream ----------------------------------

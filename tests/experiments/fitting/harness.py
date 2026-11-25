@@ -376,13 +376,8 @@ class FittingTestCase:
     def _fitted_once(self, environment: MagicMock) -> Any:
         """``fit()`` run once per test class, because several of these fits are slow.
 
-        The global numpy RNG is seeded first, because ``lorentzian_fit`` runs
-        ``differential_evolution``, which draws its population from it. Left alone,
-        the same trace fits to a different centre depending on what ran before it,
-        and ``EXPECTED`` becomes a coin toss. Seeding here rather than in
-        ``lorentzian_fit`` is deliberate: ``FluxoniumTwoToneFluxModel.fit`` retries a
-        poor trace by simply fitting it again, which only works while consecutive
-        fits differ. This pins the sequence without making it constant.
+        The global numpy RNG is seeded first, so a fit that draws from it gives the same result whatever
+        ran before it.
         """
         obj = self.FIT_CLASS(**self.INIT)
         np.random.seed(self.SEED)

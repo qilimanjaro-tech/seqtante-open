@@ -17,7 +17,6 @@ from typing import TypedDict
 
 import numpy as np
 import plotly.graph_objects as go
-from scipy.optimize import curve_fit
 
 from seqtante_open.experiments.fitting.fit_base import FittingClass
 
@@ -28,21 +27,18 @@ class _LorentzianResults(TypedDict):
     linewidth: float
     accepted: bool
     quality: str
-    params: tuple[float, float, float, float] | None
-
-
-def _lorentzian(x: np.ndarray, x0: float, a: float, gamma: float, c: float) -> np.ndarray:
-    """A Lorentzian peak: ``c + (a * gamma / 2) / pi / ((x - x0)^2 + (gamma/2)^2)``."""
-    return c + (a * gamma / 2) / np.pi / ((x - x0) ** 2 + (gamma / 2) ** 2)
+    #: ``(amplitude, center, width, offset)`` of :meth:`FittingClass.lorentzian`, NaN when the fit failed.
+    params: tuple[float, float, float, float]
 
 
 class LorentzianPeakModel(FittingClass[_LorentzianResults]):
     """Fit a Lorentzian peak to a two-tone sweep's magnitude and return the qubit IF (QHC-1807).
 
-    Ported from the experimentalists' calibration script (``two_tones_lorentzian_fit_and_plot``). The
-    magnitude ``|I + iQ|`` is fit with a Lorentzian whose starting values come from the data; the fit is
-    **accepted** only if it converges, its R² reaches the minimum, its centre lies inside the sweep, and
-    its linewidth is wider than one sweep step and narrower than the whole sweep. A rejected fit leaves
+    The acceptance rules are the experimentalists' calibration script's (``two_tones_lorentzian_fit_and_plot``).
+    The rotated real quadrature ``Re(rotate_iq(I + iQ))`` is fit with the shared
+    :meth:`~seqtante_open.experiments.fitting.fit_base.FittingClass.fit_lorentzian`, the one Lorentzian
+    fit (QHC-1932 item 5). The fit is **accepted** only if its R² reaches the minimum, its centre lies
+    inside the sweep, and its linewidth is wider than one sweep step and narrower than the whole sweep. A rejected fit leaves
     :attr:`results` ``accepted`` false and ``fitted_if`` ``None`` — the reset-point search reads that to
     widen the sweep or fail the step.
 
@@ -72,44 +68,29 @@ class LorentzianPeakModel(FittingClass[_LorentzianResults]):
         xarr = self.get_xarray()
         frequency_coord = xarr[xarr.dims[0]]
         self.frequencies = np.asarray(frequency_coord.data, dtype=float)
-        self.magnitude = np.abs(xarr.to_numpy())
+        self.signal = np.real(self.rotate_iq(xarr.to_numpy()))
 
     def fit(self) -> _LorentzianResults:
         """Fit the Lorentzian, apply the acceptance checks and record the outcome."""
         # A refit that finds nothing must not leave the previous result readable.
         self._results = None
-        frequency, magnitude = self.frequencies, self.magnitude
-        guess = self._initial_guess(frequency, magnitude)
-
+        frequency = self.frequencies
+        fit = self.fit_lorentzian(frequency, self.signal)
+        r_squared, centre, linewidth = fit["r_squared"], fit["center"], abs(fit["width"])
+        params = (fit["amplitude"], centre, fit["width"], fit["offset"])
+        step = abs(frequency[1] - frequency[0])
+        span = abs(frequency[-1] - frequency[0])
         fitted_if: float | None = None
-        r_squared = 0.0
-        linewidth = 0.0
-        params: tuple[float, float, float, float] | None = None
-        try:
-            best, _ = curve_fit(_lorentzian, frequency, magnitude, p0=guess)
-        except (RuntimeError, ValueError) as error:
-            quality = f"fit did not converge ({error})"
+        quality = f"R2 = {r_squared:.2f}, f_q IF = {centre * 1e-6:.3f} MHz, linewidth = {linewidth * 1e-3:.0f} kHz"
+        # Every comparison with NaN is False, so an undefined R² (a flat trace or a failed fit) is rejected explicitly.
+        if math.isnan(r_squared) or r_squared < self.r2_min:
+            quality += f": rejected, R2 below {self.r2_min}"
+        elif not min(frequency) <= centre <= max(frequency):
+            quality += ": rejected, centre outside the sweep"
+        elif not step < linewidth < span:
+            quality += ": rejected, linewidth not resolved by the sweep"
         else:
-            params = (float(best[0]), float(best[1]), float(best[2]), float(best[3]))
-            model = _lorentzian(frequency, *best)
-            ss_res = float(np.sum((magnitude - model) ** 2))
-            ss_tot = float(np.sum((magnitude - np.mean(magnitude)) ** 2))
-            # A flat trace (drive off, readout saturated) has no variance to explain: R² is undefined (NaN),
-            # not a division by zero, and it is rejected below like a low R².
-            r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
-            step = abs(frequency[1] - frequency[0])
-            span = abs(frequency[-1] - frequency[0])
-            linewidth = abs(best[2])
-            quality = f"R2 = {r_squared:.2f}, f_q IF = {best[0] * 1e-6:.3f} MHz, linewidth = {linewidth * 1e-3:.0f} kHz"
-            # Every comparison with NaN is False, so an undefined R² is rejected explicitly.
-            if math.isnan(r_squared) or r_squared < self.r2_min:
-                quality += f": rejected, R2 below {self.r2_min}"
-            elif not min(frequency) <= best[0] <= max(frequency):
-                quality += ": rejected, centre outside the sweep"
-            elif not step < linewidth < span:
-                quality += ": rejected, linewidth not resolved by the sweep"
-            else:
-                fitted_if = float(best[0])
+            fitted_if = centre
 
         # Stored even for a rejected fit: ``accepted`` and ``quality`` are its result, read by the node.
         self.results = _LorentzianResults(
@@ -121,22 +102,6 @@ class LorentzianPeakModel(FittingClass[_LorentzianResults]):
             params=params,
         )
         return self.results
-
-    @staticmethod
-    def _initial_guess(frequency: np.ndarray, magnitude: np.ndarray) -> tuple[float, float, float, float]:
-        """Starting ``(x0, amplitude, linewidth, offset)`` for the Lorentzian, as the script picks them."""
-        edge_vs_mean = np.mean(magnitude[0:5]) - np.mean(magnitude)
-        if edge_vs_mean < 0:
-            extreme_index = int(np.argmax(magnitude))
-            sign = 1.0
-        else:
-            extreme_index = int(np.argmin(magnitude))
-            sign = -1.0
-        x0 = float(frequency[extreme_index])
-        amplitude = sign * 30e5
-        linewidth = abs((frequency[0] + frequency[-1]) / 10)
-        offset = float(magnitude[0])
-        return x0, amplitude, linewidth, offset
 
     @property
     def fitted_if(self) -> float | None:
@@ -171,18 +136,18 @@ class LorentzianPeakModel(FittingClass[_LorentzianResults]):
         fig.add_trace(
             go.Scatter(
                 x=frequencies_mhz,
-                y=self.magnitude,
+                y=self.signal,
                 mode="markers",
                 name="Data",
                 marker={"color": "royalblue", "size": 5},
             )
         )
-        if results["accepted"] and results["params"] is not None:
+        if results["accepted"]:
             dense = np.linspace(self.frequencies[0], self.frequencies[-1], 501)
             fig.add_trace(
                 go.Scatter(
                     x=dense * 1e-6,
-                    y=_lorentzian(dense, *results["params"]),
+                    y=self.lorentzian(dense, *results["params"]),
                     mode="lines",
                     name="Fit",
                     line={"color": "red", "width": 2},
