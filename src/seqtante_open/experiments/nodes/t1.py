@@ -92,7 +92,7 @@ class T1Node(FixedFluxNode[None]):
         qprogram = t1_saturation(
             calibration=self.context.calibration,
             target=str(target),
-            operating_point=self._section(target).operating_point,
+            operating_point=self._operating_point_name(target),
             idle_duration_sweep=durations_idle,
             averages=self._param(target, "averages"),
             relax_duration=self._param(target, "relax_duration"),
