@@ -35,7 +35,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from seqtante_open.controllers.calibration_node import AnalysisResult
-from seqtante_open.controllers.operating_point import operating_point_for
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.fitting import LorentzianPeakModel
 from seqtante_open.experiments.nodes.two_tone_saturation import TWO_TONE_SATURATION_DEFAULTS, TwoToneSaturationNode
@@ -78,7 +77,7 @@ class TwoToneNode(TwoToneSaturationNode[TwoToneSweetSpot]):
 
     def _measure(self, target: Target) -> int:
         """Run one two-tone pulsed-saturation sweep at the target's operating point; return its id."""
-        operating_point = operating_point_for(self.calibration_file, self.experiment, target)
+        operating_point = self._operating_point(target)
         drive_if_sweep = self._absolute_sweep(target, "drive_if_sweep", operating_point.drive.if_)
         return self._measure_two_tone_saturation(target, drive_if_sweep)
 
@@ -91,7 +90,7 @@ class TwoToneNode(TwoToneSaturationNode[TwoToneSweetSpot]):
         Raises:
             AnalysisError: when the Lorentzian fit is rejected (the step fails for this target).
         """
-        operating_point = operating_point_for(self.calibration_file, self.experiment, target)
+        operating_point = self._operating_point(target)
         model = LorentzianPeakModel(
             measurements[-1],
             target=str(target),
@@ -112,5 +111,5 @@ class TwoToneNode(TwoToneSaturationNode[TwoToneSweetSpot]):
         """Write the fitted drive IF onto the sweet-spot operating point; the only writer (the LO is untouched)."""
         # analyze returns a fitted point or raises, so apply always has one; the guard is just a type narrow.
         if result.fitted is not None:
-            operating_point = operating_point_for(self.calibration_file, self.experiment, target)
+            operating_point = self._operating_point(target)
             operating_point.drive.if_ = result.fitted.drive_if

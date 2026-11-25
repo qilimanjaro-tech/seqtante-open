@@ -70,7 +70,6 @@ def two_tone_frequency(
     )
     if instrument_platform is not None:
         if instrument_platform == "ROHDE_SCHWARZ":
-            platform.set_parameter(alias=drive_bus, parameter=Parameter.IQ_MODULATION, value=True)
             platform.set_parameter(alias=drive_bus, parameter=Parameter.POWER, value=drive_gain)
             platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=True)
         elif instrument_platform == "QCMRF":
@@ -152,7 +151,6 @@ def two_tone__frequency_vs_flux(
     )
     if instrument_platform is not None:
         if instrument_platform == "ROHDE_SCHWARZ":
-            platform.set_parameter(alias=drive_bus, parameter=Parameter.IQ_MODULATION, value=True)
             platform.set_parameter(alias=drive_bus, parameter=Parameter.POWER, value=drive_gain)
             platform.set_parameter(alias=drive_bus, parameter=Parameter.RF_ON, value=True)
         elif instrument_platform == "QCMRF":

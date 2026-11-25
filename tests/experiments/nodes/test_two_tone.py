@@ -34,9 +34,10 @@ Q1 = ExperimentTarget.from_str("q1")
 DRIVE_LO = 2.9e9
 FITTED_IF = -0.10e9  # + LO = 2.80 GHz
 STORED_IF = -0.08e9  # the point's drive IF before the node runs
+RESET_IF = -0.05e9  # the reset point's drive IF
 MEAS_ID = 100
 
-#: The sweep window the step hands the node (absolute Hz).
+#: The sweep window the step hands the node.
 #: The drive-IF window: np.linspace args as offsets from the stored drive IF (QHC-1932).
 PARAMS = {"drive_if_sweep": (-10e6, 10e6, 51)}
 
@@ -91,7 +92,12 @@ def _file() -> CalibrationFile:
                     flux=Flux(z=0.6),
                     drive=DriveFreqs(lo=DRIVE_LO, if_=STORED_IF),
                     readout=ReadoutFreqs(lo=7e9, if_=1e8, attenuation=50.0),
-                )
+                ),
+                "reset": OperatingPoint(
+                    flux=Flux(z=0.2),
+                    drive=DriveFreqs(lo=DRIVE_LO, if_=RESET_IF),
+                    readout=ReadoutFreqs(lo=7e9, if_=1e8, attenuation=50.0),
+                ),
             }
         },
         experiments={"two_tone": {"q1": ExperimentSection(operating_point="sweet_spot")}},
@@ -101,19 +107,22 @@ def _file() -> CalibrationFile:
 def _calibration() -> Calibration:
     calibration = Calibration()
     calibration.add_waveform(bus="readout_q1", name="readout-sweet_spot", waveform=Square(amplitude=1.0, duration=1000))
+    calibration.add_waveform(bus="readout_q1", name="readout-reset", waveform=Square(amplitude=1.0, duration=1000))
     calibration.crosstalk_matrix = identity_crosstalk()
     write_calibration_file(calibration, _file())
     return calibration
 
 
-def _make(calibration: Calibration) -> TwoToneNode:
+def _make(calibration: Calibration, **params) -> TwoToneNode:
     context = RunContext(
         platform=FakePlatform(),
         platform_path="runcard.yml",
         calibration=calibration,
         calibration_path="calibration.yml",
     )
-    return TwoToneNode(name="two_tone_sweet_spot", idx=0, targets=[Q1], parameters={Q1: dict(PARAMS)}, context=context)
+    return TwoToneNode(
+        name="two_tone_sweet_spot", idx=0, targets=[Q1], parameters={Q1: {**PARAMS, **params}}, context=context
+    )
 
 
 def _patch(monkeypatch):
@@ -175,3 +184,16 @@ def test_the_drive_if_sweep_is_the_window_offset_onto_the_stored_drive_if(monkey
     _make(_calibration()).run({})
 
     np.testing.assert_allclose(calls["sweep"], STORED_IF + np.linspace(*PARAMS["drive_if_sweep"]))
+
+
+def test_a_step_naming_another_point_sweeps_and_writes_that_point(monkeypatch):
+    """The section names sweet_spot; a step naming reset sweeps around reset's IF and writes reset (QHC-1936)."""
+    calls = _patch(monkeypatch)
+    calibration = _calibration()
+
+    assert _make(calibration, operating_point="reset").run({}) == []
+
+    np.testing.assert_allclose(calls["sweep"], RESET_IF + np.linspace(*PARAMS["drive_if_sweep"]))
+    points = read_calibration_file(calibration).operating_points["q1"]
+    assert points["reset"].drive.if_ == pytest.approx(FITTED_IF)
+    assert points["sweet_spot"].drive.if_ == pytest.approx(STORED_IF)
