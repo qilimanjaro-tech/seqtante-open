@@ -49,15 +49,20 @@ def _file() -> CalibrationFile:
     )
 
 
-def test_operating_point_for_resolves_the_section():
-    point = operating_point_for(_file(), "single_tone", "q1")
+def test_operating_point_for_resolves_the_named_point():
+    point = operating_point_for(_file(), "q1", "sweet")
     assert point.flux.z == pytest.approx(0.1)
     assert point.flux.x == pytest.approx(0.02)
 
 
+def test_operating_point_for_names_the_points_a_target_has():
+    with pytest.raises(KeyError, match="q1 has no operating point 'reset' \\(it has: sweet\\)"):
+        operating_point_for(_file(), "q1", "reset")
+
+
 def test_sets_target_and_parked_fluxes():
     platform = FakePlatform()
-    apply_operating_point(_file(), "single_tone", ExperimentTarget.from_str("q1"), ParameterRestore(platform))
+    apply_operating_point(_file(), ExperimentTarget.from_str("q1"), "sweet", ParameterRestore(platform))
     assert platform.values["flux_z_q1", Parameter.FLUX] == pytest.approx(0.1)
     assert platform.values["flux_x_q1", Parameter.FLUX] == pytest.approx(0.02)
     assert platform.values["flux_z_q2", Parameter.FLUX] == pytest.approx(0.3)
@@ -65,7 +70,7 @@ def test_sets_target_and_parked_fluxes():
 
 def test_omits_x_flux_where_the_point_has_none():
     platform = FakePlatform()
-    apply_operating_point(_file(), "single_tone", ExperimentTarget.from_str("q1"), ParameterRestore(platform))
+    apply_operating_point(_file(), ExperimentTarget.from_str("q1"), "sweet", ParameterRestore(platform))
     # q2 is parked with z only, so no x bus is touched.
     assert all(alias != "flux_x_q2" for alias, _, _ in platform.sets)
 
@@ -73,7 +78,7 @@ def test_omits_x_flux_where_the_point_has_none():
 def test_fluxes_are_set_through_restore_and_can_be_undone():
     platform = FakePlatform({("flux_z_q1", Parameter.FLUX): 0.9})
     restore = ParameterRestore(platform)
-    apply_operating_point(_file(), "single_tone", ExperimentTarget.from_str("q1"), restore)
+    apply_operating_point(_file(), ExperimentTarget.from_str("q1"), "sweet", restore)
     assert platform.values["flux_z_q1", Parameter.FLUX] == pytest.approx(0.1)
     restore.restore()
     assert platform.values["flux_z_q1", Parameter.FLUX] == pytest.approx(0.9)

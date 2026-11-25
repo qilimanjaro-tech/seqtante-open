@@ -45,7 +45,7 @@ from loguru import logger
 from qili_qprograms.bus_alias import AXES, Axis, Role, bus_alias
 from qili_qprograms.calibration import pulse_name
 from qili_qprograms.calibration.io import read_calibration_file, save_calibration, write_calibration_file
-from qili_qprograms.calibration.model import CalibrationFile, ExperimentSection
+from qili_qprograms.calibration.model import CalibrationFile, ExperimentSection, OperatingPoint
 from qili_qprograms.targets import Target
 from qililab import Parameter, Platform
 from qililab.qprogram.calibration import Calibration
@@ -361,21 +361,60 @@ class CalibrationNode(ABC, Generic[ResultT]):
                 f"{max_rel_uncertainty}"
             )
 
+    def _operating_point_name(self, target: Target) -> str:
+        """The operating point ``target`` runs at: the step's ``operating_point``, else its section's (QHC-1936).
+
+        A step names the point it runs at (ADR-0003), so one target can run the same experiment at two
+        points, as ``rabi_reset`` and ``rabi_sweet_spot`` do. A step that names none runs at the point its
+        experiment section names (ADR-0001).
+
+        Raises:
+            TypeError: on a spine, which sets no experiment and so runs at no point.
+            ValueError: if the step names a point ``target`` does not have.
+            KeyError: if the step names no point and the experiment has no section for ``target``.
+        """
+        self._leaf_experiment()
+        named = self.parameters[target].get("operating_point")
+        if named is None:
+            return self._section(target).operating_point
+        points = self.calibration_file.operating_points.get(str(target), {})
+        if named not in points:
+            raise ValueError(
+                f"step '{self.name}': {target} operating_point {named!r} is not one of its operating points "
+                f"({', '.join(sorted(points)) or 'none'})"
+            )
+        return named
+
+    def _operating_point(self, target: Target) -> OperatingPoint:
+        """``target``'s operating point for this step (:meth:`_operating_point_name`)."""
+        point = self._operating_point_name(target)  # first: a spine fails here, before the file is read
+        return operating_point_for(self.calibration_file, target, point)
+
     def _pulse(self, target: Target, role: Role, purpose: PulsePurpose) -> str:
         """The pulse ``target`` plays on ``role``: ``<purpose>-<operating_point>`` (ADR-0008, QHC-1932).
 
-        That is the name the shared ``qili_qprograms`` experiments play (``readout-<op>``, ``pi-<op>``).
+        That is the name the shared ``qili_qprograms`` experiments play (``readout-<op>``, ``pi-<op>``) at
+        the step's point (:meth:`_operating_point_name`). The step's ``pulses`` may name it; otherwise the
+        experiment section's ``pulses`` may, when the step runs at the section's point.
 
         Raises:
-            ValueError: if the section names a different pulse for ``role``, which the QProgram would not play.
+            ValueError: if the step or the section names a different pulse for ``role``, which the QProgram
+                would not play.
         """
-        section = self._section(target)
-        played = pulse_name(purpose, section.operating_point)
-        named = section.pulses.get(role, played)
+        point = self._operating_point_name(target)
+        played = pulse_name(purpose, point)
+        step_pulses = self.parameters[target].get("pulses") or {}
+        if role.value in step_pulses:
+            named, source = step_pulses[role.value], f"step '{self.name}'"
+        else:
+            section = self.calibration_file.experiments.get(self._leaf_experiment(), {}).get(str(target))
+            runs_at_section = section is not None and section.operating_point == point
+            named = section.pulses.get(role, played) if runs_at_section else played
+            source = f"{self.experiment} section"
         if named != played:
             raise ValueError(
-                f"{target}: the {self.experiment} section names {role.value} pulse '{named}', but its QProgram "
-                f"plays '{played}' at operating point '{section.operating_point}'"
+                f"{target}: the {source} names {role.value} pulse '{named}', but its QProgram plays '{played}' at "
+                f"operating point '{point}'"
             )
         return played
 
@@ -383,7 +422,7 @@ class CalibrationNode(ABC, Generic[ResultT]):
         """:meth:`_pulse`, checked to exist on its bus, so a missing pulse fails before any hardware is set.
 
         Raises:
-            ValueError: if the section names another pulse, or the pulse is not in ``Calibration.waveforms``.
+            ValueError: if the step or section names another pulse, or the pulse is not in ``Calibration.waveforms``.
         """
         name = self._pulse(target, role, purpose)
         bus = bus_alias(target, role)
@@ -485,8 +524,7 @@ class CalibrationNode(ABC, Generic[ResultT]):
             ValueError: if the readout attenuation is not a whole number of dB, or the drive instrument's
                 level is neither set in the step nor defaulted.
         """
-        experiment = self._leaf_experiment()
-        point = operating_point_for(self.calibration_file, experiment, target)
+        point = self._operating_point(target)
         attenuation = point.readout.attenuation
         if not float(attenuation).is_integer():
             raise ValueError(f"{target}: readout attenuation {attenuation} dB is not a whole number of dB")
@@ -582,7 +620,7 @@ class CalibrationNode(ABC, Generic[ResultT]):
         # Reject a flux conflict between targets' points up front -- this is meant to fail loudly (no
         # parallel-placement policy yet), so it sits outside the restore-failure guard below.
         if self.applies_operating_point and self.experiment is not None:
-            self._reject_flux_conflicts(live, self.experiment)
+            self._reject_flux_conflicts(live)
         try:
             with restoring_parameters(platform) as restore:
                 self._restore = restore
@@ -637,12 +675,12 @@ class CalibrationNode(ABC, Generic[ResultT]):
                 failed.append(str(target))
         return placed
 
-    def _reject_flux_conflicts(self, live: list[Target], experiment: str) -> None:
+    def _reject_flux_conflicts(self, live: list[Target]) -> None:
         """Raise if two targets' operating points write the same flux bus to different values."""
         planned: dict[str, tuple[str, float]] = {}
         for target in live:
             try:
-                writes = operating_point_flux_writes(self.calibration_file, experiment, target)
+                writes = operating_point_flux_writes(self.calibration_file, target, self._operating_point_name(target))
             except Exception:  # ruff: ignore[blind-except] -- an uncomputable point drops here; placing for real handles it
                 writes = {}
             for bus, value in writes.items():
@@ -762,8 +800,8 @@ class CalibrationNode(ABC, Generic[ResultT]):
         return self._thresholds.get(target)
 
     def _place_operating_point(self, target: Target) -> None:
-        experiment = self._leaf_experiment()
-        apply_operating_point(self.calibration_file, experiment, target, self.restore)
+        point = self._operating_point_name(target)  # first: a spine fails here, before the file is read
+        apply_operating_point(self.calibration_file, target, point, self.restore)
 
     def _save_calibration(self) -> None:
         write_calibration_file(self.context.calibration, self.calibration_file)
