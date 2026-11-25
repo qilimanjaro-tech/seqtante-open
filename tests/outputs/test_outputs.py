@@ -261,7 +261,28 @@ def test_end_run_ends_the_started_run(make_outputs, database_schema, run_class, 
 
     outputs.end_run()
 
-    getattr(run, end_method).assert_called_once_with(db_manager.session)
+    getattr(run, end_method).assert_called_once_with(db_manager.session, traceback=None)
+
+
+@pytest.mark.parametrize(
+    ("database_schema", "run_class", "end_method", "add_method"),
+    [
+        pytest.param("measurements", SequenceRun, "end_sequence", "add_sequence_run", id="measurements"),
+        pytest.param("autocal", CalibrationRun, "end_calibration", "add_calibration_run", id="autocal"),
+    ],
+)
+def test_end_run_forwards_an_abort_traceback(make_outputs, database_schema, run_class, end_method, add_method):
+    # qililab marks the entry completed only when no traceback is given, so an aborted run must pass
+    # its traceback on or it is saved as completed (and shows as a clean run in qompass).
+    outputs = make_outputs({"database_schema": database_schema})
+    db_manager = outputs.db_manager
+    run = MagicMock(spec=run_class)
+    getattr(db_manager, add_method).return_value = run
+    outputs.start_run(TREE, sample_name="chip", cooldown="cd1", sequence_name="seq")
+
+    outputs.end_run(traceback="Traceback: flux conflict")
+
+    getattr(run, end_method).assert_called_once_with(db_manager.session, traceback="Traceback: flux conflict")
 
 
 def test_end_run_without_a_run_does_nothing(make_outputs):
