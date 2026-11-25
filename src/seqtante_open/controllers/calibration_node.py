@@ -395,28 +395,30 @@ class CalibrationNode(ABC, Generic[ResultT]):
         """The pulse ``target`` plays on ``role``: ``<purpose>-<operating_point>`` (ADR-0008, QHC-1932).
 
         That is the name the shared ``qili_qprograms`` experiments play (``readout-<op>``, ``pi-<op>``) at
-        the step's point (:meth:`_operating_point_name`). The step's ``pulses`` may name it; otherwise the
-        experiment section's ``pulses`` may, when the step runs at the section's point.
+        the step's point (:meth:`_operating_point_name`). The step's resolved ``pulses`` (from ``defaults``,
+        the step or an override) may name it, and so may the experiment section's ``pulses`` when the step
+        runs at the section's point. Every name given must be the played one.
 
         Raises:
-            ValueError: if the step or the section names a different pulse for ``role``, which the QProgram
-                would not play.
+            ValueError: if the step's pulses or the section name a different pulse for ``role``, which the
+                QProgram would not play.
         """
         point = self._operating_point_name(target)
         played = pulse_name(purpose, point)
+        named: list[tuple[str, str]] = []
         step_pulses = self.parameters[target].get("pulses") or {}
         if role.value in step_pulses:
-            named, source = step_pulses[role.value], f"step '{self.name}'"
-        else:
-            section = self.calibration_file.experiments.get(self._leaf_experiment(), {}).get(str(target))
-            runs_at_section = section is not None and section.operating_point == point
-            named = section.pulses.get(role, played) if runs_at_section else played
-            source = f"{self.experiment} section"
-        if named != played:
-            raise ValueError(
-                f"{target}: the {source} names {role.value} pulse '{named}', but its QProgram plays '{played}' at "
-                f"operating point '{point}'"
-            )
+            source = f"the pulses of step '{self.name}' (defaults, the step or an override)"
+            named.append((step_pulses[role.value], source))
+        section = self.calibration_file.experiments.get(self._leaf_experiment(), {}).get(str(target))
+        if section is not None and section.operating_point == point and role in section.pulses:
+            named.append((section.pulses[role], f"the {self.experiment} section"))
+        for pulse, source in named:
+            if pulse != played:
+                raise ValueError(
+                    f"{target}: {role.value} pulse '{pulse}', from {source}, is not the '{played}' its QProgram "
+                    f"plays at operating point '{point}'"
+                )
         return played
 
     def _require_pulse(self, target: Target, role: Role, purpose: PulsePurpose) -> str:

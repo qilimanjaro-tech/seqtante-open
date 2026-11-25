@@ -179,7 +179,10 @@ def test_a_section_naming_another_pulse_is_rejected():
     calibration.add_waveform(bus="drive_q1", name="pi-reset", waveform=Square(amplitude=1.0, duration=40))
     node = _node(calibration=calibration)
 
-    with pytest.raises(ValueError, match=r"names drive pulse 'pi-reset', but its QProgram plays 'pi-sweet_spot'"):
+    with pytest.raises(
+        ValueError,
+        match=r"drive pulse 'pi-reset', from the helpers_example section, is not the 'pi-sweet_spot' its QProgram plays",
+    ):
         node._pulse(Q1, Role.drive, "pi")
 
 
@@ -239,8 +242,23 @@ def test_a_step_naming_a_point_the_target_lacks_is_rejected():
 def test_a_step_naming_another_pulse_is_rejected():
     node = _node({"operating_point": "reset", "pulses": {"drive": "pi-sweet_spot"}})
 
+    # The pulses may come from defaults or an override, so the error names the step's resolved pulses.
     with pytest.raises(
-        ValueError, match=r"step 'step' names drive pulse 'pi-sweet_spot', but its QProgram plays 'pi-reset'"
+        ValueError,
+        match=r"drive pulse 'pi-sweet_spot', from the pulses of step 'step' \(defaults, the step or an override\), "
+        r"is not the 'pi-reset' its QProgram plays at operating point 'reset'",
+    ):
+        node._pulse(Q1, Role.drive, "pi")
+
+
+def test_the_section_s_pulse_is_checked_when_the_step_names_one_at_its_point():
+    """A step naming the played pulse does not hide a section that names another one at the same point."""
+    calibration = _calibration({"drive": "drag"})
+    calibration.add_waveform(bus="drive_q1", name="drag", waveform=Square(amplitude=1.0, duration=40))
+    node = _node({"pulses": {"drive": "pi-sweet_spot"}}, calibration=calibration)
+
+    with pytest.raises(
+        ValueError, match=r"drive pulse 'drag', from the helpers_example section, is not the 'pi-sweet_spot'"
     ):
         node._pulse(Q1, Role.drive, "pi")
 
