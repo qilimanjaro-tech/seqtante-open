@@ -25,7 +25,10 @@ defaults:
     relax_duration: 20000
     averages: 10000
   rabi:
-    amplitude_sweep: [0.02, 0.8, 40]
+    drive_amplitude_sweep: [0.02, 0.8, 40]
+    drive_power: -20  # dBm, for a Rohde & Schwarz drive source; a QCM-RF drive runs at drive_gain 1, the only value rabi accepts
+    relax_duration: 500000
+    averages: 2000
   t1:
     idle_duration_sweep: [0, 200000, 51]
     drive_amplitude: 0.1
@@ -97,7 +100,7 @@ pipelines:
         pulses: {drive: pi-reset, readout: readout-reset}
         overrides:
           - targets: [q14]
-            amplitude_sweep: [0.02, 0.5, 25]
+            drive_amplitude_sweep: [0.02, 0.5, 25]
       lz:
         experiment: landau_zener
         operating_point: reset

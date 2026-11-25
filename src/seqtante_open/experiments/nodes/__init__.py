@@ -19,6 +19,7 @@ calls a driver from ``experiment_classes`` and fits the result.
 """
 
 from .offset_calibration import single_tone_vs_flux
+from .rabi import RabiNode
 from .single_tone import single_tone_node
 from .t1 import T1Node
 from .t2 import T2Node
@@ -26,6 +27,7 @@ from .two_tone import two_tone_node
 from .two_tone_vs_flux import TwoToneVsFluxNode
 
 __all__ = [
+    "RabiNode",
     "T1Node",
     "T2Node",
     "TwoToneVsFluxNode",
