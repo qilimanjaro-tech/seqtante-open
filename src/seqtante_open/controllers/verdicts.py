@@ -93,6 +93,21 @@ class BenchmarkResult:
     thresholds: BenchmarkThresholds
 
 
+@dataclass(frozen=True)
+class UnscoredBenchmark:
+    """A benchmark target that was measured but could not be scored, and why (ADR-0002, QHC-1848).
+
+    The run has no verdict to give it -- the tree sets no thresholds for the target, or the analysis
+    returned no value -- so it is not a :class:`BenchmarkResult`, but it is not a step failure either.
+    The report lists it as "Not evaluated" so a measured benchmark never silently drops out.
+    """
+
+    target: str
+    value: float | None
+    uncertainty: float | None
+    reason: str
+
+
 def verdict_for(value: float, thresholds: BenchmarkThresholds) -> Verdict:
     """Score ``value`` against ``thresholds`` into Passed, Warning or Failed (ADR-0002).
 

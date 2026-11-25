@@ -45,7 +45,7 @@ from loguru import logger
 from qili_qprograms.bus_alias import AXES, Axis, Role, bus_alias
 from qili_qprograms.calibration import pulse_name
 from qili_qprograms.calibration.io import read_calibration_file, save_calibration, write_calibration_file
-from qili_qprograms.calibration.model import CalibrationFile, ExperimentSection
+from qili_qprograms.calibration.model import CalibrationFile, ExperimentSection, OperatingPoint
 from qili_qprograms.targets import Target
 from qililab import Parameter, Platform
 from qililab.qprogram.calibration import Calibration
@@ -61,7 +61,13 @@ from seqtante_open.controllers.operating_point import (
     operating_point_for,
 )
 from seqtante_open.controllers.parameter_restore import ParameterRestore, restoring_parameters
-from seqtante_open.controllers.verdicts import AnalysisError, BenchmarkResult, BenchmarkThresholds, verdict_for
+from seqtante_open.controllers.verdicts import (
+    AnalysisError,
+    BenchmarkResult,
+    BenchmarkThresholds,
+    UnscoredBenchmark,
+    verdict_for,
+)
 from seqtante_open.outputs import output_controller
 
 if TYPE_CHECKING:
@@ -88,7 +94,6 @@ def write_whole(stream_array: StreamArray, averaged: Sequence[np.ndarray]) -> No
 #: The pulse purposes a node asks :meth:`CalibrationNode._pulse` for: the ``<purpose>`` of a
 #: ``<purpose>-<operating_point>`` pulse name (ADR-0008).
 PulsePurpose = Literal["pi", "pi_half", "readout"]
-
 
 #: The node-specific fitted payload an ``analyze`` hands its ``apply`` (a frequency, a pi amplitude,
 #: readout levels...). The base passes it through untouched; each node fixes its own concrete type.
@@ -231,6 +236,12 @@ class CalibrationNode(ABC, Generic[ResultT]):
         self.analysis = analysis if analysis is not None else self._default_analysis()
         self._thresholds: dict[Target, BenchmarkThresholds] = thresholds or {}
         self.benchmark_results: tuple[BenchmarkResult, ...] = ()
+        # Benchmark targets measured this run but not scored (no thresholds or no value), so the report
+        # can list them as "Not evaluated" instead of dropping them (ADR-0002, QHC-1848).
+        self.unscored_benchmarks: tuple[UnscoredBenchmark, ...] = ()
+        # Fit plots produced this run, keyed by target, so the report can show a benchmark's plot and
+        # (later) the per-target fit plots. Populated in ``_collect`` and reset at the start of ``run``.
+        self.analysis_plots: dict[str, tuple[str, ...]] = {}
         self._file: CalibrationFile | None = None
         self._restore: ParameterRestore | None = None
         self._crosstalk: CrosstalkSession | None = None
@@ -350,29 +361,71 @@ class CalibrationNode(ABC, Generic[ResultT]):
                 f"{max_rel_uncertainty}"
             )
 
+    def _operating_point_name(self, target: Target) -> str:
+        """The operating point ``target`` runs at: the step's ``operating_point``, else its section's (QHC-1936).
+
+        A step names the point it runs at (ADR-0003), so one target can run the same experiment at two
+        points, as ``rabi_reset`` and ``rabi_sweet_spot`` do. A step that names none runs at the point its
+        experiment section names (ADR-0001).
+
+        Raises:
+            TypeError: on a spine, which sets no experiment and so runs at no point.
+            ValueError: if the step names a point ``target`` does not have.
+            KeyError: if the step names no point and the experiment has no section for ``target``.
+        """
+        self._leaf_experiment()
+        named = self.parameters[target].get("operating_point")
+        if named is None:
+            return self._section(target).operating_point
+        points = self.calibration_file.operating_points.get(str(target), {})
+        if named not in points:
+            raise ValueError(
+                f"step '{self.name}': {target} operating_point {named!r} is not one of its operating points "
+                f"({', '.join(sorted(points)) or 'none'})"
+            )
+        return named
+
+    def _operating_point(self, target: Target) -> OperatingPoint:
+        """``target``'s operating point for this step (:meth:`_operating_point_name`)."""
+        # Resolved first, so a spine fails here before the calibration file is read.
+        point = self._operating_point_name(target)
+        return operating_point_for(self.calibration_file, target, point)
+
     def _pulse(self, target: Target, role: Role, purpose: PulsePurpose) -> str:
         """The pulse ``target`` plays on ``role``: ``<purpose>-<operating_point>`` (ADR-0008, QHC-1932).
 
-        That is the name the shared ``qili_qprograms`` experiments play (``readout-<op>``, ``pi-<op>``).
+        That is the name the shared ``qili_qprograms`` experiments play (``readout-<op>``, ``pi-<op>``) at
+        the step's point (:meth:`_operating_point_name`). The step's resolved ``pulses`` (from ``defaults``,
+        the step or an override) may name it, and so may the experiment section's ``pulses`` when the step
+        runs at the section's point. Every name given must be the played one.
 
         Raises:
-            ValueError: if the section names a different pulse for ``role``, which the QProgram would not play.
+            ValueError: if the step's pulses or the section name a different pulse for ``role``, which the
+                QProgram would not play.
         """
-        section = self._section(target)
-        played = pulse_name(purpose, section.operating_point)
-        named = section.pulses.get(role, played)
-        if named != played:
-            raise ValueError(
-                f"{target}: the {self.experiment} section names {role.value} pulse '{named}', but its QProgram "
-                f"plays '{played}' at operating point '{section.operating_point}'"
-            )
+        point = self._operating_point_name(target)
+        played = pulse_name(purpose, point)
+        named: list[tuple[str, str]] = []
+        step_pulses = self.parameters[target].get("pulses") or {}
+        if role.value in step_pulses:
+            source = f"the pulses of step '{self.name}' (defaults, the step or an override)"
+            named.append((step_pulses[role.value], source))
+        section = self.calibration_file.experiments.get(self._leaf_experiment(), {}).get(str(target))
+        if section is not None and section.operating_point == point and role in section.pulses:
+            named.append((section.pulses[role], f"the {self.experiment} section"))
+        for pulse, source in named:
+            if pulse != played:
+                raise ValueError(
+                    f"{target}: {role.value} pulse '{pulse}', from {source}, is not the '{played}' its QProgram "
+                    f"plays at operating point '{point}'"
+                )
         return played
 
     def _require_pulse(self, target: Target, role: Role, purpose: PulsePurpose) -> str:
         """:meth:`_pulse`, checked to exist on its bus, so a missing pulse fails before any hardware is set.
 
         Raises:
-            ValueError: if the section names another pulse, or the pulse is not in ``Calibration.waveforms``.
+            ValueError: if the step or section names another pulse, or the pulse is not in ``Calibration.waveforms``.
         """
         name = self._pulse(target, role, purpose)
         bus = bus_alias(target, role)
@@ -474,8 +527,7 @@ class CalibrationNode(ABC, Generic[ResultT]):
             ValueError: if the readout attenuation is not a whole number of dB, or the drive instrument's
                 level is neither set in the step nor defaulted.
         """
-        experiment = self._leaf_experiment()
-        point = operating_point_for(self.calibration_file, experiment, target)
+        point = self._operating_point(target)
         self._check_readout_attenuation(target, point.readout.attenuation)
         drive_writes = self._drive_source_writes(target)
         drive_bus = bus_alias(target, Role.drive)
@@ -487,7 +539,7 @@ class CalibrationNode(ABC, Generic[ResultT]):
             restore.set(drive_bus, parameter, value)
 
     def _set_readout_line(self, target: Target) -> None:
-        """Set ``target``'s readout LO and attenuation at its operating point, through the restore handle.
+        """Set ``target``'s readout LO and attenuation at the step's operating point, through the restore handle.
 
         The readout half of :meth:`_set_operating_point_hardware`, for a node that plays no drive (the
         ``landau_zener`` flux path) and so has no drive source to arm.
@@ -496,8 +548,7 @@ class CalibrationNode(ABC, Generic[ResultT]):
             TypeError: if called on a node that sets no ``experiment`` (a spine, not a leaf).
             ValueError: if the readout attenuation is not a whole number of dB.
         """
-        experiment = self._leaf_experiment()
-        point = operating_point_for(self.calibration_file, experiment, target)
+        point = self._operating_point(target)
         attenuation = point.readout.attenuation
         self._check_readout_attenuation(target, attenuation)
         readout_bus = bus_alias(target, Role.readout)
@@ -520,7 +571,8 @@ class CalibrationNode(ABC, Generic[ResultT]):
         targets as one group: their points are placed together and ``execute_node`` is called once with
         the whole group (:attr:`parallel`). Either way a target whose phase raises -- a failed fit
         (``AnalysisError``) or any other error -- fails that target alone and the node moves on (D17);
-        benchmark results are collected on :attr:`benchmark_results`.
+        benchmark results are collected on :attr:`benchmark_results`, and benchmark targets that could
+        not be scored on :attr:`unscored_benchmarks`.
 
         Args:
             dead_targets (dict[str, str]): Targets already stopped by an earlier node, mapped to the
@@ -529,14 +581,16 @@ class CalibrationNode(ABC, Generic[ResultT]):
         Returns:
             list[str]: The targets that failed in this node (a fit error or any other error).
         """
-        # Reset before the early return below, so a re-run of this node keeps no stale verdicts.
+        # Reset before the early return below, so a re-run of this node keeps no stale verdicts or plots.
         self.benchmark_results = ()
+        self.unscored_benchmarks = ()
+        self.analysis_plots = {}
         live = [target for target in self.targets if str(target) not in dead_targets]
         if not live:
             return []
 
         failed: list[str] = []
-        benchmarks: list[BenchmarkResult] = []
+        benchmarks: list[BenchmarkResult | UnscoredBenchmark] = []
         platform = self.context.platform
         with crosstalk_session(platform, self.context.calibration) as crosstalk:
             self._crosstalk = crosstalk
@@ -550,10 +604,13 @@ class CalibrationNode(ABC, Generic[ResultT]):
             finally:
                 self._crosstalk, self._file = None, None
 
-        self.benchmark_results = tuple(benchmarks)
+        self.benchmark_results = tuple(b for b in benchmarks if isinstance(b, BenchmarkResult))
+        self.unscored_benchmarks = tuple(b for b in benchmarks if isinstance(b, UnscoredBenchmark))
         return failed
 
-    def _run_one_at_a_time(self, live: list[Target], failed: list[str], benchmarks: list[BenchmarkResult]) -> bool:
+    def _run_one_at_a_time(
+        self, live: list[Target], failed: list[str], benchmarks: list[BenchmarkResult | UnscoredBenchmark]
+    ) -> bool:
         """Run each target in its own operating-point and restore scope (``forbidden`` parallel)."""
         platform = self.context.platform
         applied = False
@@ -575,14 +632,16 @@ class CalibrationNode(ABC, Generic[ResultT]):
                 self._restore = None
         return applied
 
-    def _run_as_group(self, live: list[Target], failed: list[str], benchmarks: list[BenchmarkResult]) -> bool:
+    def _run_as_group(
+        self, live: list[Target], failed: list[str], benchmarks: list[BenchmarkResult | UnscoredBenchmark]
+    ) -> bool:
         """Place every target's point and measure the whole group in one call (``allowed``/``required``)."""
         platform = self.context.platform
         applied = False
         # Reject a flux conflict between targets' points up front -- this is meant to fail loudly (no
         # parallel-placement policy yet), so it sits outside the restore-failure guard below.
         if self.applies_operating_point and self.experiment is not None:
-            self._reject_flux_conflicts(live, self.experiment)
+            self._reject_flux_conflicts(live)
         try:
             with restoring_parameters(platform) as restore:
                 self._restore = restore
@@ -637,12 +696,12 @@ class CalibrationNode(ABC, Generic[ResultT]):
                 failed.append(str(target))
         return placed
 
-    def _reject_flux_conflicts(self, live: list[Target], experiment: str) -> None:
+    def _reject_flux_conflicts(self, live: list[Target]) -> None:
         """Raise if two targets' operating points write the same flux bus to different values."""
         planned: dict[str, tuple[str, float]] = {}
         for target in live:
             try:
-                writes = operating_point_flux_writes(self.calibration_file, experiment, target)
+                writes = operating_point_flux_writes(self.calibration_file, target, self._operating_point_name(target))
             except Exception:  # ruff: ignore[blind-except] -- an uncomputable point drops here; placing for real handles it
                 writes = {}
             for bus, value in writes.items():
@@ -655,7 +714,11 @@ class CalibrationNode(ABC, Generic[ResultT]):
                 planned[bus] = (str(target), value)
 
     def _collect(
-        self, target: Target, measurements: list[int], failed: list[str], benchmarks: list[BenchmarkResult]
+        self,
+        target: Target,
+        measurements: list[int],
+        failed: list[str],
+        benchmarks: list[BenchmarkResult | UnscoredBenchmark],
     ) -> bool:
         """Analyze and apply one target, isolating its failure; return whether ``apply`` ran (D17).
 
@@ -685,6 +748,8 @@ class CalibrationNode(ABC, Generic[ResultT]):
             failed.append(str(target))
             return False
 
+        if result.plots:
+            self.analysis_plots[str(target)] = result.plots
         if self.is_benchmark:
             # Scoring runs inside this per-target guard so a non-finite value or a scoring error
             # fails only this target (D17), rather than escaping to the group-level handler.
@@ -696,28 +761,31 @@ class CalibrationNode(ABC, Generic[ResultT]):
                 )
                 failed.append(str(target))
                 return False
-            if scored is not None:
-                benchmarks.append(scored)
+            benchmarks.append(scored)
         return True
 
-    def _score(self, target: Target, result: AnalysisResult[ResultT]) -> BenchmarkResult | None:
+    def _score(self, target: Target, result: AnalysisResult[ResultT]) -> BenchmarkResult | UnscoredBenchmark:
         """Score one benchmark target's measured value against its thresholds (QHC-1848, ADR-0002, D17).
 
-        Returns the :class:`~seqtante_open.controllers.verdicts.BenchmarkResult`, or ``None`` when the
-        benchmark cannot be scored -- no measured value or no thresholds -- which is logged and left
-        unscored (a proper "not evaluated" verdict is a QHC-1848 follow-up). Raises
+        Returns the :class:`~seqtante_open.controllers.verdicts.BenchmarkResult`, or an
+        :class:`~seqtante_open.controllers.verdicts.UnscoredBenchmark` when the benchmark cannot be
+        scored -- no measured value or no thresholds -- which is logged and reported as "Not evaluated"
+        rather than as a step failure. Raises
         :class:`~seqtante_open.controllers.verdicts.AnalysisError` when the value is non-finite or the
         thresholds do not match the benchmark's unit/direction, so the target fails the step.
         """
         thresholds = self._thresholds_for(target)
         if result.value is None or thresholds is None:
+            missing = "measured value" if result.value is None else "thresholds"
             logger.warning(
                 "Node <i>{node}</i>: <r>{target}</r> has no {missing}; benchmark left unscored",
                 node=self.name,
                 target=str(target),
-                missing="measured value" if result.value is None else "thresholds",
+                missing=missing,
             )
-            return None
+            return UnscoredBenchmark(
+                target=str(target), value=result.value, uncertainty=result.uncertainty, reason=f"no {missing}"
+            )
         if not math.isfinite(result.value):
             raise AnalysisError(f"{target}: benchmark value {result.value} is not finite")
         self._check_scoring_units(thresholds)
@@ -753,8 +821,9 @@ class CalibrationNode(ABC, Generic[ResultT]):
         return self._thresholds.get(target)
 
     def _place_operating_point(self, target: Target) -> None:
-        experiment = self._leaf_experiment()
-        apply_operating_point(self.calibration_file, experiment, target, self.restore)
+        # Resolved first, so a spine fails here before the calibration file is read.
+        point = self._operating_point_name(target)
+        apply_operating_point(self.calibration_file, target, point, self.restore)
 
     def _save_calibration(self) -> None:
         write_calibration_file(self.context.calibration, self.calibration_file)

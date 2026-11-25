@@ -14,6 +14,7 @@
 
 from .fit_base import FittingClass
 from .landau_zener_fit import LandauZenerFit
+from .rabi_fit import RabiAmplitudeModel
 from .single_tone_fit import FluxoniumSingleToneModel
 from .single_tone_vs_flux_fit import FluxoniumSingleToneFluxModel
 from .t1_fit import T1Fit
@@ -28,6 +29,7 @@ __all__ = [
     "FluxoniumTwoToneFluxModel",
     "FluxoniumTwoToneModel",
     "LandauZenerFit",
+    "RabiAmplitudeModel",
     "T1Fit",
     "cosfunc",
 ]

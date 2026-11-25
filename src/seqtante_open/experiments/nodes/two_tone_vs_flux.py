@@ -40,7 +40,6 @@ from qili_qprograms.targets import QubitTarget
 from qililab import Parameter
 
 from seqtante_open.controllers.calibration_node import AnalysisResult, FluxSweepNode
-from seqtante_open.controllers.operating_point import operating_point_for
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.fitting import FluxoniumTwoToneFluxModel
 from seqtante_open.experiments.utils.qdac_utils import get_qdac_out_trigger, qdac_step_timings
@@ -127,9 +126,8 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
                 "and the shared experiment has no readout-qubit mapping"
             )
         loop = self._loop(target)
-        section = self._section(target)
         self._require_pulse(target, Role.readout, "readout")
-        operating_point = operating_point_for(self.calibration_file, self.experiment, target)
+        operating_point = self._operating_point(target)
         fluxes = self._absolute_sweep(target, "flux_sweep", operating_point.flux.on(loop))
         drive_ifs = self._absolute_sweep(target, "drive_if_sweep", operating_point.drive.if_)
 
@@ -143,7 +141,7 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
         qprogram = two_tone_vs_flux_saturation(
             calibration=self.context.calibration,
             target=str(target),
-            operating_point=section.operating_point,
+            operating_point=self._operating_point_name(target),
             flux_sweep=fluxes,
             drive_if_sweep=drive_ifs,
             averages=self._param(target, "averages"),
@@ -202,7 +200,7 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
                 fails the step.
         """
         loop = self._loop(target)
-        operating_point = operating_point_for(self.calibration_file, self.experiment, target)
+        operating_point = self._operating_point(target)
         model = FluxoniumTwoToneFluxModel(
             measurements[-1],
             target=str(target),
@@ -229,7 +227,7 @@ class TwoToneVsFluxNode(FluxSweepNode[SweetSpotFlux]):
         # analyze returns a vertex or raises, so apply always has one; the guard is a type narrow.
         if result.fitted is None:
             return
-        operating_point = operating_point_for(self.calibration_file, self.experiment, target)
+        operating_point = self._operating_point(target)
         if result.fitted.loop == "z":
             operating_point.flux.z = result.fitted.flux
         else:
