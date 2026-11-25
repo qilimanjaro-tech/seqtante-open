@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The ``rabi`` node: one amplitude (DRAG drive) measurement with two analyses (ADR-0003, QHC-1806).
+"""The ``rabi`` node: one Rabi amplitude measurement with two analyses (ADR-0003, QHC-1806).
 
 A single Rabi amplitude sweep feeds two analyses, chosen per step:
 
@@ -20,7 +20,7 @@ A single Rabi amplitude sweep feeds two analyses, chosen per step:
   onto the operating point, tagged with the ``readout-<operating_point>`` pulse they were taken with. A
   fit below the step's minimum R² fails the step.
 - ``pi_amplitude`` (step ``rabi_sweet_spot``, at the ``sweet_spot`` point) writes the fitted pi
-  amplitude into the ``pi-<operating_point>`` DRAG pulse in ``Calibration.waveforms``, not onto the point.
+  amplitude into the ``pi-<operating_point>`` pulse in ``Calibration.waveforms``, not onto the point.
 
 The pulses are the ones ``qili_qprograms``' ``rabi_amplitude`` plays, named by
 :func:`~qili_qprograms.calibration.pulse_name` (ADR-0008). Both must already exist: the node seeds
@@ -39,7 +39,7 @@ import numpy as np
 from qili_qprograms.bus_alias import Role, bus_alias
 from qili_qprograms.calibration.model import Measured, ReadoutLevels
 from qili_qprograms.experiments import rabi_amplitude
-from qililab import IQDrag
+from qili_qprograms.waveforms import scaled, unit_amplitude
 
 from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode, write_whole
 from seqtante_open.controllers.operating_point import operating_point_for
@@ -194,19 +194,13 @@ class RabiNode(FixedFluxNode[RabiFitted]):
         )
 
     def _apply_pi_amplitude(self, target: Target, fitted: RabiFitted) -> None:
-        """Write the pi amplitude into the ``pi-<operating_point>`` DRAG pulse, keeping its other shape parameters."""
+        """Write the pulse ``rabi_amplitude`` played at the fitted gain into ``pi-<operating_point>``.
+
+        ``rabi_amplitude`` plays the stored pulse scaled to unit amplitude and sweeps a gain, so the pi
+        pulse is that unit pulse scaled by the fitted pi amplitude. Its shape and sign are kept.
+        """
         drive_bus = bus_alias(target, Role.drive)
         drive_pulse = self._require_pulse(target, Role.drive, "pi")
         existing = self.context.calibration.get_waveform(drive_bus, drive_pulse)
-        if not isinstance(existing, IQDrag):
-            raise AnalysisError(
-                f"{target}: drive pulse '{drive_pulse}' on {drive_bus} is a {type(existing).__name__}, "
-                "not an IQDrag; cannot update its pi amplitude"
-            )
-        pulse = IQDrag(
-            amplitude=fitted.pi_amplitude,
-            duration=existing.duration,
-            num_sigmas=existing.num_sigmas,
-            drag_coefficient=existing.drag_coefficient,
-        )
+        pulse = scaled(unit_amplitude(existing), fitted.pi_amplitude)
         self.context.calibration.add_waveform(bus=drive_bus, name=drive_pulse, waveform=pulse)

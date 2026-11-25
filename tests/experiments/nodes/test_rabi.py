@@ -3,7 +3,7 @@
 One test per analysis drives the full three-phase run with the measurement and the fit scripted (a fake
 :class:`RabiAmplitudeModel`, a stubbed ``execute_node``), so each analysis's write is asserted without
 hardware, a database or a disk write: ``readout_levels`` writes the |0>/|1> levels onto the operating
-point, ``pi_amplitude`` writes the fitted amplitude into the ``pi-<operating_point>`` DRAG pulse in
+point, ``pi_amplitude`` writes the fitted amplitude into the ``pi-<operating_point>`` pulse in
 ``Calibration.waveforms``.
 """
 
@@ -160,7 +160,7 @@ def test_pi_amplitude_analysis_writes_into_the_named_pulse(monkeypatch):
     stub_output_and_save(monkeypatch)
     monkeypatch.setattr(rabi_module, "RabiAmplitudeModel", FakeRabiModel)
     calibration = _calibration(_rabi_file("sweet_spot"))
-    # The pi amplitude is written into the pi-sweet_spot DRAG pulse, keeping its other shape parameters.
+    # The pi amplitude is written into the pi-sweet_spot pulse, keeping its other shape parameters.
     _add_played_pulses(calibration, "sweet_spot")
 
     node = _make_rabi(analysis="pi_amplitude", calibration=calibration)
@@ -276,14 +276,26 @@ def test_a_missing_pi_pulse_fails_before_any_hardware_is_set(monkeypatch):
     assert platform.calls == []
 
 
-def test_pi_amplitude_refuses_a_pi_pulse_that_is_not_a_drag(monkeypatch):
-    """The fitted amplitude only fits an ``IQDrag``; any other waveform under ``pi-<point>`` fails the step."""
+@pytest.mark.parametrize(
+    ("stored", "written"),
+    [
+        pytest.param(IQDrag(amplitude=0.3, duration=40, num_sigmas=4, drag_coefficient=0.1), FAKE_PI, id="drag"),
+        pytest.param(
+            IQDrag(amplitude=-0.3, duration=40, num_sigmas=4, drag_coefficient=0.1), -FAKE_PI, id="negative-drag"
+        ),
+        pytest.param(Square(amplitude=-0.5, duration=40), -FAKE_PI, id="negative-square"),
+    ],
+)
+def test_pi_amplitude_writes_the_played_pulse_at_the_fitted_gain(monkeypatch, stored, written):
+    """rabi_amplitude plays the stored pulse at unit amplitude, so any shape works and the sign is kept."""
     monkeypatch.setattr(rabi_module, "RabiAmplitudeModel", FakeRabiModel)
     calibration = _calibration(_rabi_file("sweet_spot"))
-    calibration.add_waveform(bus="drive_q1", name="pi-sweet_spot", waveform=Square(amplitude=1.0, duration=40))
+    calibration.add_waveform(bus="drive_q1", name="pi-sweet_spot", waveform=stored)
     node = _make_rabi(analysis="pi_amplitude", calibration=calibration)
 
-    result = node.analyze(Q1, [777])
+    node.apply(Q1, node.analyze(Q1, [777]))
 
-    with pytest.raises(AnalysisError, match="is a Square, not an IQDrag"):
-        node.apply(Q1, result)
+    pulse = calibration.get_waveform(bus="drive_q1", name="pi-sweet_spot")
+    assert type(pulse) is type(stored)
+    assert pulse.amplitude == pytest.approx(written)
+    assert pulse.duration == 40
