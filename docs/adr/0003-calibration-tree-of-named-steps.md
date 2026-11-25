@@ -13,7 +13,7 @@ targets: [q1, q14]
 
 defaults:
   two_tone: {freq_sweep: [-5e6, 5e6, 101], averages: 10000}
-  rabi:     {amplitude_sweep: [0.02, 0.8, 40], averages: 10000}
+  rabi:     {drive_amplitude_sweep: [0.02, 0.8, 40], averages: 10000}
 
 pipelines:
   sweet_spot:
@@ -64,7 +64,7 @@ pipelines:
         operating_point: reset
         overrides:
           - targets: [q14]
-            amplitude_sweep: [0.02, 0.5, 25]
+            drive_amplitude_sweep: [0.02, 0.5, 25]
       lz:
         experiment: landau_zener
         operating_point: reset

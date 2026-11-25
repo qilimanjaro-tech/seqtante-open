@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from .fit_base import FittingClass
+from .rabi_fit import RabiAmplitudeModel
 from .single_tone_fit import FluxoniumSingleToneModel
 from .single_tone_vs_flux_fit import FluxoniumSingleToneFluxModel
 from .t1_fit import T1Fit
@@ -26,6 +27,7 @@ __all__ = [
     "FluxoniumSingleToneModel",
     "FluxoniumTwoToneFluxModel",
     "FluxoniumTwoToneModel",
+    "RabiAmplitudeModel",
     "T1Fit",
     "cosfunc",
 ]
