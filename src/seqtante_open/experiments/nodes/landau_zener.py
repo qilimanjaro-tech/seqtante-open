@@ -41,18 +41,16 @@ Where the inputs come from:
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from qili_qprograms.bus_alias import Role, bus_alias
 from qili_qprograms.experiments import generalized_linear_ramps
 from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
-from qililab.result import StreamArray
 
 from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode
 from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.fitting.landau_zener_fit import LandauZenerFit
-from seqtante_open.outputs import output_controller
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -60,7 +58,6 @@ if TYPE_CHECKING:
     from qili_qprograms.targets import Target
     from qililab import QProgram
     from qililab.qprogram.calibration import Calibration
-    from qililab.result import AutocalMeasurement, Measurement
 
 THEORY_AGREEMENT = "theory_agreement"
 
@@ -102,9 +99,10 @@ class LandauZenerNode(FixedFluxNode[None]):
         """Build one QProgram per flux path, set the readout line, run them in turn and stream the results.
 
         Every QProgram is built before the hardware is touched, so a malformed or over-long path fails
-        the target before anything is measured. It streams itself rather than through :meth:`_stream`,
-        which repeats one QProgram compiled with the run's calibration: here each row is its own
-        QProgram, compiled with the AC crosstalk of :meth:`_with_ac_crosstalk`, and stores the threshold.
+        the target before anything is measured. It executes the QPrograms itself rather than through
+        :meth:`_stream`, which repeats one QProgram compiled with the run's calibration: here each row is
+        its own QProgram, compiled with the AC crosstalk of :meth:`_with_ac_crosstalk`, and stores the
+        threshold. The stream array is the shared :meth:`_stream_array`.
 
         Raises:
             ValueError: if there are no flux paths, their count differs from the annealing times', a path
@@ -132,7 +130,10 @@ class LandauZenerNode(FixedFluxNode[None]):
 
         platform = self.context.platform
         readout_bus = bus_alias(target, Role.readout)
-        stream_array = StreamArray(
+        stream_array = self._stream_array(
+            target,
+            qprograms[0],
+            experiment_name=_EXPERIMENT_NAME,
             shape=(len(annealing_times), 3),
             # The loop name is the one LandauZenerFit reads back.
             loops={
@@ -143,19 +144,14 @@ class LandauZenerNode(FixedFluxNode[None]):
                     "parameter": "Total_annealing_time",
                 },
             },
-            platform=platform,
-            experiment_name=_EXPERIMENT_NAME,
-            db_manager=output_controller.db_manager,
-            qprogram=qprograms[0],
             calibration=calibration,
-            qubit_idx=str(target),
         )
         with stream_array:
             for idx, qprogram in enumerate(qprograms):
                 result = platform.execute_qprogram(qprogram, calibration=calibration).results[readout_bus][0]
                 stream_array[idx, :2] = result.array.T
                 stream_array[idx, 2] = result.threshold[0]
-        return cast("Measurement | AutocalMeasurement", stream_array.measurement).measurement_id
+        return self._measurement_id(stream_array)
 
     def _build(self, target: Target, operating_point: str, reset_point: str, flux_path: Any) -> QProgram:
         """The ``generalized_linear_ramps`` QProgram for one flux path, idle and read out at ``operating_point``."""

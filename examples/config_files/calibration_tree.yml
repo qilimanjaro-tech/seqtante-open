@@ -41,6 +41,11 @@ defaults:
     drive_power: -20  # dBm, for a Rohde & Schwarz drive source; a QCM-RF drive takes drive_gain in [-1, 1]
     relax_duration: 500000
     averages: 2000
+  landau_zener:
+    relax_duration: 500000  # hold at the reset point's flux, ns
+    averages: 2000
+    entry_ramp_duration: 40  # ns; needed when a path does not start at the reset point's flux
+    exit_ramp_duration: 40  # ns; needed when a path does not end at the readout point's flux
 
 pipelines:
   sweet_spot:
@@ -106,4 +111,9 @@ pipelines:
         experiment: landau_zener
         operating_point: reset
         pulses: {readout: readout-reset}
+        # Waypoints (phi_z, phi_x, ns) in Phi_0, as generalized_linear_ramps takes them; one annealing time per path.
+        flux_paths:
+          - [[0.15, 0.25, 100], [0.2, 0.3, 100]]
+          - [[0.15, 0.25, 100], [0.3, 0.4, 200]]
+        annealing_times: [200, 300]
         thresholds: {passed: 1.5, warning: 3}

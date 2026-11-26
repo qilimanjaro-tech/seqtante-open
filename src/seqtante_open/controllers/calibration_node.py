@@ -467,16 +467,13 @@ class CalibrationNode(ABC, Generic[ResultT]):
             raise ValueError(f"{target} {self.experiment}: repetitions must be at least 1, not {repetitions}")
         platform = self.context.platform
         readout_bus = bus_alias(target, Role.readout)
-        stream_array = StreamArray(
-            shape=shape,
-            loops=loops,
-            platform=platform,
+        stream_array = self._stream_array(
+            target,
+            qprogram,
             experiment_name=experiment_name,
-            db_manager=output_controller.db_manager,
-            qprogram=qprogram,
-            calibration=self.context.calibration,
+            loops=loops,
+            shape=shape,
             optional_identifier=optional_identifier,
-            qubit_idx=str(target),
         )
         total: list[np.ndarray] = []
         with stream_array:
@@ -489,6 +486,39 @@ class CalibrationNode(ABC, Generic[ResultT]):
                     arrays if execution == 1 else [summed + array for summed, array in zip(total, arrays, strict=True)]
                 )
                 write(stream_array, [summed / execution for summed in total])
+        return self._measurement_id(stream_array)
+
+    def _stream_array(
+        self,
+        target: Target,
+        qprogram: "QProgram",
+        *,
+        experiment_name: str,
+        loops: Mapping[str, Any],
+        shape: tuple[int, ...],
+        calibration: Calibration | None = None,
+        optional_identifier: str | None = None,
+    ) -> StreamArray:
+        """The stream array a measurement of ``target`` is saved through.
+
+        It stores the run's calibration unless ``calibration`` is given. :meth:`_stream` builds it here, and so does a node that executes its QPrograms itself (``landau_zener``
+        runs one QProgram per row, compiled with its own AC crosstalk), so every measurement is stored alike.
+        """
+        return StreamArray(
+            shape=shape,
+            loops=loops,
+            platform=self.context.platform,
+            experiment_name=experiment_name,
+            db_manager=output_controller.db_manager,
+            qprogram=qprogram,
+            calibration=self.context.calibration if calibration is None else calibration,
+            optional_identifier=optional_identifier,
+            qubit_idx=str(target),
+        )
+
+    @staticmethod
+    def _measurement_id(stream_array: StreamArray) -> int:
+        """The database id of the measurement ``stream_array`` saved, once its ``with`` block has closed."""
         return cast("Measurement | AutocalMeasurement", stream_array.measurement).measurement_id
 
     def _drive_source_writes(self, target: Target) -> list[tuple[Parameter, ParameterValue]]:

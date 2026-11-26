@@ -162,7 +162,6 @@ def builds(monkeypatch) -> list[dict]:
         return real_build(**kwargs)
 
     monkeypatch.setattr(lz_module, "generalized_linear_ramps", spy)
-    monkeypatch.setattr(lz_module, "StreamArray", FakeStreamArray)  # the node streams itself, not via _stream
     monkeypatch.setattr(lz_module, "LandauZenerFit", FakeLandauZenerFit)
     monkeypatch.setattr(FakeLandauZenerFit, "last", {})
     stub_output_and_save(monkeypatch)
