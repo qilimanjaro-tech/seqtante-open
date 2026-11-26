@@ -58,9 +58,11 @@ def make_two_tone_vs_flux_data(
     fluxes: np.ndarray = FLUXES,
     frequencies: np.ndarray = FREQUENCIES,
     sweet_spot: float = SWEET_SPOT,
+    sweet_spot_if: float = -5.0e6,
 ) -> tuple[np.ndarray, dict]:
-    """A qubit peak tracing a downward parabola in flux, apex at ``sweet_spot``, over ``fluxes`` by ``frequencies``."""
-    qubit_if = -5.0e6 + CURVATURE * (fluxes - sweet_spot) ** 2
+    """A qubit peak tracing a downward parabola in flux, apex at ``sweet_spot`` and ``sweet_spot_if``,
+    over ``fluxes`` by ``frequencies``."""
+    qubit_if = sweet_spot_if + CURVATURE * (fluxes - sweet_spot) ** 2
     width = 4.0e6
     detuning = (frequencies[None, :] - qubit_if[:, None]) / (0.5 * width)
     magnitude = 1.0 / (1.0 + detuning**2)

@@ -50,14 +50,16 @@ def make_single_tone_vs_flux_data(
     fluxes: np.ndarray = FLUXES,
     frequencies: np.ndarray = FREQUENCIES,
     sweet_spot: float = SWEET_SPOT,
+    sweet_spot_if: float = -10.0e6,
 ) -> tuple[np.ndarray, dict]:
-    """A resonator dip tracing a parabola in flux, centred on ``sweet_spot``, over ``fluxes`` by ``frequencies``.
+    """A resonator dip tracing a parabola in flux, apex at ``sweet_spot`` and ``sweet_spot_if``, over ``fluxes``
+    by ``frequencies``.
 
     Every cut of the image at fixed frequency is symmetric about ``sweet_spot``,
     because the resonance depends on ``(flux - sweet_spot) ** 2``. That symmetry
     is what the auto-convolution inside the fit locates.
     """
-    resonance = -10.0e6 - 30.0e6 * ((fluxes - sweet_spot) / FLUX_HALF_SPAN) ** 2
+    resonance = sweet_spot_if - 30.0e6 * ((fluxes - sweet_spot) / FLUX_HALF_SPAN) ** 2
     width = 4.0e6
     detuning = (frequencies[None, :] - resonance[:, None]) / (0.5 * width)
     magnitude = 1.0 - 0.8 / (1.0 + detuning**2)
