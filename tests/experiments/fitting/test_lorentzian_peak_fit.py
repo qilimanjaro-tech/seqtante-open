@@ -49,6 +49,8 @@ class TestLorentzianPeakModel(FittingTestCase):
         "results.accepted": True,
         "results.r_squared": lambda r: r > 0.9,
     }
+    # The measurement id is in the filename, so a search's sweeps of one target don't overwrite one file.
+    PLOTS = ["Two tone (reset search) q1 ID 1.png"]
 
     def test_save_fitting(self, environment, fitted) -> None:
         """``save_fitting`` writes the fitted drive IF and the fit R² under their QHC-1497 keys, once."""

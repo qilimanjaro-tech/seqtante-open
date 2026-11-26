@@ -32,13 +32,14 @@ class _LorentzianResults(TypedDict):
 
 
 class LorentzianPeakModel(FittingClass[_LorentzianResults]):
-    """Fit a Lorentzian peak to a two-tone sweep's magnitude and return the qubit IF (QHC-1807).
+    """Fit a Lorentzian peak to a two-tone sweep's rotated quadrature and return the qubit IF (QHC-1807).
 
     The acceptance rules are the experimentalists' calibration script's (``two_tones_lorentzian_fit_and_plot``).
     The rotated real quadrature ``Re(rotate_iq(I + iQ))`` is fit with the shared
     :meth:`~seqtante_open.experiments.fitting.fit_base.FittingClass.fit_lorentzian`, the one Lorentzian
-    fit (QHC-1932 item 5). The fit is **accepted** only if its R² reaches the minimum, its centre lies
-    inside the sweep, and its linewidth is wider than one sweep step and narrower than the whole sweep. A rejected fit leaves
+    fit (QHC-1932 item 5), which keeps no fit whose centre is within one sweep step of either end of the
+    sweep. The fit is **accepted** only if its R² reaches the minimum and its linewidth is wider than one
+    sweep step and narrower than the whole sweep. A rejected fit leaves
     :attr:`results` ``accepted`` false and ``fitted_if`` ``None`` — the reset-point search reads that to
     widen the sweep or fail the step.
 
@@ -82,11 +83,11 @@ class LorentzianPeakModel(FittingClass[_LorentzianResults]):
         span = abs(frequency[-1] - frequency[0])
         fitted_if: float | None = None
         quality = f"R2 = {r_squared:.2f}, f_q IF = {centre * 1e-6:.3f} MHz, linewidth = {linewidth * 1e-3:.0f} kHz"
-        # Every comparison with NaN is False, so an undefined R² (a flat trace or a failed fit) is rejected explicitly.
-        if math.isnan(r_squared) or r_squared < self.r2_min:
+        # Every comparison with NaN is False, so an undefined R² (no fit kept) is rejected explicitly.
+        if math.isnan(r_squared):
+            quality += ": rejected, no converged fit with its centre inside the sweep"
+        elif r_squared < self.r2_min:
             quality += f": rejected, R2 below {self.r2_min}"
-        elif not min(frequency) <= centre <= max(frequency):
-            quality += ": rejected, centre outside the sweep"
         elif not step < linewidth < span:
             quality += ": rejected, linewidth not resolved by the sweep"
         else:
@@ -160,4 +161,5 @@ class LorentzianPeakModel(FittingClass[_LorentzianResults]):
             width=1000,
             height=600,
         )
-        return self.save_plot(fig, title)
+        # Each sweep of a search gets its own file: the filename is the measurement's, not just the target's.
+        return self.save_plot(fig, f"{title} ID {self.id}")

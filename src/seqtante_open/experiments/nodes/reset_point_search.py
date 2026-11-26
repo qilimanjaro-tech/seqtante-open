@@ -56,16 +56,16 @@ if TYPE_CHECKING:
 LORENTZIAN_PEAK = "lorentzian_peak"
 
 #: Defaults are the experimentalists' calibration-script values (the node's ``defaults``); every one is a
-#: tree parameter. The two-tone measurement's own defaults come from the shared spine.
+#: tree parameter. The two-tone measurement's own defaults come from the shared spine. The target
+#: frequency window, ``target_freq_min`` / ``target_freq_max`` (absolute Hz), has no default: it is the
+#: device's, so a tree that leaves it out fails the step instead of steering to another device's window.
 RESET_POINT_SEARCH_DEFAULTS: Mapping[str, Any] = {
     # Fit acceptance and span widening.
     "min_r2": 0.8,
     "retry_spans": (30e6, 60e6),
-    # Target frequency window (absolute Hz), and the drive-IF window that first looks for the line:
-    # ``np.linspace`` args as offsets from the stored drive IF (QHC-1932). Its spacing is kept when the
-    # search re-centres the sweep or widens it to ``retry_spans``.
-    "target_freq_min": 2.79e9,
-    "target_freq_max": 2.81e9,
+    # The drive-IF window that first looks for the line: ``np.linspace`` args as offsets from the stored
+    # drive IF (QHC-1932). Its spacing is kept when the search re-centres the sweep or widens it to
+    # ``retry_spans``; a retry span no wider than this window is skipped.
     "drive_if_sweep": (-10e6, 10e6, 51),
     # flux_z tuning.
     "flux_z_probe_step": 0.0005,
@@ -149,40 +149,56 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
     def execute_node(self, targets: list[Target]) -> dict[Target, list[int]]:
         """Run the find-the-line / move-into-the-window loop per target; return every measurement id.
 
-        Every target's sweeps are checked before anything is measured. ``run`` has just placed the
+        Every target's target window and sweeps are checked before anything is measured. ``run`` has just placed the
         operating point, a jump from the zeroed flux much larger than any search move, so the first
         sweep waits ``flux_settle_duration`` as every later move does (the script sleeps after its
         initial flux set too): a first point read while the flux still drifts seeds a wrong secant.
 
         Raises:
-            ValueError: if a target's ``drive_if_sweep`` or ``retry_spans`` gives a sweep no fit can use
-                (:meth:`_sweep_offsets`).
+            KeyError: if a target sets no ``target_freq_min`` or ``target_freq_max``.
+            ValueError: if a target's window is empty (:meth:`_target_window`), or its ``drive_if_sweep``
+                gives a sweep no fit can use (:meth:`_sweep_offsets`).
         """
-        offsets = {target: self._sweep_offsets(target) for target in targets}
+        offsets = {}
+        for target in targets:
+            self._target_window(target)
+            offsets[target] = self._sweep_offsets(target)
         time.sleep(max(self._param(target, "flux_settle_duration") for target in targets) * 1e-9)
         return {target: self._search_one(target, offsets[target]) for target in targets}
+
+    def _target_window(self, target: Target) -> tuple[float, float]:
+        """The ``(target_freq_min, target_freq_max)`` window the search steers the qubit into, in Hz.
+
+        Raises:
+            KeyError: if the step sets no ``target_freq_min`` or ``target_freq_max`` (no default).
+            ValueError: if ``target_freq_min`` is not below ``target_freq_max``, so no frequency is inside.
+        """
+        target_freq_min = self._param(target, "target_freq_min")
+        target_freq_max = self._param(target, "target_freq_max")
+        if not target_freq_min < target_freq_max:
+            raise ValueError(
+                f"step '{self.name}': {target} target_freq_min {target_freq_min:g} Hz is not below "
+                f"target_freq_max {target_freq_max:g} Hz, so no qubit frequency is inside the window"
+            )
+        return target_freq_min, target_freq_max
 
     def _sweep_offsets(self, target: Target) -> list[np.ndarray]:
         """The drive-IF offsets of each sweep :meth:`_find_qubit` may take, centred on 0, in Hz.
 
         The first is the step's ``drive_if_sweep`` window; each retry widens it to the next of
-        ``retry_spans`` at the same point spacing.
+        ``retry_spans`` at the same point spacing. A retry span no wider than the sweep before it
+        would re-measure inside a window that just failed, so it is skipped.
 
         Raises:
-            ValueError: if ``drive_if_sweep`` is not a usable window (:meth:`_sweep`), or a retry span
-                is narrower than the window's spacing, which would leave a one-point sweep.
+            ValueError: if ``drive_if_sweep`` is not a usable window (:meth:`_sweep`).
         """
         window = self._sweep(target, "drive_if_sweep")
         spacing = abs(window[1] - window[0])
         offsets = [window - (window[0] + window[-1]) / 2]
         for span in self._param(target, "retry_spans"):
             half = round(span / spacing / 2)
-            if half < 1:
-                raise ValueError(
-                    f"step '{self.name}': {target} retry span {span:g} Hz is narrower than the drive_if_sweep "
-                    f"spacing of {spacing:g} Hz, so its sweep would have fewer than 2 points"
-                )
-            offsets.append(np.arange(-half, half + 1) * spacing)
+            if 2 * half * spacing > np.ptp(offsets[-1]) + spacing / 2:  # widths are whole spacings
+                offsets.append(np.arange(-half, half + 1) * spacing)
         return offsets
 
     def _search_one(self, target: Target, offsets: list[np.ndarray]) -> list[int]:
@@ -190,8 +206,7 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
         drive_lo = operating_point.drive.lo
         flux_z_bus = bus_alias(target, Role.flux, "z")
 
-        target_freq_min = self._param(target, "target_freq_min")
-        target_freq_max = self._param(target, "target_freq_max")
+        target_freq_min, target_freq_max = self._target_window(target)
         target_freq = (target_freq_min + target_freq_max) / 2
         max_shift = self._param(target, "flux_z_max_shift")
         max_moves = self._param(target, "flux_z_max_moves")

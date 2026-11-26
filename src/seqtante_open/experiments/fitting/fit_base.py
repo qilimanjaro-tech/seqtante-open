@@ -398,8 +398,11 @@ class FittingClass(ABC, Generic[ResultsT]):
         trace's range and the baseline within its values. It fits once from a peak and once from a dip
         and keeps the higher R²: a line near the window's edge pulls the edge baseline, so the trace's
         mean alone can pick the wrong sign and start the local fit on a noise extremum. A fit that does
-        not converge is dropped, since its last iterate could still pass a caller's checks. A flat
-        trace, or no converged fit, has every parameter and R² NaN, so a caller's R² check rejects it.
+        not converge is dropped, since its last iterate could still pass a caller's checks. So is a fit
+        whose centre lies within one sample spacing of either end of the window: the centre is bounded
+        to the window, so a line just outside it is fit with its centre pinned on the edge, and the tail
+        alone can reach a good R². A flat trace, or no fit kept, has every parameter and R² NaN, so a
+        caller's R² check rejects it.
         """
         x = np.asarray(x_values, dtype=float)
         y = np.asarray(y_values, dtype=float)
@@ -409,6 +412,9 @@ class FittingClass(ABC, Generic[ResultsT]):
         if y_range == 0 or span == 0:
             return failed
         ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+        # Centres closer than one sample spacing to an end of the window are not resolved inside it.
+        margin = span / (x.size - 1)
+        lowest, highest = float(x.min()) + margin, float(x.max()) - margin
         best = failed
         for dip in (False, True):
             guess = FittingClass.lorentzian_initial_guess(x, y, dip=dip)
@@ -421,7 +427,7 @@ class FittingClass(ABC, Generic[ResultsT]):
                 fit = model.fit(data=y, params=model.make_params(), x=x, method="least_squares")
             except (ValueError, RuntimeError):
                 continue
-            if not fit.success:
+            if not fit.success or not lowest <= fit.params["center"].value <= highest:
                 continue
             r_squared = 1.0 - float(np.sum((y - fit.best_fit) ** 2)) / ss_tot
             if np.isnan(best["r_squared"]) or r_squared > best["r_squared"]:

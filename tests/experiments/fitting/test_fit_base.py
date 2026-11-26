@@ -344,6 +344,17 @@ def test_fit_lorentzian_drops_a_fit_that_did_not_converge(monkeypatch):
     assert all(np.isnan(value) for value in fit.values())
 
 
+@pytest.mark.parametrize("center", [10.5e6, 12e6])
+def test_fit_lorentzian_keeps_no_fit_centred_on_the_window_edge(center):
+    """A line just outside the window is fit with its centre pinned on the edge; no such fit is kept."""
+    x = np.linspace(-10e6, 10e6, 51)
+    y = FittingClass.lorentzian(x, 1.0, center, 1.5e6, 0.0) + np.random.default_rng(3).normal(0, 0.02, x.size)
+
+    fit = FittingClass.fit_lorentzian(x, y)
+
+    assert np.isnan(fit["r_squared"]) or fit["center"] < x.max() - (x[1] - x[0])
+
+
 def test_fit_lorentzian_of_a_flat_trace_is_nan():
     fit = FittingClass.fit_lorentzian(np.linspace(0, 1, 11), np.ones(11))
 
