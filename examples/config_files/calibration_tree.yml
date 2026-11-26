@@ -112,9 +112,9 @@ pipelines:
         experiment: landau_zener
         operating_point: reset
         pulses: {readout: readout-reset}
-        # Waypoints (phi_z, phi_x, ns) in Phi_0, as generalized_linear_ramps takes them; one annealing time per path.
+        # Waypoints (phi_z, phi_x, ns) in Phi_0, as generalized_linear_ramps takes them; a path's duration is
+        # its total annealing time.
         flux_paths:
           - [[0.15, 0.25, 100], [0.2, 0.3, 100]]
           - [[0.15, 0.25, 100], [0.3, 0.4, 200]]
-        annealing_times: [200, 300]
         thresholds: {passed: 1.5, warning: 3}

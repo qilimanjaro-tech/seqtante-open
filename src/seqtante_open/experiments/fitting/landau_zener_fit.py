@@ -15,7 +15,7 @@
 """Normalise and plot the compartmentalized Landau-Zener transition (QHC-1808, ADR-0002).
 
 MVP: the averaged readout quadratures are rotated to the real axis and mapped to a transition
-probability with the reset-point readout levels (|0>, |1>), then plotted against the total annealing
+probability with the operating point's readout levels (|0>, |1>), then plotted against the total annealing
 time. No model is fit and no agreement metric is computed yet: the theory curve and the metric that
 give the benchmark its verdict are a follow-up (QHC-1921), so the node reports no value and the run
 leaves the benchmark "Not evaluated".
@@ -23,18 +23,24 @@ leaves the benchmark "Not evaluated".
 
 from __future__ import annotations
 
+from typing import TypedDict
+
 import numpy as np
 import plotly.graph_objects as go
 
 from seqtante_open.experiments.fitting.fit_base import FittingClass
 
 
-class LandauZenerFit(FittingClass):
+class _LandauZenerResults(TypedDict):
+    """Empty until the agreement metric and theory curve are fit (QHC-1921, ADR-0012)."""
+
+
+class LandauZenerFit(FittingClass[_LandauZenerResults]):
     """Normalise the Landau-Zener transition signal with the readout levels and plot it (QHC-1808).
 
     The averaged readout quadratures are rotated to the real axis (:meth:`FittingClass.rotate_iq`) and
     mapped to a transition probability ``P = (signal - level_0) / (level_1 - level_0)`` with the
-    |0>/|1> readout levels taken at the reset point (ADR-0001). The levels are passed in by the node,
+    |0>/|1> readout levels of the step's operating point (ADR-0001). The levels are passed in by the node,
     which reads them from the calibration and enforces the readout-pulse match (ADR-0001, D8).
 
     No model is fit: the agreement metric and theory curve are a follow-up (QHC-1921).

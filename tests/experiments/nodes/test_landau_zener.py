@@ -57,7 +57,6 @@ PARAMS = {
         [[0.15, 0.25, 100], [0.2, 0.3, 100]],
         [[0.15, 0.25, 100], [0.3, 0.4, 200]],
     ],
-    "annealing_times": [200, 300],
     "relax_duration": 1_000,
     "averages": 1_000,
     "entry_ramp_duration": [40, 60],
@@ -208,7 +207,8 @@ def test_runs_one_qprogram_per_path_and_leaves_the_benchmark_unscored(builds):
     stream = FakeStreamArray.last
     assert stream is not None
     assert stream.kwargs["shape"] == (2, 3)
-    assert stream.kwargs["loops"]["total_annealing_time"]["array"] == PARAMS["annealing_times"]
+    # Each path's total annealing time is its duration: 100 + 100 and 100 + 200 ns.
+    assert stream.kwargs["loops"]["total_annealing_time"]["array"] == [200, 300]
     assert ((1, 2), THRESHOLD) in stream.writes
     # analyze normalised with the operating point's readout levels, and reported no value.
     assert FakeLandauZenerFit.last == {
@@ -243,7 +243,7 @@ def test_without_a_step_matrix_the_calibrations_ac_crosstalk_is_used(builds):
     [
         pytest.param({"ac_crosstalk": None}, id="no_ac_crosstalk"),
         pytest.param({"flux_paths": []}, id="no_paths"),
-        pytest.param({"annealing_times": [200]}, id="paths_and_times_differ"),
+        pytest.param({"flux_paths": [[[0.15, 0.25, 100], [0.2, 0.3]]]}, id="malformed_waypoint"),
         pytest.param({"entry_ramp_duration": None}, id="path_needs_an_entry_ramp"),
     ],
 )
@@ -270,13 +270,16 @@ def test_ac_crosstalk_with_flux_offsets_is_refused(builds):
     assert platform.executions == 0
 
 
-def test_refuses_readout_levels_taken_with_a_different_pulse(builds):
-    # Levels stored under a different pulse than the QProgram plays -> ADR-0001 D8 refusal in analyze.
-    node = _make(_calibration(readout_levels_pulse="readout-other"), LandauZenerPlatform())
+def test_refuses_readout_levels_taken_with_a_different_pulse_before_measuring(builds):
+    # Levels stored under a different pulse than the QProgram plays -> ADR-0001 D8 refusal, before the sweep.
+    platform = LandauZenerPlatform()
+    node = _make(_calibration(readout_levels_pulse="readout-other"), platform)
 
     failed = node.run({})
 
     assert failed == ["q1"]  # the target fails the step; no benchmark is recorded
+    assert platform.executions == 0
+    assert FakeStreamArray.last is None
     assert FakeLandauZenerFit.last == {}
     assert node.benchmark_results == ()
 

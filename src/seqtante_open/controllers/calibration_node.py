@@ -551,11 +551,11 @@ class CalibrationNode(ABC, Generic[ResultT]):
     def _set_operating_point_hardware(self, target: Target) -> None:
         """Set ``target``'s line at its operating point, then arm its drive, through the restore handle (ADR-0006).
 
-        The QProgram sets the IFs and plays the pulses; this sets what it does not: the drive and readout
-        LOs and the readout attenuation from the operating point, then the drive source
-        (:meth:`_set_drive_source`). Every write goes through :attr:`restore`, so ``run`` puts the line
-        back as it was after each target and nothing leaks into the next node. The drive level is
-        checked before the first write, so a missing one leaves the line untouched.
+        The QProgram sets the IFs and plays the pulses; this sets what it does not: the readout line
+        (:meth:`_set_readout_line`), then the drive LO from the operating point and the drive source
+        (:meth:`_drive_source_writes`). Every write goes through :attr:`restore`, so ``run`` puts the line
+        back as it was after each target and nothing leaks into the next node. The drive level and the
+        readout attenuation are checked before the first write, so a bad one leaves the line untouched.
 
         Raises:
             TypeError: if called on a node that sets no ``experiment`` (a spine, not a leaf).
@@ -563,15 +563,12 @@ class CalibrationNode(ABC, Generic[ResultT]):
                 level is neither set in the step nor defaulted.
         """
         point = self._operating_point(target)
-        self._check_readout_attenuation(target, point.readout.attenuation)
         drive_writes = self._drive_source_writes(target)
-        drive_bus = bus_alias(target, Role.drive)
-
-        restore = self.restore
-        restore.set(drive_bus, Parameter.LO_FREQUENCY, round(point.drive.lo))
         self._set_readout_line(target)
+        drive_bus = bus_alias(target, Role.drive)
+        self.restore.set(drive_bus, Parameter.LO_FREQUENCY, round(point.drive.lo))
         for parameter, value in drive_writes:
-            restore.set(drive_bus, parameter, value)
+            self.restore.set(drive_bus, parameter, value)
 
     def _set_readout_line(self, target: Target) -> None:
         """Set ``target``'s readout LO and attenuation at the step's operating point, through the restore handle.
@@ -585,15 +582,11 @@ class CalibrationNode(ABC, Generic[ResultT]):
         """
         point = self._operating_point(target)
         attenuation = point.readout.attenuation
-        self._check_readout_attenuation(target, attenuation)
+        if not float(attenuation).is_integer():
+            raise ValueError(f"{target}: readout attenuation {attenuation} dB is not a whole number of dB")
         readout_bus = bus_alias(target, Role.readout)
         self.restore.set(readout_bus, Parameter.LO_FREQUENCY, round(point.readout.lo))
         self.restore.set(readout_bus, Parameter.OUT0_ATT, int(attenuation))
-
-    @staticmethod
-    def _check_readout_attenuation(target: Target, attenuation: float) -> None:
-        if not float(attenuation).is_integer():
-            raise ValueError(f"{target}: readout attenuation {attenuation} dB is not a whole number of dB")
 
     def run(self, dead_targets: dict[str, str]) -> list[str]:
         """Run the three phases for every live target and return the ones that failed (ADR-0006).

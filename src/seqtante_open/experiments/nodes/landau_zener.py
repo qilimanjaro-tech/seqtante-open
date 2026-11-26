@@ -31,8 +31,8 @@ Where the inputs come from:
   gives the readout pulse (``readout-<operating_point>``), its weights, IF, LO and attenuation, and the
   |0>/|1> readout levels. The reset point is the operating point the step's ``reset_point`` names (the
   step's own by default).
-- The step's tree parameters: the flux paths and their annealing times, the entry/exit ramp durations,
-  the reset hold, the averages and the readout ring-up.
+- The step's tree parameters: the flux paths, the entry/exit ramp durations, the reset hold, the
+  averages and the readout ring-up. Each path's total annealing time, the sweep's axis, is its duration.
 - The AC crosstalk on the fast-flux lines: qililab corrects the levels for it when it compiles the
   QProgram. The step's ``ac_crosstalk`` (a raw 2x2 array over the ``z``/``x`` fast-flux buses) is used
   when set, as on BSC; otherwise the calibration's ``crosstalk_matrix_ac``.
@@ -46,15 +46,16 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from qili_qprograms.bus_alias import Role, bus_alias
 from qili_qprograms.experiments import generalized_linear_ramps
+from qili_qprograms.flux_path import FluxPath
 from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 
 from seqtante_open.controllers.calibration_node import AnalysisResult, FixedFluxNode
-from seqtante_open.controllers.verdicts import AnalysisError
 from seqtante_open.experiments.fitting.landau_zener_fit import LandauZenerFit
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from qili_qprograms.calibration.model import ReadoutLevels
     from qili_qprograms.targets import Target
     from qililab import QProgram
     from qililab.qprogram.calibration import Calibration
@@ -66,7 +67,7 @@ _EXPERIMENT_NAME = "generalized_linear_ramps"
 
 #: Defaults for the optional step parameters (the node's ``defaults``); every one is overridable in the
 #: tree. The measurement keys are named like the ``generalized_linear_ramps`` arguments. ``flux_paths``,
-#: ``annealing_times``, ``averages`` and ``relax_duration`` have no default. A ramp duration is needed only
+#: ``averages`` and ``relax_duration`` have no default. A ramp duration is needed only
 #: when a path does not start at the reset point's flux (entry) or end at the readout point's (exit).
 LANDAU_ZENER_DEFAULTS: Mapping[str, Any] = {
     "reset_point": None,
@@ -91,6 +92,11 @@ class LandauZenerNode(FixedFluxNode[None]):
     analyses = (THEORY_AGREEMENT,)
     defaults = LANDAU_ZENER_DEFAULTS
 
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        #: Each target's |0>/|1> readout levels, checked by :meth:`_run_sweep` before it measures.
+        self._levels: dict[Target, ReadoutLevels] = {}
+
     def execute_node(self, targets: list[Target]) -> dict[Target, list[int]]:
         """Run the Landau-Zener sweep on each target at its operating point; return its measurement id."""
         return {target: [self._run_sweep(target)] for target in targets}
@@ -98,29 +104,27 @@ class LandauZenerNode(FixedFluxNode[None]):
     def _run_sweep(self, target: Target) -> int:
         """Build one QProgram per flux path, set the readout line, run them in turn and stream the results.
 
-        Every QProgram is built before the hardware is touched, so a malformed or over-long path fails
-        the target before anything is measured. It executes the QPrograms itself rather than through
+        The readout pulse and levels are checked and every QProgram is built before anything is measured
+        (``run`` has already biased the slow flux lines), so a malformed or over-long path, or levels the
+        signal cannot be normalised with, fail the target without measuring. It executes the QPrograms itself rather than through
         :meth:`_stream`, which repeats one QProgram compiled with the run's calibration: here each row is
         its own QProgram, compiled with the AC crosstalk of :meth:`_with_ac_crosstalk`, and stores the
         threshold. The stream array is the shared :meth:`_stream_array`.
 
         Raises:
-            ValueError: if there are no flux paths, their count differs from the annealing times', a path
-                is malformed or overruns the Qblox waveform memory (raised by the QProgram), or no AC
-                crosstalk is available for the fast-flux lines.
+            TypeError: if a path's waypoint is not a ``(phi_z, phi_x, samples)`` triple.
+            ValueError: if there are no flux paths, a path is malformed or overruns the Qblox waveform
+                memory (raised by the QProgram), the readout levels are missing or were taken with another
+                pulse (:meth:`_readout_levels`), or no AC crosstalk is available for the fast-flux lines.
         """
         flux_paths = self._param(target, "flux_paths")
-        annealing_times = list(self._param(target, "annealing_times"))
         if not flux_paths:
             raise ValueError(f"{target}: flux_paths is empty; there is nothing to sweep")
-        if len(flux_paths) != len(annealing_times):
-            raise ValueError(
-                f"{target}: flux_paths ({len(flux_paths)}) and annealing_times ({len(annealing_times)}) must "
-                "have one entry per sweep point"
-            )
+        annealing_times = [self._annealing_time(path) for path in flux_paths]
 
-        # Before any hardware: the readout pulse the QProgram plays must be stored.
+        # Before measuring: the readout pulse the QProgram plays must be stored, with levels taken with it.
         self._require_pulse(target, Role.readout, "readout")
+        self._levels[target] = self._readout_levels(target)
         operating_point = self._operating_point_name(target)
         reset_point = self._param(target, "reset_point") or operating_point
         calibration = self._with_ac_crosstalk(target)
@@ -171,6 +175,36 @@ class LandauZenerNode(FixedFluxNode[None]):
             exit_ramp_move_first=self._param(target, "exit_ramp_move_first"),
         )
 
+    @staticmethod
+    def _annealing_time(flux_path: Any) -> int:
+        """A path's total annealing time, in ns: the duration of the ``FluxPath`` it describes.
+
+        Waypoints are read as ``generalized_linear_ramps`` reads them, starting at the first, so it holds.
+        """
+        if isinstance(flux_path, FluxPath):
+            return flux_path.duration
+        return FluxPath.from_waypoints(flux_path, start=(flux_path[0][0], flux_path[0][1])).duration
+
+    def _readout_levels(self, target: Target) -> ReadoutLevels:
+        """The operating point's |0>/|1> readout levels, checked to be taken with the pulse the QProgram plays.
+
+        Raises:
+            ValueError: if the operating point stores no readout levels, or stores them for another
+                readout pulse (ADR-0001, D8).
+        """
+        point_name = self._operating_point_name(target)
+        # The pulse generalized_linear_ramps plays at its readout point, the step's operating point.
+        readout_pulse = self._pulse(target, Role.readout, "readout")
+        levels = self._operating_point(target).readout.levels
+        if levels is None:
+            raise ValueError(f"{target}: operating point '{point_name}' stores no readout levels to normalise with")
+        if levels.pulse != readout_pulse:
+            raise ValueError(
+                f"{target}: the readout levels at operating point '{point_name}' were taken with pulse "
+                f"'{levels.pulse}', but the QProgram plays '{readout_pulse}'; refusing to use them"
+            )
+        return levels
+
     def _ramp_duration(self, target: Target, key: str) -> int | tuple[int, int] | None:
         """The step's ``key`` ramp duration; a YAML list ``[z, x]`` becomes the ``(z, x)`` pair the QProgram takes."""
         duration = self._param(target, key)
@@ -215,27 +249,11 @@ class LandauZenerNode(FixedFluxNode[None]):
     def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[None]:
         """Normalise the signal with the readout levels and plot it; report no value yet.
 
-        Reads the |0>/|1> readout levels from the operating point, refusing levels taken with a different
-        readout pulse than the ``readout-<operating_point>`` the QProgram plays (ADR-0001, D8). The
-        agreement metric that would give a value (and so a verdict) is a follow-up (QHC-1921), so
-        ``value`` is ``None`` and the run leaves the benchmark unscored.
-
-        Raises:
-            AnalysisError: when the operating point stores no readout levels, or stores them for another
-                readout pulse.
+        The |0>/|1> readout levels are the operating point's, checked by :meth:`_run_sweep` before it
+        measured (:meth:`_readout_levels`). The agreement metric that would give a value (and so a
+        verdict) is a follow-up (QHC-1921), so ``value`` is ``None`` and the run leaves the benchmark unscored.
         """
-        point_name = self._operating_point_name(target)
-        # The pulse generalized_linear_ramps plays at its readout point, the step's operating point.
-        readout_pulse = self._pulse(target, Role.readout, "readout")
-        levels = self._operating_point(target).readout.levels
-        if levels is None:
-            raise AnalysisError(f"{target}: operating point '{point_name}' stores no readout levels to normalise with")
-        if levels.pulse != readout_pulse:
-            raise AnalysisError(
-                f"{target}: the readout levels at operating point '{point_name}' were taken with pulse "
-                f"'{levels.pulse}', but the QProgram plays '{readout_pulse}'; refusing to use them"
-            )
-
+        levels = self._levels[target]
         model = LandauZenerFit(
             measurement_id=measurements[-1],
             target=str(target),
