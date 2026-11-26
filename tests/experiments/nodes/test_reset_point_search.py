@@ -35,6 +35,8 @@ DRIVE_LO = 2.9e9
 IF_OUTSIDE = -0.08e9  # + LO = 2.82 GHz, above the 2.79-2.81 GHz window
 IF_INSIDE = -0.10e9  # + LO = 2.80 GHz, inside the window
 FIRST_ID = 100
+#: The target frequency window every test step sets; it has no default (it is the device's).
+WINDOW = {"target_freq_min": 2.79e9, "target_freq_max": 2.81e9}
 
 
 class FakeLorentzian:
@@ -111,7 +113,7 @@ def _make(calibration: Calibration, parameters: dict | None = None) -> ResetPoin
         calibration_path="calibration.yml",
     )
     return ResetPointSearchNode(
-        name="reset_flux", idx=0, targets=[Q1], parameters={Q1: parameters or {}}, context=context
+        name="reset_flux", idx=0, targets=[Q1], parameters={Q1: {**WINDOW, **(parameters or {})}}, context=context
     )
 
 
@@ -267,11 +269,11 @@ def test_the_first_sweep_waits_for_the_flux_to_settle_after_the_placement(monkey
     ("parameters", "message"),
     [
         ({"drive_if_sweep": (0, 0, 11)}, "starts and stops at 0"),
-        ({"drive_if_sweep": (-20e6, 20e6, 2)}, "retry span 3e[+]07 Hz is narrower than the drive_if_sweep spacing"),
+        ({"target_freq_min": 2.81e9, "target_freq_max": 2.79e9}, "is not below target_freq_max"),
     ],
-    ids=["zero-spacing", "one-point-retry"],
+    ids=["zero-spacing", "swapped-window"],
 )
-def test_a_sweep_no_fit_can_use_fails_the_target_before_anything_is_measured(monkeypatch, parameters, message):
+def test_a_step_no_search_can_use_fails_the_target_before_anything_is_measured(monkeypatch, parameters, message):
     _patch(monkeypatch)
     measured: list = []
     monkeypatch.setattr(
@@ -283,3 +285,40 @@ def test_a_sweep_no_fit_can_use_fails_the_target_before_anything_is_measured(mon
         node.execute_node([Q1])
     assert node.run({}) == ["q1"]
     assert measured == []
+
+
+@pytest.mark.parametrize("key", ["target_freq_min", "target_freq_max"])
+def test_a_step_without_its_target_window_fails_the_target_before_anything_is_measured(monkeypatch, key):
+    """The window is the device's, so there is no default to steer to: the step must set both ends."""
+    _patch(monkeypatch)
+    measured: list = []
+    monkeypatch.setattr(
+        ResetPointSearchNode, "_measure_two_tone_saturation", lambda self, target, sweep: measured.append(sweep) or 1
+    )
+    node = _make(_calibration())
+    del node.parameters[Q1][key]
+
+    with pytest.raises(KeyError, match=f"sets no '{key}'"):
+        node.execute_node([Q1])
+    assert node.run({}) == ["q1"]
+    assert measured == []
+
+
+def test_a_retry_span_no_wider_than_the_sweep_before_it_is_skipped(monkeypatch):
+    """A 30 MHz retry after a 50 MHz window would re-measure inside the window that just failed."""
+    _patch(monkeypatch)
+    node = _make(_calibration(), {"drive_if_sweep": (-25e6, 25e6, 126), "retry_spans": (30e6, 50e6, 60e6)})
+
+    widths = [np.ptp(offsets) for offsets in node._sweep_offsets(Q1)]
+
+    assert widths == pytest.approx([50e6, 60e6])
+
+
+def test_a_retry_span_narrower_than_the_spacing_is_skipped(monkeypatch):
+    """A 30 MHz retry on a 40 MHz spacing would be a one-point sweep; the 60 MHz one has 3 points."""
+    _patch(monkeypatch)
+    node = _make(_calibration(), {"drive_if_sweep": (-20e6, 20e6, 2)})
+
+    offsets = node._sweep_offsets(Q1)
+
+    assert [len(sweep) for sweep in offsets] == [2, 3]
