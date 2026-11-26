@@ -36,6 +36,11 @@ defaults:
     drive_power: -20  # dBm, for a Rohde & Schwarz drive source; a QCM-RF drive takes drive_gain in [-1, 1]
     relax_duration: 500000
     averages: 2000
+  t2:
+    idle_duration_sweep: [0, 60000, 61]
+    drive_power: -20  # dBm, for a Rohde & Schwarz drive source; a QCM-RF drive takes drive_gain in [-1, 1]
+    relax_duration: 500000
+    averages: 2000
 
 pipelines:
   sweet_spot:
@@ -87,7 +92,8 @@ pipelines:
       reset_flux:
         experiment: reset_point_search
         operating_point: reset
-        target_frequency: [2.79e9, 2.81e9]
+        target_freq_min: 2.79e9
+        target_freq_max: 2.81e9
       rabi_reset:
         experiment: rabi
         analysis: readout_levels
