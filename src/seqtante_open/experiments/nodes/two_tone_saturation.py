@@ -43,8 +43,9 @@ EXPERIMENT_NAME = "two_tone_saturation"
 
 #: Measurement defaults (the experimentalists' calibration-script values), the spine's ``defaults``; every
 #: one is a tree parameter, named like the ``two_tone_saturation`` argument it feeds. The readout pulse
-#: (amplitude, duration, weights) comes from the calibration file, not from parameters. ``drive_power``
-#: is the Rohde & Schwarz power in dBm; a QCM-RF drive needs ``drive_gain`` set in the step.
+#: (amplitude, duration, weights) comes from the calibration file, not from parameters. The drive bus's
+#: instrument reads one of the two drive levels: ``drive_power``, the Rohde & Schwarz power in dBm, or
+#: ``drive_gain``, the QCM-RF sequencer gain, 1 as in the legacy two-tone node.
 TWO_TONE_SATURATION_DEFAULTS: Mapping[str, Any] = {
     "averages": 5000,
     "relax_duration": 50_000,
@@ -52,6 +53,7 @@ TWO_TONE_SATURATION_DEFAULTS: Mapping[str, Any] = {
     "drive_duration": 30_000,
     "drive_amplitude": 0.8,
     "drive_power": -40,
+    "drive_gain": 1,
     "overlap_time": 0,
     "drive_n_sigmas": 4,
     "drive_ringup_time": 200,

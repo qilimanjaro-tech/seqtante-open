@@ -143,3 +143,14 @@ def test_a_node_without_an_experiment_cannot_measure():
     node = NoExperiment.__new__(NoExperiment)
     with pytest.raises(TypeError, match="sets no experiment"):
         node._measure_two_tone_saturation(Q1, SWEEP)
+
+
+def test_a_qcm_rf_drive_defaults_to_gain_1(example_node_cls):
+    """The legacy two-tone node drove a QCM-RF at gain 1; a step that sets no drive_gain keeps it."""
+    platform = ExecutingPlatform(instruments={"drive_q1": "QCMRF"})
+    context = RunContext(
+        platform=platform, platform_path="runcard.yml", calibration=_calibration(), calibration_path="calibration.yml"
+    )
+    node = example_node_cls(name="step", idx=0, targets=[Q1], parameters={Q1: {}}, context=context)
+
+    assert (Parameter.GAIN, 1) in node._drive_source_writes(Q1)
