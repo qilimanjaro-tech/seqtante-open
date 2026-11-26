@@ -41,7 +41,11 @@ FREQUENCIES = np.arange(-30_000_000, 30_000_001, int(FREQ_STEP))
 
 
 def make_single_tone_data(
-    rng: np.random.Generator, *, frequencies: np.ndarray = FREQUENCIES, resonance_if: float = RESONANCE_IF
+    rng: np.random.Generator,
+    *,
+    frequencies: np.ndarray = FREQUENCIES,
+    resonance_if: float = RESONANCE_IF,
+    sigma: float = 0.002,
 ) -> tuple[np.ndarray, dict]:
     """A single resonator dip: a Lorentzian in |S21| centred on ``resonance_if``, over ``frequencies``.
 
@@ -52,7 +56,7 @@ def make_single_tone_data(
     detuning = (frequencies - resonance_if) / (0.5 * width)
     magnitude = 1.0 - 0.8 / (1.0 + detuning**2)
 
-    results = as_iq(magnitude, rng, sigma=0.002)
+    results = as_iq(magnitude, rng, sigma=sigma)
 
     loops = {
         "frequency": loop(frequencies, units="Hz", bus="readout_q1", parameter="IF_frequency"),

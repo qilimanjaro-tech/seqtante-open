@@ -34,12 +34,16 @@ AMPLITUDES = np.linspace(0.0, 1.0, 81)
 
 
 def make_rabi_data(
-    rng: np.random.Generator, *, amplitudes: np.ndarray = AMPLITUDES, pi_amplitude: float = PI_AMPLITUDE
+    rng: np.random.Generator,
+    *,
+    amplitudes: np.ndarray = AMPLITUDES,
+    pi_amplitude: float = PI_AMPLITUDE,
+    sigma: float = 0.02,
 ) -> tuple[np.ndarray, dict]:
     """A Rabi oscillation over ``amplitudes``: ground (|0>) at amplitude 0, the pi extremum at ``pi_amplitude``."""
     angular_frequency = np.pi / pi_amplitude  # half a period lands on pi_amplitude
     signal = cosfunc(amplitudes, A=1.0, omega=angular_frequency, offset=0.0, phase_offset=0.0)
-    results = as_iq(signal, rng, sigma=0.02)
+    results = as_iq(signal, rng, sigma=sigma)
     loops = {"drive_amplitude": loop(amplitudes, units="amp", bus="drive_q1", parameter="drive_amplitude")}
     return results, loops
 

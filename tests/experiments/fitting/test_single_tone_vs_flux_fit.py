@@ -51,6 +51,7 @@ def make_single_tone_vs_flux_data(
     frequencies: np.ndarray = FREQUENCIES,
     sweet_spot: float = SWEET_SPOT,
     sweet_spot_if: float = -10.0e6,
+    sigma: float = 0.002,
 ) -> tuple[np.ndarray, dict]:
     """A resonator dip tracing a parabola in flux, apex at ``sweet_spot`` and ``sweet_spot_if``, over ``fluxes``
     by ``frequencies``.
@@ -64,7 +65,7 @@ def make_single_tone_vs_flux_data(
     detuning = (frequencies[None, :] - resonance[:, None]) / (0.5 * width)
     magnitude = 1.0 - 0.8 / (1.0 + detuning**2)
 
-    results = as_iq(magnitude, rng, sigma=0.002)
+    results = as_iq(magnitude, rng, sigma=sigma)
 
     loops = {
         "flux": loop(fluxes, units="V", bus="flux_z_q1", parameter="Flux"),

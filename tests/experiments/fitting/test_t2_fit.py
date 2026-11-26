@@ -35,14 +35,16 @@ FRINGE_FREQ = 1.0 / 12_000
 WAIT = np.arange(0, 60_001, 500)
 
 
-def make_t2_data(rng: np.random.Generator, *, wait: np.ndarray = WAIT, t2: float = T2_NS) -> tuple[np.ndarray, dict]:
+def make_t2_data(
+    rng: np.random.Generator, *, wait: np.ndarray = WAIT, t2: float = T2_NS, sigma: float = 0.01
+) -> tuple[np.ndarray, dict]:
     """A damped cosine of lifetime ``t2`` (ns) over ``wait``, placed on a rotated axis of the IQ plane.
 
     ``T2Fit`` rotates the trace back before fitting, so the decay has to survive that
     round trip. Wait times are integer ns, as the sequencer sweeps them.
     """
     signal = FittingClass.sinus_exp(wait, 1.0, FRINGE_FREQ, 0.0, t2, 0.0)
-    results = as_iq(signal, rng, sigma=0.01)
+    results = as_iq(signal, rng, sigma=sigma)
 
     return results, {"wait": loop(wait, units="ns", bus="drive_q1", parameter="t2_elapsed_time")}
 

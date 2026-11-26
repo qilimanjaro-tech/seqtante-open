@@ -59,6 +59,7 @@ def make_two_tone_vs_flux_data(
     frequencies: np.ndarray = FREQUENCIES,
     sweet_spot: float = SWEET_SPOT,
     sweet_spot_if: float = -5.0e6,
+    sigma: float = 0.01,
 ) -> tuple[np.ndarray, dict]:
     """A qubit peak tracing a downward parabola in flux, apex at ``sweet_spot`` and ``sweet_spot_if``,
     over ``fluxes`` by ``frequencies``."""
@@ -67,7 +68,7 @@ def make_two_tone_vs_flux_data(
     detuning = (frequencies[None, :] - qubit_if[:, None]) / (0.5 * width)
     magnitude = 1.0 / (1.0 + detuning**2)
 
-    results = as_iq(magnitude, rng, sigma=0.01)
+    results = as_iq(magnitude, rng, sigma=sigma)
 
     loops = {
         "flux": loop(fluxes, units="phi_0", bus="flux_z_q1", parameter="Flux"),
