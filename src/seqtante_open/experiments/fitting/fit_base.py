@@ -15,7 +15,7 @@
 import os
 from abc import ABC
 from functools import cached_property
-from typing import TYPE_CHECKING, Generic, TypeVar, cast
+from typing import TYPE_CHECKING, Generic, TypedDict, TypeVar, cast
 
 import numpy as np
 import plotly.graph_objects as go
@@ -33,6 +33,18 @@ if TYPE_CHECKING:
 RENDER_FORMAT = "png"
 
 RENDER_SCALE = 2  # pixel multiplier on the figure's layout size
+
+
+class LorentzianFit(TypedDict):
+    """What :meth:`FittingClass.fit_lorentzian` reports; every value NaN for a flat trace or a failed fit."""
+
+    amplitude: float
+    center: float
+    #: Full width at half maximum, in the units of the swept values.
+    width: float
+    offset: float
+    r_squared: float
+
 
 #: What a fit's :meth:`FittingClass.fit` produces, per subclass (usually a ``TypedDict``).
 ResultsT = TypeVar("ResultsT")
@@ -347,64 +359,94 @@ class FittingClass(ABC, Generic[ResultsT]):
         return np.concatenate((cdf_prep0, cdf_prep1))
 
     @staticmethod
+    def lorentzian(x, amplitude: float, center: float, width: float, offset: float):
+        """A Lorentzian line of peak height ``amplitude`` (negative for a dip) and full width ``width`` at half maximum."""
+        return amplitude / (1 + ((x - center) / (0.5 * width)) ** 2) + offset
+
+    @staticmethod
+    def lorentzian_initial_guess(
+        x_values: np.ndarray, y_values: np.ndarray, dip: bool | None = None
+    ) -> dict[str, float]:
+        """A starting point for :meth:`lorentzian`, read off the trace, keyed by its parameter names.
+
+        The baseline is the median of the window's edges; the line is a dip when ``dip`` says so, or,
+        when it is ``None``, when the trace's mean sits below the baseline; the centre is the extremum, the
+        height its distance from the baseline, and the width the span of the points past half that height
+        (a tenth of the window when fewer than two are). Nothing depends on where the window sits in
+        frequency or on the signal's scale.
+        """
+        x = np.asarray(x_values, dtype=float)
+        y = np.asarray(y_values, dtype=float)
+        edge = max(3, len(y) // 10)
+        offset = float(np.median(np.concatenate([y[:edge], y[-edge:]])))
+        if dip is None:
+            dip = bool(np.mean(y) < offset)
+        extreme = int(np.argmin(y) if dip else np.argmax(y))
+        height = float(y[extreme] - offset)
+        half = offset + height / 2
+        past_half = y < half if dip else y > half
+        span = float(np.ptp(x))
+        width = float(np.ptp(x[past_half])) if past_half.sum() > 1 else span / 10
+        return {"amplitude": height, "center": float(x[extreme]), "width": max(width, span / 100), "offset": offset}
+
+    @staticmethod
+    def fit_lorentzian(x_values: np.ndarray, y_values: np.ndarray) -> LorentzianFit:
+        """Fit :meth:`lorentzian` to a trace and report its parameters and R²; the one Lorentzian fit (QHC-1932).
+
+        A bounded local least-squares fit from :meth:`lorentzian_initial_guess`: the centre inside the
+        window, the width between a hundredth of the window and the whole of it, the height within the
+        trace's range and the baseline within its values. It fits once from a peak and once from a dip
+        and keeps the higher R²: a line near the window's edge pulls the edge baseline, so the trace's
+        mean alone can pick the wrong sign and start the local fit on a noise extremum. A fit that does
+        not converge is dropped, since its last iterate could still pass a caller's checks. So is a fit
+        whose centre lies within one sample spacing of either end of the window: the centre is bounded
+        to the window, so a line just outside it is fit with its centre pinned on the edge, and the tail
+        alone can reach a good R². A flat trace, or no fit kept, has every parameter and R² NaN, so a
+        caller's R² check rejects it.
+        """
+        x = np.asarray(x_values, dtype=float)
+        y = np.asarray(y_values, dtype=float)
+        nan = float("nan")
+        failed = LorentzianFit(amplitude=nan, center=nan, width=nan, offset=nan, r_squared=nan)
+        y_range, span = float(np.ptp(y)), float(np.ptp(x))
+        if y_range == 0 or span == 0:
+            return failed
+        ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+        # Centres closer than one sample spacing to an end of the window are not resolved inside it.
+        margin = span / (x.size - 1)
+        lowest, highest = float(x.min()) + margin, float(x.max()) - margin
+        best = failed
+        for dip in (False, True):
+            guess = FittingClass.lorentzian_initial_guess(x, y, dip=dip)
+            model = Model(FittingClass.lorentzian)
+            model.set_param_hint("amplitude", value=guess["amplitude"], min=-y_range, max=y_range)
+            model.set_param_hint("center", value=guess["center"], min=float(x.min()), max=float(x.max()))
+            model.set_param_hint("width", value=guess["width"], min=span / 100, max=span)
+            model.set_param_hint("offset", value=guess["offset"], min=float(y.min()), max=float(y.max()))
+            try:
+                fit = model.fit(data=y, params=model.make_params(), x=x, method="least_squares")
+            except (ValueError, RuntimeError):
+                continue
+            if not fit.success or not lowest <= fit.params["center"].value <= highest:
+                continue
+            r_squared = 1.0 - float(np.sum((y - fit.best_fit) ** 2)) / ss_tot
+            if np.isnan(best["r_squared"]) or r_squared > best["r_squared"]:
+                best = LorentzianFit(
+                    amplitude=float(fit.params["amplitude"].value),
+                    center=float(fit.params["center"].value),
+                    width=float(fit.params["width"].value),
+                    offset=float(fit.params["offset"].value),
+                    r_squared=r_squared,
+                )
+        return best
+
+    @staticmethod
     def lorentzian_fit(y_values, x_values):
-        """Fits the data to a lorentzian"""
-
-        def lorentzian(x, amplitude, center, width, offset):
-            return amplitude / (1 + ((x - center) / (0.5 * width)) ** 2) + offset
-
-        # Fit signal
-        fit_signal = y_values
-
-        # Lorentzian fit
-        mod = Model(lorentzian)
-
-        # Set initial parameter values
-        initial_amp = np.max(fit_signal) - np.min(fit_signal)
-        if (np.mean(fit_signal) - np.min(fit_signal)) ** 2 > (np.mean(fit_signal) - np.max(fit_signal)) ** 2:
-            # if the mean of the values is closer to the maximum, it means we have negative amplitude!
-            initial_amp = -initial_amp
-
-        mod.set_param_hint(
-            "amplitude",
-            value=initial_amp,
-            min=-abs(np.max(fit_signal) - np.min(fit_signal)),
-            max=abs(np.max(fit_signal) - np.min(fit_signal)),
-        )
-        mod.set_param_hint("center", value=np.mean(x_values), min=np.min(x_values), max=np.max(x_values))
-        mod.set_param_hint(
-            "width",
-            value=(np.max(x_values) - np.min(x_values)) / 10,
-            min=(np.max(x_values) - np.min(x_values)) / 100,
-            max=(np.max(x_values) - np.min(x_values)),
-        )
-        mod.set_param_hint("offset", value=np.mean(fit_signal), min=np.min(fit_signal), max=np.max(fit_signal))
-
-        params = mod.make_params()
-        fit = mod.fit(data=fit_signal, params=params, x=x_values, method="differential_evolution")
-
-        # Update r_squared value
-        r_squared = fit.rsquared
-
-        fitted_amplitude = fit.params["amplitude"].value
-        fitted_center = fit.params["center"].value
-        fitted_width = fit.params["width"].value
-        fitted_offset = fit.params["offset"].value
-
-        popt = [fitted_amplitude, fitted_center, fitted_width, fitted_offset]
-
-        if fitted_amplitude < 0:
-            fitted_if = x_values[
-                np.argmin(lorentzian(x_values, fitted_amplitude, fitted_center, fitted_width, fitted_offset))
-            ]
-        else:
-            fitted_if = x_values[
-                np.argmax(lorentzian(x_values, fitted_amplitude, fitted_center, fitted_width, fitted_offset))
-            ]
-
-        fit_values = lorentzian(x_values, *popt)
-
-        return fitted_if, fit_values, r_squared
+        """``(centre, fitted curve, R²)`` of :meth:`fit_lorentzian`, for the callers that take the tuple."""
+        x = np.asarray(x_values, dtype=float)
+        fit = FittingClass.fit_lorentzian(x, y_values)
+        params = (fit["amplitude"], fit["center"], fit["width"], fit["offset"])
+        return fit["center"], FittingClass.lorentzian(x, *params), fit["r_squared"]
 
     @staticmethod
     def sinus(x, a, b, c, d):
