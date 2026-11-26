@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The ``two_tone`` node: one pulsed-saturation sweep at the sweet spot, fit to a Lorentzian (QHC-1805).
+"""The ``two_tone`` node: one pulsed-saturation sweep at an operating point, fit to a Lorentzian (QHC-1805).
 
 Ports the legacy ``two_tone`` function to a real :class:`CalibrationNode` (ADR-0004, ADR-0007). The node
 runs at the step's operating point (the base places it before ``execute_node``), sweeps the drive IF with
@@ -23,8 +23,8 @@ The measurement is the shared qili ``two_tone_saturation`` QProgram (QHC-1916), 
 :class:`~seqtante_open.experiments.nodes.two_tone_saturation.TwoToneSaturationNode` spine it shares with
 ``reset_point_search`` (QHC-1807).
 
-``apply`` -- the only writer -- stores the fitted drive IF on the operating point (the ``two_tone_sweet_spot``
-point). The drive LO is left as it was, and the legacy ``save_platform`` call is gone: the run persists the
+``apply`` -- the only writer -- stores the fitted drive IF on the step's operating point (``sweet_spot`` in
+``two_tone_sweet_spot``). The drive LO is left as it was, and the legacy ``save_platform`` call is gone: the run persists the
 calibration file (ADR-0001). The Lorentzian fit is shared with ``reset_point_search`` (QHC-1807); the fitted
 ``drive_if``, ``drive_lo`` and ``fit_r2`` are written to the measurement entry (QHC-1497, QHC-1791).
 """
@@ -58,14 +58,14 @@ TWO_TONE_DEFAULTS: Mapping[str, Any] = {
 
 
 @dataclass(frozen=True)
-class TwoToneSweetSpot:
+class TwoToneLine:
     """What ``analyze`` hands ``apply``: the fitted drive IF to store on the operating point, in Hz."""
 
     drive_if: float
 
 
-class TwoToneNode(TwoToneSaturationNode[TwoToneSweetSpot]):
-    """One two-tone pulsed-saturation sweep at the sweet spot, fit to a Lorentzian peak (QHC-1805)."""
+class TwoToneNode(TwoToneSaturationNode[TwoToneLine]):
+    """One two-tone pulsed-saturation sweep at the step's operating point, fit to a Lorentzian peak (QHC-1805)."""
 
     experiment = "two_tone"
     analyses = (LORENTZIAN_PEAK,)
@@ -81,7 +81,7 @@ class TwoToneNode(TwoToneSaturationNode[TwoToneSweetSpot]):
         drive_if_sweep = self._absolute_sweep(target, "drive_if_sweep", operating_point.drive.if_)
         return self._measure_two_tone_saturation(target, drive_if_sweep)
 
-    def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[TwoToneSweetSpot]:
+    def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[TwoToneLine]:
         """Fit the sweep, check it, save ``drive_if``/``drive_lo``/``fit_r2``, plot, and return the drive IF; read-only.
 
         Fit, then the acceptance check, then save, then plot: a rejected fit never reaches the DB (a reader
@@ -96,7 +96,7 @@ class TwoToneNode(TwoToneSaturationNode[TwoToneSweetSpot]):
             target=str(target),
             path=self.parameters[target].get("data_folder"),
             r2_min=self._param(target, "min_r2"),
-            title="Two tone (sweet spot)",
+            title=f"Two tone ({self._operating_point_name(target)})",
         )
         model.fit()
         if not model.accepted or model.fitted_if is None:
@@ -105,10 +105,10 @@ class TwoToneNode(TwoToneSaturationNode[TwoToneSweetSpot]):
         model.add_fitted_parameter(FittedParameter.DRIVE_LO, operating_point.drive.lo)
         model.save_fitting()
         plot = model.plot()
-        return AnalysisResult(fitted=TwoToneSweetSpot(drive_if=model.fitted_if), plots=(plot,) if plot else ())
+        return AnalysisResult(fitted=TwoToneLine(drive_if=model.fitted_if), plots=(plot,) if plot else ())
 
-    def apply(self, target: Target, result: AnalysisResult[TwoToneSweetSpot]) -> None:
-        """Write the fitted drive IF onto the sweet-spot operating point; the only writer (the LO is untouched)."""
+    def apply(self, target: Target, result: AnalysisResult[TwoToneLine]) -> None:
+        """Write the fitted drive IF onto the step's operating point; the only writer (the LO is untouched)."""
         # analyze returns a fitted point or raises, so apply always has one; the guard is just a type narrow.
         if result.fitted is not None:
             operating_point = self._operating_point(target)

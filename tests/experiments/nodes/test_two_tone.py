@@ -51,9 +51,11 @@ class FakeLorentzian:
 
     saved: list = []
     events: list = []
+    titles: list = []
     accepted_result = True
 
     def __init__(self, measurement_id, target=None, path=None, r2_min=0.8, title="Two tone"):
+        type(self).titles.append(title)
         self.id = measurement_id
         self.results = {"quality": "fake"}
 
@@ -143,6 +145,7 @@ def _patch(monkeypatch):
     monkeypatch.setattr(node_module, "save_calibration", lambda calibration, path: None)
     monkeypatch.setattr(FakeLorentzian, "saved", [])
     monkeypatch.setattr(FakeLorentzian, "events", [])
+    monkeypatch.setattr(FakeLorentzian, "titles", [])
     monkeypatch.setattr(FakeLorentzian, "accepted_result", True)
     return calls
 
@@ -162,6 +165,7 @@ def test_accepted_fit_writes_the_drive_if_and_keeps_the_lo(monkeypatch):
     # drive_if/fit_r2 come from the shared fit's save_fitting; the node records drive_lo alongside them.
     assert (FittedParameter.DRIVE_LO, DRIVE_LO) in FakeLorentzian.saved
     assert FakeLorentzian.events == ["fit", "save", "plot"]  # fit -> check -> save -> plot
+    assert FakeLorentzian.titles == ["Two tone (sweet_spot)"]
 
 
 def test_rejected_fit_fails_the_target_and_leaves_the_point(monkeypatch):
@@ -197,3 +201,4 @@ def test_a_step_naming_another_point_sweeps_and_writes_that_point(monkeypatch):
     points = read_calibration_file(calibration).operating_points["q1"]
     assert points["reset"].drive.if_ == pytest.approx(FITTED_IF)
     assert points["sweet_spot"].drive.if_ == pytest.approx(STORED_IF)
+    assert FakeLorentzian.titles == ["Two tone (reset)"]  # the plot is labelled with the point it measured
