@@ -59,6 +59,7 @@ dev = [
     "h5py>=3.13.0",
     "towncrier>=25.8.0",
     "ty>=0.0.34",
+    "pyvisa-sim>=0.6.0",
 ]
 
 docs = [
