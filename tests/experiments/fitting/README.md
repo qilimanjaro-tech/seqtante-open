@@ -13,7 +13,10 @@ so its test goes in `tests/experiments/fitting/test_single_tone_vs_flux_fit.py`.
 **2. Write a builder for the data,** next to the case that uses it. It takes a
 seeded generator and returns the `(results, loops)` pair the acquisition would
 have written. Build the shape of the signal out of the model functions already on
-`FittingClass`; the harness supplies the noise and the IQ packing.
+`FittingClass`; the harness supplies the noise and the IQ packing. The sweep axes
+and the value that places the feature (a centre, a sweet spot, a lifetime) are
+keyword-only arguments defaulting to the case's own, so the same builder can fake
+a measurement on any sweep.
 
 **3. Declare the case.** In full:
 
@@ -33,18 +36,24 @@ FLUX_POINTS = 41
 FLUX_STEP = 2 * FLUX_HALF_SPAN / (2 * FLUX_POINTS - 2)
 """Step of the auto-convolution axis the fit reports its answer on."""
 
+FLUXES = np.linspace(SWEET_SPOT - FLUX_HALF_SPAN, SWEET_SPOT + FLUX_HALF_SPAN, FLUX_POINTS)
+FREQUENCIES = np.arange(-50_000_000, 10_000_001, 1_000_000)
 
-def make_single_tone_vs_flux_data(rng: np.random.Generator) -> tuple[np.ndarray, dict]:
-    """A resonator dip tracing a parabola in flux, centred on the sweet spot.
 
-    Every cut of the image at fixed frequency is symmetric about ``SWEET_SPOT``,
+def make_single_tone_vs_flux_data(
+    rng: np.random.Generator,
+    *,
+    fluxes: np.ndarray = FLUXES,
+    frequencies: np.ndarray = FREQUENCIES,
+    sweet_spot: float = SWEET_SPOT,
+) -> tuple[np.ndarray, dict]:
+    """A resonator dip tracing a parabola in flux, centred on ``sweet_spot``, over ``fluxes`` by ``frequencies``.
+
+    Every cut of the image at fixed frequency is symmetric about ``sweet_spot``,
     because the resonance depends on ``(flux - sweet_spot) ** 2``. That symmetry
     is what the auto-convolution inside the fit locates.
     """
-    fluxes = np.linspace(SWEET_SPOT - FLUX_HALF_SPAN, SWEET_SPOT + FLUX_HALF_SPAN, FLUX_POINTS)
-    frequencies = np.arange(-50_000_000, 10_000_001, 1_000_000)
-
-    resonance = -10.0e6 - 30.0e6 * ((fluxes - SWEET_SPOT) / FLUX_HALF_SPAN) ** 2
+    resonance = -10.0e6 - 30.0e6 * ((fluxes - sweet_spot) / FLUX_HALF_SPAN) ** 2
     width = 4.0e6
     detuning = (frequencies[None, :] - resonance[:, None]) / (0.5 * width)
     magnitude = 1.0 - 0.8 / (1.0 + detuning**2)
