@@ -24,7 +24,8 @@ lives in ``execute_node``:
    is below its minimum R², widen the span and retry (the script's 30 MHz, then 60 MHz).
 2. **Move into the window.** While the qubit is outside the target frequency window, move ``flux.z``
    along the measured slope — a small probe first, then secant steps clipped to a maximum step — waiting
-   for the flux to settle between moves. Give up past a maximum total shift or number of moves.
+   for the flux to settle after the placement jump and after every move, as the script does. Give up
+   past a maximum total shift or number of moves.
 
 Flux moves go through the restore handle (ADR-0004), so the run returns the fridge to where it was;
 ``execute_node`` returns every measurement id so the report shows each move. ``analyze`` checks the
@@ -146,13 +147,45 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
         self._search: dict[Target, _SearchOutcome] = {}
 
     def execute_node(self, targets: list[Target]) -> dict[Target, list[int]]:
-        """Run the find-the-line / move-into-the-window loop per target; return every measurement id."""
-        measurements: dict[Target, list[int]] = {}
-        for target in targets:
-            measurements[target] = self._search_one(target)
-        return measurements
+        """Run the find-the-line / move-into-the-window loop per target; return every measurement id.
 
-    def _search_one(self, target: Target) -> list[int]:
+        Every target's sweeps are checked before anything is measured. ``run`` has just placed the
+        operating point, a jump from the zeroed flux much larger than any search move, so the first
+        sweep waits ``flux_settle_duration`` as every later move does (the script sleeps after its
+        initial flux set too): a first point read while the flux still drifts seeds a wrong secant.
+
+        Raises:
+            ValueError: if a target's ``drive_if_sweep`` or ``retry_spans`` gives a sweep no fit can use
+                (:meth:`_sweep_offsets`).
+        """
+        offsets = {target: self._sweep_offsets(target) for target in targets}
+        time.sleep(max(self._param(target, "flux_settle_duration") for target in targets) * 1e-9)
+        return {target: self._search_one(target, offsets[target]) for target in targets}
+
+    def _sweep_offsets(self, target: Target) -> list[np.ndarray]:
+        """The drive-IF offsets of each sweep :meth:`_find_qubit` may take, centred on 0, in Hz.
+
+        The first is the step's ``drive_if_sweep`` window; each retry widens it to the next of
+        ``retry_spans`` at the same point spacing.
+
+        Raises:
+            ValueError: if ``drive_if_sweep`` is not a usable window (:meth:`_sweep`), or a retry span
+                is narrower than the window's spacing, which would leave a one-point sweep.
+        """
+        window = self._sweep(target, "drive_if_sweep")
+        spacing = abs(window[1] - window[0])
+        offsets = [window - (window[0] + window[-1]) / 2]
+        for span in self._param(target, "retry_spans"):
+            half = round(span / spacing / 2)
+            if half < 1:
+                raise ValueError(
+                    f"step '{self.name}': {target} retry span {span:g} Hz is narrower than the drive_if_sweep "
+                    f"spacing of {spacing:g} Hz, so its sweep would have fewer than 2 points"
+                )
+            offsets.append(np.arange(-half, half + 1) * spacing)
+        return offsets
+
+    def _search_one(self, target: Target, offsets: list[np.ndarray]) -> list[int]:
         operating_point = self._operating_point(target)
         drive_lo = operating_point.drive.lo
         flux_z_bus = bus_alias(target, Role.flux, "z")
@@ -169,7 +202,7 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
 
         window = self._sweep(target, "drive_if_sweep")
         window_centre = (window[0] + window[-1]) / 2
-        qubit_if, plot_path = self._find_qubit(target, operating_point.drive.if_ + window_centre, ids)
+        qubit_if, plot_path = self._find_qubit(target, operating_point.drive.if_ + window_centre, offsets, ids)
         if qubit_if is None:
             raise AnalysisError(f"{target}: no qubit line found at flux_z = {flux_z:.5f} in any sweep width")
         qubit_freq_abs = qubit_if + drive_lo
@@ -204,7 +237,7 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
             flux_z = next_flux_z
             moves += 1
 
-            qubit_if, plot_path = self._find_qubit(target, expected_freq - drive_lo, ids)
+            qubit_if, plot_path = self._find_qubit(target, expected_freq - drive_lo, offsets, ids)
             if qubit_if is None:
                 raise AnalysisError(f"{target}: lost the qubit line after moving flux_z to {flux_z:.5f}")
             qubit_freq_abs = qubit_if + drive_lo
@@ -213,20 +246,16 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
         self._search[target] = _SearchOutcome(flux_z=flux_z, measurement_id=ids[-1], plot_path=plot_path)
         return ids
 
-    def _find_qubit(self, target: Target, centre_if: float, ids: list[int]) -> tuple[float | None, str | None]:
+    def _find_qubit(
+        self, target: Target, centre_if: float, offsets: list[np.ndarray], ids: list[int]
+    ) -> tuple[float | None, str | None]:
         """Look for the qubit line around ``centre_if`` (Hz), widening the sweep until a fit is accepted.
 
-        The first sweep is the step's ``drive_if_sweep`` window, centred on ``centre_if``; each retry
-        widens it to the next of ``retry_spans`` at the same point spacing. Every attempt is plotted
-        (accepted or not), so a failed search still leaves its sweeps in the report. Returns the fitted IF
-        and the accepted fit's plot path, so :meth:`analyze` can reuse that plot instead of re-plotting it.
+        Each sweep is the next of ``offsets`` (:meth:`_sweep_offsets`) centred on ``centre_if``. Every
+        attempt is plotted (accepted or not), so a failed search still leaves its sweeps in the report.
+        Returns the fitted IF and the accepted fit's plot path, so :meth:`analyze` can reuse that plot
+        instead of re-plotting it.
         """
-        window = self._sweep(target, "drive_if_sweep")
-        spacing = abs(window[1] - window[0])
-        offsets = [window - (window[0] + window[-1]) / 2]
-        for span in self._param(target, "retry_spans"):
-            half = round(span / spacing / 2)
-            offsets.append(np.arange(-half, half + 1) * spacing)
         for offset in offsets:
             measurement_id = self._measure_two_tone_saturation(target, centre_if + offset)
             ids.append(measurement_id)
