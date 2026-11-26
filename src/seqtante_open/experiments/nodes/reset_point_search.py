@@ -175,7 +175,7 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
         """
         target_freq_min = self._param(target, "target_freq_min")
         target_freq_max = self._param(target, "target_freq_max")
-        if not target_freq_min < target_freq_max:
+        if target_freq_min >= target_freq_max:
             raise ValueError(
                 f"step '{self.name}': {target} target_freq_min {target_freq_min:g} Hz is not below "
                 f"target_freq_max {target_freq_max:g} Hz, so no qubit frequency is inside the window"
@@ -197,7 +197,8 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
         offsets = [window - (window[0] + window[-1]) / 2]
         for span in self._param(target, "retry_spans"):
             half = round(span / spacing / 2)
-            if 2 * half * spacing > np.ptp(offsets[-1]) + spacing / 2:  # widths are whole spacings
+            # Widths are whole spacings, so half a spacing absorbs floating-point noise.
+            if 2 * half * spacing > np.ptp(offsets[-1]) + spacing / 2:
                 offsets.append(np.arange(-half, half + 1) * spacing)
         return offsets
 
