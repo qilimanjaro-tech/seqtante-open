@@ -41,7 +41,7 @@ cooldown: CD79-Mimas
 targets: [q1, q2]
 
 defaults:
-  two_tone: {freq_sweep: [-5e6, 5e6, 101], averages: 10000}
+  two_tone: {drive_if_sweep: [-5e6, 5e6, 101], averages: 10000}
   rabi:     {drive_amplitude_sweep: [0.02, 0.8, 40], averages: 10000}
 
 pipelines:
@@ -51,7 +51,7 @@ pipelines:
         experiment: two_tone_vs_flux
         analysis: parabola_vertex
         operating_point: sweet_spot
-        loop: z
+        flux_axis: z
         flux_sweep: [-0.02, 0.02, 11]
       two_tone_sweet_spot:
         experiment: two_tone
@@ -186,13 +186,13 @@ class TestAdrExample:
     def test_defaults_and_step_values(self, pipelines):
         steps = by_name(pipelines)
         assert steps["two_tone_sweet_spot"].parameters["q1"] == {
-            "freq_sweep": [-5e6, 5e6, 101],
+            "drive_if_sweep": [-5e6, 5e6, 101],
             "averages": 10000,
             "operating_point": "sweet_spot",
         }
         assert steps["sweet_spot_flux"].parameters["q1"] == {
             "operating_point": "sweet_spot",
-            "loop": "z",
+            "flux_axis": "z",
             "flux_sweep": [-0.02, 0.02, 11],
         }
 

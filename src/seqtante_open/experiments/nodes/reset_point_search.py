@@ -280,6 +280,7 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
                 target=str(target),
                 path=self.parameters[target].get("data_folder"),
                 r2_min=self._param(target, "min_r2"),
+                title="Two tone (reset search)",
             )
             model.fit()
             plot = model.plot()
@@ -303,6 +304,7 @@ class ResetPointSearchNode(TwoToneSaturationNode[ResetPoint]):
             target=str(target),
             path=self.parameters[target].get("data_folder"),
             r2_min=self._param(target, "min_r2"),
+            title="Two tone (reset search)",
         )
         model.fit()
         if not model.accepted or model.fitted_if is None:

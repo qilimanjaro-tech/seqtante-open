@@ -17,11 +17,12 @@ defaults:
     relax_duration: 20000
     averages: 1000
   two_tone:
-    freq_sweep: [-5e6, 5e6, 101]
+    # Drive-IF window (np.linspace args, Hz) as offsets from the operating point's stored drive IF. The
+    # readout pulse comes from the calibration file. A QCM-RF drive takes drive_gain instead of drive_power.
+    drive_if_sweep: [-5e6, 5e6, 101]
     drive_amplitude: 0.05
     drive_duration: 2000
-    readout_amplitude: 0.2
-    readout_duration: 2000
+    drive_power: -40
     relax_duration: 20000
     averages: 10000
   rabi:
@@ -62,7 +63,7 @@ pipelines:
         operating_point: sweet_spot
         overrides:
           - targets: [q14]
-            freq_sweep: [-10e6, 10e6, 201]
+            drive_if_sweep: [-10e6, 10e6, 201]
 
   t1:
     after: two_tone_sweet_spot
