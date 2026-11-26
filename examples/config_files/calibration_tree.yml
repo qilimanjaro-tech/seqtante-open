@@ -10,11 +10,10 @@ targets: [q1, q14]
 
 defaults:
   two_tone_vs_flux:
-    freq_sweep: [-50e6, 50e6, 101]
+    drive_if_sweep: [-50e6, 50e6, 101]  # offsets from the operating point's drive IF, Hz
     drive_amplitude: 0.1
     drive_duration: 2000
-    readout_amplitude: 0.2
-    readout_duration: 2000
+    drive_power: -20  # dBm, for a Rohde & Schwarz drive source; a QCM-RF drive takes drive_gain in [-1, 1]
     relax_duration: 20000
     averages: 1000
   two_tone:
@@ -26,13 +25,20 @@ defaults:
     relax_duration: 20000
     averages: 10000
   rabi:
-    amplitude_sweep: [0.02, 0.8, 40]
+    drive_amplitude_sweep: [0.02, 0.8, 40]
+    drive_power: -20  # dBm, for a Rohde & Schwarz drive source; a QCM-RF drive runs at drive_gain 1, the only value rabi accepts
+    relax_duration: 500000
+    averages: 2000
   t1:
-    wait_sweep: [0, 200000, 51]
+    idle_duration_sweep: [0, 200000, 51]
     drive_amplitude: 0.1
     drive_duration: 2000
-    readout_amplitude: 0.2
-    readout_duration: 2000
+    drive_power: -20  # dBm, for a Rohde & Schwarz drive source; a QCM-RF drive takes drive_gain in [-1, 1]
+    relax_duration: 500000
+    averages: 2000
+  t2:
+    idle_duration_sweep: [0, 60000, 61]
+    drive_power: -20  # dBm, for a Rohde & Schwarz drive source; a QCM-RF drive takes drive_gain in [-1, 1]
     relax_duration: 500000
     averages: 2000
 
@@ -43,8 +49,8 @@ pipelines:
         experiment: two_tone_vs_flux
         analysis: parabola_vertex
         operating_point: sweet_spot
-        loop: z
-        flux_sweep: [-0.02, 0.02, 11]
+        flux_axis: z
+        flux_sweep: [-0.02, 0.02, 11]  # offsets from the operating point's z flux, phi_0
       two_tone_sweet_spot:
         experiment: two_tone
         analysis: lorentzian_peak
@@ -94,7 +100,7 @@ pipelines:
         pulses: {drive: pi-reset, readout: readout-reset}
         overrides:
           - targets: [q14]
-            amplitude_sweep: [0.02, 0.5, 25]
+            drive_amplitude_sweep: [0.02, 0.5, 25]
       lz:
         experiment: landau_zener
         operating_point: reset

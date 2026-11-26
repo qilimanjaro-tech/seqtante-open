@@ -15,7 +15,7 @@
 import os
 from abc import ABC
 from functools import cached_property
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Generic, TypeVar, cast
 
 import numpy as np
 import plotly.graph_objects as go
@@ -34,9 +34,16 @@ RENDER_FORMAT = "png"
 
 RENDER_SCALE = 2  # pixel multiplier on the figure's layout size
 
+#: What a fit's :meth:`FittingClass.fit` produces, per subclass (usually a ``TypedDict``).
+ResultsT = TypeVar("ResultsT")
 
-class FittingClass(ABC):
-    """Base class for all fittings."""
+
+class FittingClass(ABC, Generic[ResultsT]):
+    """Base class for all fittings.
+
+    A subclass's :meth:`fit` assigns :attr:`results`, and every fitted value is read through it. Reading
+    :attr:`results` before a successful fit raises, so no method has to remember to check first.
+    """
 
     def __init__(
         self,
@@ -61,6 +68,7 @@ class FittingClass(ABC):
         self.fitting: dict[str, float] = {}
         self.path = path
         self.target = target
+        self._results: ResultsT | None = None
 
     @cached_property
     def platform(self) -> "Platform":
@@ -74,6 +82,21 @@ class FittingClass(ABC):
 
     def plot(self):
         """Plots the fitted data. if a folder is given, it saves ther plot, else it shows it."""
+
+    @property
+    def results(self) -> ResultsT:
+        """What :meth:`fit` produced.
+
+        Raises:
+            RuntimeError: before :meth:`fit` has assigned a result, or after a fit that found none.
+        """
+        if self._results is None:
+            raise RuntimeError(f"{type(self).__name__} has no fit result: call fit() first.")
+        return self._results
+
+    @results.setter
+    def results(self, value: ResultsT) -> None:
+        self._results = value
 
     def fit_and_plot(self):
         """Sequentially does the fit and the plot functions."""
@@ -118,7 +141,7 @@ class FittingClass(ABC):
             return
         output_controller.db_manager.add_fitting(id=self.id, path=filepath)
 
-    def save_plot(self, fig: go.Figure, title: str, save_to_db: bool = False) -> str | None:
+    def save_plot(self, fig: go.Figure, title: str, save_to_db: bool = True) -> str | None:
         """Write ``fig`` under :attr:`path`, or show it when there is no path.
 
         Args:
@@ -126,7 +149,8 @@ class FittingClass(ABC):
             title (str): Basename for the file. Newlines are stripped, so a plot
                 title broken across lines can be passed straight in.
             save_to_db (bool, optional): Store the written path as the fit's representative plot with
-                :meth:`save_fitting_path_to_database`. Defaults to False.
+                :meth:`save_fitting_path_to_database`, so the measurement entry points at it. Defaults to True
+                (QHC-1932): every fit stores its plot's path.
 
         Returns:
             str | None: Path written, or None when the figure was shown instead.
@@ -410,3 +434,50 @@ class FittingClass(ABC):
     @staticmethod
     def cosfunc(phi, a, omega, offset, phase_offset):
         return offset + a * np.cos(omega * phi + phase_offset)
+
+    @staticmethod
+    def oscillation_initial_guess(
+        x_array: np.typing.ArrayLike, y_array: np.typing.ArrayLike, *, free_phase: bool = True
+    ) -> dict[str, float]:
+        """A starting point for fitting :meth:`cosfunc` to an oscillating trace, keyed by its parameter names.
+
+        Scans angular frequencies from an eighth of a period over the window up to the sampling's Nyquist
+        limit and, at each, fits the offset and the cosine (and the sine, with ``free_phase``) by linear
+        least squares, keeping the frequency with the smallest residual. An FFT peak cannot do this for a
+        trace holding one or two periods: its bins are a whole period per window apart, and a local fit
+        started from the wrong bin settles in a neighbouring minimum.
+
+        Args:
+            x_array: The swept values.
+            y_array: The trace.
+            free_phase: Fit the phase as well. Without it ``phase_offset`` is 0 and ``a`` is signed.
+
+        Returns:
+            ``a``, ``omega``, ``offset`` and ``phase_offset``. ``omega`` is 0 when ``x_array`` spans no range.
+        """
+        x = np.asarray(x_array, dtype=float)
+        y = np.asarray(y_array, dtype=float)
+        span = float(np.ptp(x))
+        if span == 0:
+            return {"a": 0.0, "omega": 0.0, "offset": float(np.mean(y)), "phase_offset": 0.0}
+        step = span / (len(x) - 1)
+        best_residual, best_omega, best_coefficients = np.inf, 0.0, np.zeros(3)
+        # 10 frequencies per FFT bin over the scanned range.
+        for omega in np.linspace(np.pi / (4 * span), np.pi / step, 10 * len(x)):
+            columns = [np.ones_like(x), np.cos(omega * x)] + ([np.sin(omega * x)] if free_phase else [])
+            basis = np.column_stack(columns)
+            coefficients = np.linalg.lstsq(basis, y, rcond=None)[0]
+            residual = float(np.sum((basis @ coefficients - y) ** 2))
+            if residual < best_residual:
+                best_residual, best_omega, best_coefficients = residual, float(omega), coefficients
+        offset, cosine = float(best_coefficients[0]), float(best_coefficients[1])
+        if not free_phase:
+            return {"a": cosine, "omega": best_omega, "offset": offset, "phase_offset": 0.0}
+        # The cosine and sine coefficients are a·cos(phase) and -a·sin(phase).
+        sine = float(best_coefficients[2])
+        return {
+            "a": float(np.hypot(cosine, sine)),
+            "omega": best_omega,
+            "offset": offset,
+            "phase_offset": float(np.arctan2(-sine, cosine)),
+        }

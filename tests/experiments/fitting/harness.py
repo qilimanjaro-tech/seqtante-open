@@ -410,9 +410,12 @@ class FittingTestCase:
         """Constructs from the data, and leaves every declared output unpopulated."""
         for path in self.EXPECTED:
             name = path.split(".")[0]
-            if not hasattr(fit_obj, name):
+            try:
+                value = getattr(fit_obj, name)
+            except AttributeError:
                 continue  # not initialised at all is fine, it certainly is not populated
-            value = getattr(fit_obj, name)
+            except RuntimeError:
+                continue  # read through ``FittingClass.results``, which refuses until fit() assigns it
             assert is_unpopulated(value), (
                 f"{self.FIT_CLASS.__name__}.{name} is already {value!r} before fit() runs, "
                 f"so test_fit would pass without fit() doing anything"
@@ -459,7 +462,7 @@ class FittingTestCase:
         fitted.plot()
         assert environment.add_fitting.call_count <= 1, (
             f"{self.FIT_CLASS.__name__}.plot() called add_fitting {environment.add_fitting.call_count} times. "
-            f"Pass save_to_db=True on a single save_plot() call."
+            f"save_plot() stores the path by default: pass save_to_db=False on every save_plot() call but one."
         )
 
     def test_plot_shows_when_no_path(self, fitted: Any, shows: dict[str, int]) -> None:

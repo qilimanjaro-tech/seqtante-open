@@ -41,7 +41,7 @@ Goal: Seqtante-Open runs the EuroQCS 1q calibration tree unattended. That means 
 
 Other points settled in review:
 
-- Steps name the flux loop they sweep (`loop: z | x`).
+- Steps name the flux loop they sweep (`flux_axis: z | x`).
 - T2 joins the delivery as its own pipeline after the sweet spot: Rabi for a pi amplitude, then T2 (`t2__drag`). T1 stays the saturation version.
 - The `Calibration` is deserialised once per run, and its path becomes a CLI argument (ADR-0004).
 - **Node** is the code name for the class that runs a step; the glossary scopes it.
@@ -58,7 +58,7 @@ The search re-measures until the qubit is in the window, which a read-only `anal
 1. **Find the line.** Run a two-tone sweep at the current reset flux. If the Lorentzian fit is below its minimum R² (0.8 in the script), widen the span and retry (30 MHz, then 60 MHz).
 2. **Move the qubit into the window.** If the qubit lies outside the target frequency window, move `flux.z` along the measured slope. The first move is a small probe; after that each move is a secant step, clipped to a maximum step. Wait for the flux to settle, then measure again. Give up past a maximum total shift or a maximum number of moves.
 3. **Write the point.** Write the reset point's `flux.z` and drive IF.
-4. **Take the readout levels.** Run Rabi at the new reset point. A fit below its minimum R² (0.9) fails the step. Otherwise it writes `level_0` and `level_1` with their uncertainties and the name of the readout pulse it played; which level is |0⟩ is decided by the first point of the sweep.
+4. **Take the readout levels.** Run Rabi at the new reset point. The step fails when the fit is below its minimum R² (0.9), when the pi amplitude falls outside the swept window (the sweep never reached |1⟩, so its level would only be extrapolated), or when the fit gives the levels no uncertainty. Otherwise it writes `level_0` and `level_1` with their uncertainties and the name of the readout pulse it played. |0⟩ is the fitted cosine at zero drive, where the qubit has not been rotated, and |1⟩ is half a Rabi period on; neither is read from a single sample, so the window need not start at zero drive (QHC-1806).
 
 The window, spans, step sizes, shift limit, move limit, settle time and R² thresholds are tree parameters with the script's values as defaults. Widening on failure stays inside this experiment. It is not a framework feature.
 

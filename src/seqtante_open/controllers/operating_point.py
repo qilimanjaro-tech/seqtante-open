@@ -14,7 +14,9 @@
 
 """Place a target at its operating point before an experiment runs (ADR-0001, ADR-0006).
 
-A node runs a target at one operating point named by the target's experiment section (ADR-0001).
+A node runs a target at one named operating point: the step's ``operating_point`` when the tree names
+one, otherwise the target's experiment section's (ADR-0001, ADR-0003; resolved by
+:meth:`~seqtante_open.controllers.calibration_node.CalibrationNode._operating_point_name`).
 :func:`apply_operating_point` sets the target's own flux and the flux of every neighbour its point
 parks, each through a :class:`~seqtante_open.controllers.parameter_restore.ParameterRestore` handle
 so the run undoes them. The stored frequencies (drive/readout LO and IF) are played by the
@@ -29,52 +31,54 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from qili_qprograms.bus_alias import Role, bus_alias
 from qililab.typings.enums import Parameter
 
-from seqtante_open.calibration.bus_alias import Role, bus_alias
-
 if TYPE_CHECKING:
-    from seqtante_open.calibration.model import CalibrationFile, Flux, OperatingPoint
+    from qili_qprograms.calibration.model import CalibrationFile, Flux, OperatingPoint
+    from qili_qprograms.targets import Target
+
     from seqtante_open.controllers.parameter_restore import ParameterRestore
-    from seqtante_open.targets import Target
 
 
-def operating_point_for(file: CalibrationFile, experiment: str, target: Target | str) -> OperatingPoint:
-    """The operating point ``experiment`` runs ``target`` at, resolved through its section (ADR-0001).
+def operating_point_for(file: CalibrationFile, target: Target | str, point: str) -> OperatingPoint:
+    """``target``'s operating point named ``point`` (ADR-0001).
 
     Raises:
-        KeyError: if the experiment has no section for the target, or the named point does not exist.
+        KeyError: if ``target`` has no operating point named ``point``.
     """
-    section = file.experiments[experiment][str(target)]
-    return file.operating_points[str(target)][section.operating_point]
+    points = file.operating_points.get(str(target), {})
+    if point not in points:
+        raise KeyError(f"{target} has no operating point '{point}' (it has: {', '.join(sorted(points)) or 'none'})")
+    return points[point]
 
 
 def apply_operating_point(
     file: CalibrationFile,
-    experiment: str,
     target: Target | str,
+    point: str,
     restore: ParameterRestore,
 ) -> None:
-    """Set ``target`` and its parked neighbours to the fluxes of its operating point, through ``restore``.
+    """Set ``target`` and its parked neighbours to the fluxes of its operating point ``point``, through ``restore``.
 
     Sets each flux bus's ``FLUX`` parameter to the stored bias (ADR-0011). The ``restore`` handle
     records the prior values, so the run returns every bus to where it was. The ``x`` bias is set
     only where the point stores one (z-only loops omit it).
     """
-    for alias, bias in operating_point_flux_writes(file, experiment, target).items():
+    for alias, bias in operating_point_flux_writes(file, target, point).items():
         restore.set(alias, Parameter.FLUX, bias)
 
 
-def operating_point_flux_writes(file: CalibrationFile, experiment: str, target: Target | str) -> dict[str, float]:
-    """The flux-bus writes placing ``target``'s operating point would make: ``{bus alias: bias}``.
+def operating_point_flux_writes(file: CalibrationFile, target: Target | str, point: str) -> dict[str, float]:
+    """The flux-bus writes placing ``target`` at its operating point ``point`` would make: ``{bus alias: bias}``.
 
     Its own flux and the flux of every neighbour its point parks (ADR-0001). Lets a caller inspect a
     placement -- e.g. to detect a conflict between two targets in a parallel group -- without setting it.
     """
-    point = operating_point_for(file, experiment, target)
+    operating_point = operating_point_for(file, target, point)
     writes: dict[str, float] = {}
-    _record_flux(writes, target, point.flux)
-    for neighbour, flux in point.parked_flux.items():
+    _record_flux(writes, target, operating_point.flux)
+    for neighbour, flux in operating_point.parked_flux.items():
         _record_flux(writes, neighbour, flux)
     return writes
 

@@ -24,6 +24,7 @@ plain file write, so no image renderer runs.
 import os
 import warnings
 
+import numpy as np
 import plotly.graph_objects as go
 import pytest
 
@@ -87,7 +88,22 @@ def make_fit(path=None, fitting=None):
     fit.id = 42
     fit.fitting = {} if fitting is None else dict(fitting)
     fit.path = path
+    fit._results = None
     return fit
+
+
+# --------------------------------- results ----------------------------------
+
+
+def test_results_refuse_to_be_read_until_a_fit_assigns_them():
+    """Every fitted value is read through ``results``, so a read before ``fit()`` raises without a per-method check."""
+    fit = make_fit()
+    with pytest.raises(RuntimeError, match="FittingClass has no fit result"):
+        _ = fit.results
+
+    fit.results = {"center": 0.1}
+
+    assert fit.results == {"center": 0.1}
 
 
 # --------------------------- add_fitted_parameter ---------------------------
@@ -182,10 +198,18 @@ def test_save_plot_writes_plot_path_when_enabled(fake_db, configure, tmp_path):
     assert os.path.isfile(expected)
 
 
-def test_save_plot_skips_db_by_default(fake_db, configure, tmp_path):
+def test_save_plot_stores_the_path_by_default(fake_db, configure, tmp_path):
+    """Every fit stores its plot's path on the measurement entry unless it opts out (QHC-1932)."""
     configure(True)
     fit = make_fit(path=str(tmp_path))
-    fit.save_plot(go.Figure(), "myplot")
+    filepath = fit.save_plot(go.Figure(), "myplot")
+    assert [call["path"] for call in fake_db.fitting_calls] == [filepath]
+
+
+def test_save_plot_skips_db_when_asked(fake_db, configure, tmp_path):
+    configure(True)
+    fit = make_fit(path=str(tmp_path))
+    fit.save_plot(go.Figure(), "myplot", save_to_db=False)
     assert fake_db.fitting_calls == []
 
 
@@ -228,3 +252,27 @@ def test_storage_conf_parameters_to_save_filters_what_is_saved(fake_db, tmp_path
     fit = make_fit(fitting={"t1": 1.0, "t2": 2.0})
     fit.save_fitting_to_database()
     assert fake_db.fitting_calls == [{"id": 42, "path": None, "parameters": {"t1": 1.0}}]
+
+
+@pytest.mark.parametrize("free_phase", [False, True])
+def test_oscillation_initial_guess_resolves_a_trace_of_under_two_periods(free_phase):
+    """~1.4 periods over 40 points: the FFT bins sit 1.25 periods per unit apart, the scan resolves it."""
+    x = np.linspace(0.02, 0.8, 40)
+    omega, phase = np.pi / 0.28, (0.7 if free_phase else 0.0)
+    y = 0.2 - 0.9 * np.cos(omega * x + phase)
+
+    guess = FittingClass.oscillation_initial_guess(x, y, free_phase=free_phase)
+
+    assert guess["omega"] == pytest.approx(omega, rel=0.02)
+    assert guess["offset"] == pytest.approx(0.2, abs=0.05)
+    model = FittingClass.cosfunc(x, guess["a"], guess["omega"], guess["offset"], guess["phase_offset"])
+    np.testing.assert_allclose(model, y, atol=0.1)
+    if not free_phase:
+        assert guess["phase_offset"] == pytest.approx(0.0)
+        assert guess["a"] == pytest.approx(-0.9, abs=0.05)  # signed, no phase to absorb it
+
+
+def test_oscillation_initial_guess_of_a_window_with_no_range_has_no_frequency():
+    guess = FittingClass.oscillation_initial_guess(np.full(5, 0.3), np.arange(5.0))
+
+    assert guess == {"a": 0.0, "omega": 0.0, "offset": 2.0, "phase_offset": 0.0}

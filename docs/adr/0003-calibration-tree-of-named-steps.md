@@ -13,7 +13,7 @@ targets: [q1, q14]
 
 defaults:
   two_tone: {freq_sweep: [-5e6, 5e6, 101], averages: 10000}
-  rabi:     {amplitude_sweep: [0.02, 0.8, 40], averages: 10000}
+  rabi:     {drive_amplitude_sweep: [0.02, 0.8, 40], averages: 10000}
 
 pipelines:
   sweet_spot:
@@ -22,7 +22,7 @@ pipelines:
         experiment: two_tone_vs_flux
         analysis: parabola_vertex
         operating_point: sweet_spot
-        loop: z
+        flux_axis: z
         flux_sweep: [-0.02, 0.02, 11]
       two_tone_sweet_spot:
         experiment: two_tone
@@ -64,7 +64,7 @@ pipelines:
         operating_point: reset
         overrides:
           - targets: [q14]
-            amplitude_sweep: [0.02, 0.5, 25]
+            drive_amplitude_sweep: [0.02, 0.5, 25]
       lz:
         experiment: landau_zener
         operating_point: reset
@@ -80,6 +80,7 @@ pipelines:
 - `targets` at the top is the default for every pipeline; a pipeline or a step can narrow it. `all_q` and `all_c` keep working.
 - A flux sweep names the flux `loop` it sweeps (`z` or `x`).
 - A step names the pulses it plays (`pulses`) when it does not use its experiment's default (ADR-0001).
+- A step runs at the `operating_point` it names, and plays and writes that point's pulses, so one target can run the same experiment at two points (`rabi_reset`, `rabi_sweet_spot`). A step that names none runs at the point its experiment section names. *(Added 2026-11-25, QHC-1936: the nodes had read only the section.)*
 - Parameters resolve in three levels, each overriding the one before: `defaults.<experiment>`, the step's own values, then every `overrides` entry whose `targets` include the target, in file order. `overrides` is a list so that one entry can cover many targets: on 50 qubits where 20 share an override, a per-target mapping would repeat it 20 times. The key replaces today's `overwrites`, which already has this shape.
 - `simultaneous` is not in the format while no experiment supports parallel execution (ADR-0004).
 - A `check` command that validates the file without touching hardware and prints the graph per target comes after the December delivery, on top of ADR-0005.
