@@ -364,19 +364,23 @@ class FittingClass(ABC, Generic[ResultsT]):
         return amplitude / (1 + ((x - center) / (0.5 * width)) ** 2) + offset
 
     @staticmethod
-    def lorentzian_initial_guess(x_values: np.ndarray, y_values: np.ndarray) -> dict[str, float]:
+    def lorentzian_initial_guess(
+        x_values: np.ndarray, y_values: np.ndarray, dip: bool | None = None
+    ) -> dict[str, float]:
         """A starting point for :meth:`lorentzian`, read off the trace, keyed by its parameter names.
 
-        The baseline is the median of the window's edges; the line is a dip when the trace's mean sits
-        below it; the centre is the extremum, the height its distance from the baseline, and the width the
-        span of the points past half that height (a tenth of the window when fewer than two are). Nothing
-        depends on where the window sits in frequency or on the signal's scale.
+        The baseline is the median of the window's edges; the line is a dip when ``dip`` says so, or,
+        when it is ``None``, when the trace's mean sits below the baseline; the centre is the extremum, the
+        height its distance from the baseline, and the width the span of the points past half that height
+        (a tenth of the window when fewer than two are). Nothing depends on where the window sits in
+        frequency or on the signal's scale.
         """
         x = np.asarray(x_values, dtype=float)
         y = np.asarray(y_values, dtype=float)
         edge = max(3, len(y) // 10)
         offset = float(np.median(np.concatenate([y[:edge], y[-edge:]])))
-        dip = bool(np.mean(y) < offset)
+        if dip is None:
+            dip = bool(np.mean(y) < offset)
         extreme = int(np.argmin(y) if dip else np.argmax(y))
         height = float(y[extreme] - offset)
         half = offset + height / 2
@@ -391,8 +395,11 @@ class FittingClass(ABC, Generic[ResultsT]):
 
         A bounded local least-squares fit from :meth:`lorentzian_initial_guess`: the centre inside the
         window, the width between a hundredth of the window and the whole of it, the height within the
-        trace's range and the baseline within its values. A flat trace, or a fit that fails, has every
-        parameter and R² NaN, so a caller's R² check rejects it.
+        trace's range and the baseline within its values. It fits once from a peak and once from a dip
+        and keeps the higher R²: a line near the window's edge pulls the edge baseline, so the trace's
+        mean alone can pick the wrong sign and start the local fit on a noise extremum. A fit that does
+        not converge is dropped, since its last iterate could still pass a caller's checks. A flat
+        trace, or no converged fit, has every parameter and R² NaN, so a caller's R² check rejects it.
         """
         x = np.asarray(x_values, dtype=float)
         y = np.asarray(y_values, dtype=float)
@@ -401,25 +408,31 @@ class FittingClass(ABC, Generic[ResultsT]):
         y_range, span = float(np.ptp(y)), float(np.ptp(x))
         if y_range == 0 or span == 0:
             return failed
-        guess = FittingClass.lorentzian_initial_guess(x, y)
-        model = Model(FittingClass.lorentzian)
-        model.set_param_hint("amplitude", value=guess["amplitude"], min=-y_range, max=y_range)
-        model.set_param_hint("center", value=guess["center"], min=float(x.min()), max=float(x.max()))
-        model.set_param_hint("width", value=guess["width"], min=span / 100, max=span)
-        model.set_param_hint("offset", value=guess["offset"], min=float(y.min()), max=float(y.max()))
-        try:
-            fit = model.fit(data=y, params=model.make_params(), x=x, method="least_squares")
-        except (ValueError, RuntimeError):
-            return failed
-        ss_res = float(np.sum((y - fit.best_fit) ** 2))
         ss_tot = float(np.sum((y - np.mean(y)) ** 2))
-        return LorentzianFit(
-            amplitude=float(fit.params["amplitude"].value),
-            center=float(fit.params["center"].value),
-            width=float(fit.params["width"].value),
-            offset=float(fit.params["offset"].value),
-            r_squared=1.0 - ss_res / ss_tot,
-        )
+        best = failed
+        for dip in (False, True):
+            guess = FittingClass.lorentzian_initial_guess(x, y, dip=dip)
+            model = Model(FittingClass.lorentzian)
+            model.set_param_hint("amplitude", value=guess["amplitude"], min=-y_range, max=y_range)
+            model.set_param_hint("center", value=guess["center"], min=float(x.min()), max=float(x.max()))
+            model.set_param_hint("width", value=guess["width"], min=span / 100, max=span)
+            model.set_param_hint("offset", value=guess["offset"], min=float(y.min()), max=float(y.max()))
+            try:
+                fit = model.fit(data=y, params=model.make_params(), x=x, method="least_squares")
+            except (ValueError, RuntimeError):
+                continue
+            if not fit.success:
+                continue
+            r_squared = 1.0 - float(np.sum((y - fit.best_fit) ** 2)) / ss_tot
+            if np.isnan(best["r_squared"]) or r_squared > best["r_squared"]:
+                best = LorentzianFit(
+                    amplitude=float(fit.params["amplitude"].value),
+                    center=float(fit.params["center"].value),
+                    width=float(fit.params["width"].value),
+                    offset=float(fit.params["offset"].value),
+                    r_squared=r_squared,
+                )
+        return best
 
     @staticmethod
     def lorentzian_fit(y_values, x_values):

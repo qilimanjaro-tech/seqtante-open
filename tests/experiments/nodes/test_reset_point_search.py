@@ -242,3 +242,44 @@ def test_the_search_starts_on_the_window_around_the_stored_if_and_widens_at_the_
     stored_if = _file().operating_points["q1"]["reset"].drive.if_
     np.testing.assert_allclose(sweeps[0], stored_if + np.linspace(-2e6, 2e6, 5))
     np.testing.assert_allclose(sweeps[1], stored_if + np.arange(-4, 5) * 1e6)
+
+
+def test_the_first_sweep_waits_for_the_flux_to_settle_after_the_placement(monkeypatch):
+    """``run`` jumps the flux from zero to the point, so the first sweep waits as every later move does."""
+    _patch(monkeypatch)
+    events: list = []
+    monkeypatch.setattr(reset_module.time, "sleep", lambda seconds: events.append(("sleep", seconds)))
+    measure = ResetPointSearchNode._measure_two_tone_saturation
+    monkeypatch.setattr(
+        ResetPointSearchNode,
+        "_measure_two_tone_saturation",
+        lambda self, target, sweep: events.append(("measure",)) or measure(self, target, sweep),
+    )
+    node = _make(_calibration(), {"flux_settle_duration": 2_000_000_000})
+
+    assert node.run({}) == []
+
+    # Settle after the placement, measure (outside the window), move and settle, measure (inside).
+    assert events == [("sleep", pytest.approx(2.0)), ("measure",), ("sleep", pytest.approx(2.0)), ("measure",)]
+
+
+@pytest.mark.parametrize(
+    ("parameters", "message"),
+    [
+        ({"drive_if_sweep": (0, 0, 11)}, "starts and stops at 0"),
+        ({"drive_if_sweep": (-20e6, 20e6, 2)}, "retry span 3e[+]07 Hz is narrower than the drive_if_sweep spacing"),
+    ],
+    ids=["zero-spacing", "one-point-retry"],
+)
+def test_a_sweep_no_fit_can_use_fails_the_target_before_anything_is_measured(monkeypatch, parameters, message):
+    _patch(monkeypatch)
+    measured: list = []
+    monkeypatch.setattr(
+        ResetPointSearchNode, "_measure_two_tone_saturation", lambda self, target, sweep: measured.append(sweep) or 1
+    )
+    node = _make(_calibration(), parameters)
+
+    with pytest.raises(ValueError, match=message):
+        node.execute_node([Q1])
+    assert node.run({}) == ["q1"]
+    assert measured == []

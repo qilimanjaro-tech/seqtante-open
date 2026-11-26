@@ -321,11 +321,16 @@ class CalibrationNode(ABC, Generic[ResultT]):
         """The step's ``key`` window: ``np.linspace`` arguments ``[start, stop, num]``.
 
         Raises:
-            ValueError: if the window has fewer than 2 points, which no fit can use.
+            ValueError: if the window has fewer than 2 points, or its start and stop are equal, which no
+                fit can use.
         """
         sweep = np.linspace(*self._param(target, key))
         if len(sweep) < 2:
             raise ValueError(f"step '{self.name}': {target} {key} must have at least 2 points, got {len(sweep)}")
+        if sweep[0] == sweep[-1]:
+            raise ValueError(
+                f"step '{self.name}': {target} {key} starts and stops at {sweep[0]:g}, so it sweeps nothing"
+            )
         return sweep
 
     def _absolute_sweep(self, target: Target, key: str, centre: float) -> np.ndarray:

@@ -117,6 +117,12 @@ def test_a_sweep_with_fewer_than_two_points_is_rejected():
         node._sweep(Q1, "window")
 
 
+def test_a_sweep_that_starts_and_stops_at_the_same_value_is_rejected():
+    node = _node({"window": [0.0, 0.0, 11]})
+    with pytest.raises(ValueError, match="window starts and stops at 0, so it sweeps nothing"):
+        node._sweep(Q1, "window")
+
+
 def test_a_spine_has_no_section_to_read():
     class Spine(FixedFluxNode):
         def execute_node(self, targets):  # pragma: no cover

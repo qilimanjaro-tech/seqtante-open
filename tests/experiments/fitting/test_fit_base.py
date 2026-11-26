@@ -28,6 +28,7 @@ import numpy as np
 import plotly.graph_objects as go
 import pytest
 
+import seqtante_open.experiments.fitting.fit_base as fit_base_module
 import seqtante_open.outputs.outputs as outputs_module
 from seqtante_open.experiments.fitting.fit_base import RENDER_FORMAT, FittingClass
 from seqtante_open.outputs import FittedParameter, output_controller
@@ -302,6 +303,45 @@ def test_fit_lorentzian_reports_the_line():
     assert fit["width"] == pytest.approx(0.5e6, rel=0.1)
     assert fit["amplitude"] == pytest.approx(-2.0, rel=0.1)
     assert fit["r_squared"] > 0.95
+
+
+@pytest.mark.parametrize("center", [8.5e6, 9.5e6])
+def test_fit_lorentzian_finds_a_line_at_the_window_edge(center):
+    """A line at the edge pulls the edge baseline, so the trace's mean picks the wrong sign; both are fit."""
+    x = np.linspace(-10e6, 10e6, 51)
+    y = FittingClass.lorentzian(x, 1.0, center, 1.5e6, 0.0) + np.random.default_rng(3).normal(0, 0.05, x.size)
+    assert FittingClass.lorentzian_initial_guess(x, y)["amplitude"] < 0  # the mean alone calls it a dip
+
+    fit = FittingClass.fit_lorentzian(x, y)
+
+    assert fit["center"] == pytest.approx(center, abs=0.3e6)
+    assert fit["amplitude"] > 0
+    assert fit["r_squared"] > 0.8
+
+
+def test_the_lorentzian_start_takes_the_sign_it_is_given():
+    x = np.linspace(-5e6, 5e6, 101)
+    y = FittingClass.lorentzian(x, 1.0, 1e6, 0.8e6, 0.5)
+
+    assert FittingClass.lorentzian_initial_guess(x, y, dip=False)["center"] == pytest.approx(1e6)
+    assert FittingClass.lorentzian_initial_guess(x, y, dip=True)["amplitude"] <= 0
+
+
+def test_fit_lorentzian_drops_a_fit_that_did_not_converge(monkeypatch):
+    """lmfit's least_squares returns its last iterate with success False at its evaluation limit."""
+    original = fit_base_module.Model.fit
+
+    def unconverged(self, *args, **kwargs):
+        result = original(self, *args, **kwargs)
+        result.success = False
+        return result
+
+    monkeypatch.setattr(fit_base_module.Model, "fit", unconverged)
+    x = np.linspace(-5e6, 5e6, 101)
+
+    fit = FittingClass.fit_lorentzian(x, FittingClass.lorentzian(x, 1.0, 1e6, 0.8e6, 0.5))
+
+    assert all(np.isnan(value) for value in fit.values())
 
 
 def test_fit_lorentzian_of_a_flat_trace_is_nan():
