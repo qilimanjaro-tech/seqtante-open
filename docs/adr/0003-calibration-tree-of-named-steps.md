@@ -12,7 +12,7 @@ cooldown: CD79-Mimas
 targets: [q1, q14]
 
 defaults:
-  two_tone: {freq_sweep: [-5e6, 5e6, 101], averages: 10000}
+  two_tone: {drive_if_sweep: [-5e6, 5e6, 101], averages: 10000}
   rabi:     {drive_amplitude_sweep: [0.02, 0.8, 40], averages: 10000}
 
 pipelines:
@@ -79,7 +79,7 @@ pipelines:
 - A pipeline is switched off in the file with `enabled: false`, and a run can be launched with only some pipelines (`--pipelines lz`). A dependency on a step that is not run this time is satisfied by the values already in the calibration file.
 - Benchmark `thresholds` carry their unit, so a reader sees `50 us` rather than `50e3`. The parser converts each value to the unit the benchmark reports, which the node class declares, and a threshold with no unit, or with a unit of the wrong kind, is an error. Time thresholds take `ns`, `us` (or `µs`) and `ms`; a dimensionless metric such as the Landau-Zener χ²ᵣ takes a plain number. The node class also declares the direction, so the tree does not set it: T1 and T2 are better higher, χ²ᵣ is better lower. With higher-is-better, a value at or above `passed` is Passed, at or above `warning` is Warning, and below it Failed; lower-is-better mirrors this. The report shows the unit and the direction next to the threshold.
 - `targets` at the top is the default for every pipeline; a pipeline or a step can narrow it. `all_q` and `all_c` keep working.
-- A flux sweep names the flux `loop` it sweeps (`z` or `x`).
+- A flux sweep names the flux axis it sweeps, `flux_axis` (`z` or `x`).
 - A step names the pulses it plays (`pulses`) when it does not use its experiment's default (ADR-0001).
 - A step runs at the `operating_point` it names, and plays and writes that point's pulses, so one target can run the same experiment at two points (`rabi_reset`, `rabi_sweet_spot`). A step that names none runs at the point its experiment section names. *(Added 2026-11-25, QHC-1936: the nodes had read only the section.)*
 - Parameters resolve in three levels, each overriding the one before: `defaults.<experiment>`, the step's own values, then every `overrides` entry whose `targets` include the target, in file order. `overrides` is a list so that one entry can cover many targets: on 50 qubits where 20 share an override, a per-target mapping would repeat it 20 times. The key replaces today's `overwrites`, which already has this shape.

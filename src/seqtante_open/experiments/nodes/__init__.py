@@ -24,7 +24,7 @@ from .reset_point_search import ResetPointSearchNode
 from .single_tone import single_tone_node
 from .t1 import T1Node
 from .t2 import T2Node
-from .two_tone import two_tone_node
+from .two_tone import TwoToneNode
 from .two_tone_vs_flux import TwoToneVsFluxNode
 
 __all__ = [
@@ -32,8 +32,8 @@ __all__ = [
     "ResetPointSearchNode",
     "T1Node",
     "T2Node",
+    "TwoToneNode",
     "TwoToneVsFluxNode",
     "single_tone_node",
     "single_tone_vs_flux",
-    "two_tone_node",
 ]

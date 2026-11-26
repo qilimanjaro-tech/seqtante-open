@@ -49,7 +49,7 @@ class FakeLorentzian:
     accept = True
     saves = 0
 
-    def __init__(self, measurement_id, target=None, path=None, r2_min=0.8):
+    def __init__(self, measurement_id, target=None, path=None, r2_min=0.8, title=None):
         self.id = measurement_id
         self.results = {"quality": "fake"}
 

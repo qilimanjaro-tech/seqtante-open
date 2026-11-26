@@ -12,89 +12,104 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from copy import deepcopy
-from typing import Any
+"""The ``two_tone`` node: one pulsed-saturation sweep at an operating point, fit to a Lorentzian (QHC-1805).
 
-import numpy as np
-from qililab import save_platform
-from qililab.platform.platform import Platform
-from qililab.qprogram.calibration import Calibration
-from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
-from qililab.typings.enums import Parameter
-from qililab.utils.serialization import deserialize_from, serialize_to
+Ports the legacy ``two_tone`` function to a real :class:`CalibrationNode` (ADR-0004, ADR-0007). The node
+runs at the step's operating point (the base places it before ``execute_node``), sweeps the drive IF with
+one two-tone pulsed-saturation measurement, and fits the qubit line with
+:class:`~seqtante_open.experiments.fitting.LorentzianPeakModel`.
 
-from seqtante_open.experiments.experiment_classes import two_tone_frequency as two_tone_experiment
-from seqtante_open.experiments.fitting import FluxoniumTwoToneModel
-from seqtante_open.experiments.utils import get_lo_multiple_sources
-from seqtante_open.outputs import output_controller
+The measurement is the shared qili ``two_tone_saturation`` QProgram (QHC-1916), run by the
+:class:`~seqtante_open.experiments.nodes.two_tone_saturation.TwoToneSaturationNode` spine it shares with
+``reset_point_search`` (QHC-1807).
 
-_DEFAULTS = {
-    "drive_gain": 1,
-    "overlap_time": 0,
-    "ringup_time": 0,
+``apply`` -- the only writer -- stores the fitted drive IF on the step's operating point (``sweet_spot`` in
+``two_tone_sweet_spot``). The drive LO is left as it was, and the legacy ``save_platform`` call is gone: the run persists the
+calibration file (ADR-0001). The Lorentzian fit is shared with ``reset_point_search`` (QHC-1807); the fitted
+``drive_if``, ``drive_lo`` and ``fit_r2`` are written to the measurement entry (QHC-1497, QHC-1791).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+from seqtante_open.controllers.calibration_node import AnalysisResult
+from seqtante_open.controllers.verdicts import AnalysisError
+from seqtante_open.experiments.fitting import LorentzianPeakModel
+from seqtante_open.experiments.nodes.two_tone_saturation import TWO_TONE_SATURATION_DEFAULTS, TwoToneSaturationNode
+from seqtante_open.outputs import FittedParameter
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from qili_qprograms.targets import Target
+
+LORENTZIAN_PEAK = "lorentzian_peak"
+
+#: The node's ``defaults``: the shared two-tone measurement's, plus the fit acceptance. The sweep window
+#: ``drive_if_sweep`` (``np.linspace`` args as offsets from the stored drive IF, Hz) has no default: the
+#: step must set it.
+TWO_TONE_DEFAULTS: Mapping[str, Any] = {
+    **TWO_TONE_SATURATION_DEFAULTS,
+    # Minimum R² the Lorentzian fit must reach to pass the step.
+    "min_r2": 0.8,
 }
 
 
-def two_tone_node(platform: Platform, platform_path: str, parameters: dict[str, Any]):
-    targets = parameters["targets"]
-    qubits = [target for target in targets if target.startswith("q")]
+@dataclass(frozen=True)
+class TwoToneLine:
+    """What ``analyze`` hands ``apply``: the fitted drive IF to store on the operating point, in Hz."""
 
-    db_manager = output_controller.db_manager
+    drive_if: float
 
-    calibration: Calibration = deserialize_from(parameters["calibration_path"], Calibration)
-    if not isinstance(crosstalk := calibration.crosstalk_matrix, CrosstalkMatrix):
-        raise ValueError(
-            "To execute single_tone_vs_flux_fluxonium experiment, the Calibration needs to have a CrosstalkMatrix"
+
+class TwoToneNode(TwoToneSaturationNode[TwoToneLine]):
+    """One two-tone pulsed-saturation sweep at the step's operating point, fit to a Lorentzian peak (QHC-1805)."""
+
+    experiment = "two_tone"
+    analyses = (LORENTZIAN_PEAK,)
+    defaults = TWO_TONE_DEFAULTS
+
+    def execute_node(self, targets: list[Target]) -> dict[Target, list[int]]:
+        """Run one two-tone sweep per target and return its measurement id (hardware only)."""
+        return {target: [self._measure(target)] for target in targets}
+
+    def _measure(self, target: Target) -> int:
+        """Run one two-tone pulsed-saturation sweep at the target's operating point; return its id."""
+        operating_point = self._operating_point(target)
+        drive_if_sweep = self._absolute_sweep(target, "drive_if_sweep", operating_point.drive.if_)
+        return self._measure_two_tone_saturation(target, drive_if_sweep)
+
+    def analyze(self, target: Target, measurements: list[int]) -> AnalysisResult[TwoToneLine]:
+        """Fit the sweep, check it, save ``drive_if``/``drive_lo``/``fit_r2``, plot, and return the drive IF; read-only.
+
+        Fit, then the acceptance check, then save, then plot: a rejected fit never reaches the DB (a reader
+        would otherwise see a plausible ``drive_if`` for a step the run marked failed), as for T1 (QHC-1803).
+
+        Raises:
+            AnalysisError: when the Lorentzian fit is rejected (the step fails for this target).
+        """
+        operating_point = self._operating_point(target)
+        model = LorentzianPeakModel(
+            measurements[-1],
+            target=str(target),
+            path=self.parameters[target].get("data_folder"),
+            r2_min=self._param(target, "min_r2"),
+            title=f"Two tone ({self._operating_point_name(target)})",
         )
-    platform.set_crosstalk(crosstalk=crosstalk)
+        model.fit()
+        if not model.accepted or model.fitted_if is None:
+            raise AnalysisError(f"{target}: two-tone fit rejected: {model.results['quality']}")
+        # The shared fit writes drive_if and fit_r2; the placed LO is recorded alongside them (QHC-1497).
+        model.add_fitted_parameter(FittedParameter.DRIVE_LO, operating_point.drive.lo)
+        model.save_fitting()
+        plot = model.plot()
+        return AnalysisResult(fitted=TwoToneLine(drive_if=model.fitted_if), plots=(plot,) if plot else ())
 
-    platform.set_flux_to_zero()
-
-    try:
-        for qubit in qubits:
-            readout_bus = f"readout_{qubit}"
-            drive_bus = f"drive_{qubit}"
-            target_params = {**parameters, **parameters[qubit]}
-            drive_LO = get_lo_multiple_sources(
-                bus=drive_bus,
-                target=qubit,
-                platform=platform,
-                calibration=calibration,
-            )
-            readout_if_freq = platform.get_parameter(alias=readout_bus, parameter=Parameter.IF)
-            freq_sweep = np.linspace(*target_params["freq_sweep"]) + platform.get_parameter(
-                alias=drive_bus, parameter=Parameter.IF
-            )
-            calibration_copy = deepcopy(calibration)
-            calibration_copy.parameters["data_folder"] = target_params["data_folder"]
-
-            measurement_id = two_tone_experiment(
-                platform=platform,
-                db_manager=db_manager,
-                readout_bus=readout_bus,
-                drive_bus=drive_bus,
-                readout_if_freq=readout_if_freq,
-                drive_IF_sweep=freq_sweep,
-                averages=target_params["averages"],
-                relax_duration=target_params["relax_duration"],
-                d_duration=target_params["drive_duration"],
-                d_amp=target_params["drive_amplitude"],
-                r_amp=target_params["readout_amplitude"],
-                r_duration=target_params["readout_duration"],
-                drive_gain=target_params.get("drive_gain", _DEFAULTS["drive_gain"]),
-                ringup_time=target_params.get("ringup_time", _DEFAULTS["ringup_time"]),
-                overlap_time=target_params.get("overlap_time", _DEFAULTS["overlap_time"]),
-                calibration=calibration_copy,
-                drive_LO=drive_LO,
-                target=qubit,
-            )
-
-            model = FluxoniumTwoToneModel(measurement_id, target=qubit, path=target_params["data_folder"], lo=drive_LO)
-            model.fit()
-            model.plot()
-            platform.set_parameter(alias=drive_bus, parameter=Parameter.IF, value=model.results["signal"]["fitted_if"])
-
-    finally:
-        platform.set_bias_to_zero()
-        save_platform(path=platform_path, platform=platform)
-        serialize_to(calibration, parameters["calibration_path"])
+    def apply(self, target: Target, result: AnalysisResult[TwoToneLine]) -> None:
+        """Write the fitted drive IF onto the step's operating point; the only writer (the LO is untouched)."""
+        # analyze returns a fitted point or raises, so apply always has one; the guard is just a type narrow.
+        if result.fitted is not None:
+            operating_point = self._operating_point(target)
+            operating_point.drive.if_ = result.fitted.drive_if

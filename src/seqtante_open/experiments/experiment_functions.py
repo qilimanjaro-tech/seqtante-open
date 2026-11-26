@@ -30,7 +30,6 @@ from qililab import Platform
 from seqtante_open.experiments.nodes import (
     single_tone_node,
     single_tone_vs_flux,
-    two_tone_node,
 )
 
 
@@ -47,6 +46,5 @@ class ExperimentFunction(Protocol):
 experiment_functions_dict: dict[str, ExperimentFunction] = {
     "offset_calibration": single_tone_vs_flux,
     "single_tone": single_tone_node,
-    "two_tone": two_tone_node,
 }
 """``{experiment name: Callable(platform, platform_path, parameters) -> Any}``."""
