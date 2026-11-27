@@ -7,7 +7,7 @@ status: accepted
 ADR-0002 left two questions open for the Landau-Zener benchmark: where the theory curve comes from (O2) and which number measures agreement with it (O3). Until they were answered, the verdict was "Not evaluated". Theory answered both on 25 November 2026, and gave a reference script and notebook that define the method. We decided:
 
 - **The theory curve is the closed-form two-level Landau-Zener probability.** It is computed in seqtante-open from a few simulated points per qubit, stored in the calibration file.
-- **Agreement is measured by a similarity score S.** S is computed three ways and all three are reported. The benchmark value is the `rmse` variant. S is higher-is-better.
+- **Agreement is measured by a similarity score S.** S is computed three ways and all three are reported. The benchmark value is provisionally the `rmse` variant. S is higher-is-better.
 
 seqtante-open reimplements the method in its own style (numpy, scipy, plotly). It does not import Theory's script.
 
@@ -39,14 +39,14 @@ Each row is one φx: where the ramp runs and the two numbers the formula needs. 
 
 | Key | Meaning | Unit |
 |---|---|---|
-| `phi_x` | x flux of the ramp | Φ₀ (ADR-0011) |
-| `z_start`, `z_end` | z flux at the start and end of the linear ramp | Φ₀ (ADR-0011) |
+| `phi_x` | x flux of the ramp | Φ₀, as the calibration file's `flux.x` |
+| `z_start`, `z_end` | z flux at the start and end of the linear ramp | Φ₀, as the calibration file's `flux.z` |
 | `min_gap` (Δ) | minimum over the ramp of `E01 = 2·√(σx² + σz²)` | GHz |
-| `detuning_span` (Δε) | `2·|σz(z_end) − σz(z_start)|` | GHz |
+| `detuning_span` (Δε) | `2·\|σz(z_end) − σz(z_start)\|` | GHz |
 
 - The key names are a proposal. The calibration-file model in qili-qprograms settles them (ADR-0001 note: a format change is a qili-qprograms PR plus a `uv.lock` bump here).
 - The flux values are in the calibration file's `flux.z`/`flux.x` convention. How the simulation's convention maps to it is an open question (below).
-- The closed form assumes ε is linear in φz over the ramp, Δ is constant along it, and the ramp starts and ends far from the anticrossing (`min(|ε_start|, |ε_end|)/Δ ≫ 1`). Whoever produces a table reports these three checks with it. They are not stored in the table.
+- The closed form assumes the detuning ε = 2σz is linear in the z flux φz over the ramp, Δ is constant along it, and the ramp starts and ends far from the anticrossing (`min(|ε_start|, |ε_end|)/Δ ≫ 1`). Whoever produces a table reports these three checks with it. They are not stored in the table.
 - The table is seeded by hand from the offline simulations. seqtante-open only reads it. qili-experiments reads the same table, so it is part of the cross-repository contract (ADR-0001).
 - The offline simulations use the effective qubit Hamiltonian from qilitranspiler @ [`b7ed3cb`](https://github.com/qilimanjaro-tech/qilitranspiler/blob/b7ed3cbe2a5dc4f73b623516a6cb86f6da2c60f8/src/qilitranspiler/simulation.py) (`_one_qubit_coefficients_at_system`), built on cirqed @ [`e7e015a`](https://github.com/qilimanjaro-tech/cirqed/blob/e7e015ac08a034afe3260d5658f542132618bece/src/cirqed/circuits/fluxoniumx.py). Both are pinned because the helper is private and the qilitranspiler branch moves. They need the device parameters E_C, E_L, E_J,max and the junction asymmetry d. Getting those parameters is out of scope for seqtante-open. They belong to Natàlia Padilla or the experimentalists.
 
@@ -89,7 +89,7 @@ The three variants differ in D or in D_ref:
 | Variant | D | D_ref (S = 0) |
 |---|---|---|
 | `rmse` | D as above | mean D of uniform random values in [0, 1] at the same points (20 000 draws, fixed seed) |
-| `rmse_excess` | `D_ex = √max(D² − σ̂², 0)`: the noise of the data removed | the same, on the uniform draws |
+| `rmse_excess` | `D_ex = √max(D² − σ̂², 0)`: the noise σ̂ of the data (defined below) removed | the same, on the uniform draws |
 | `shape` | D as above | D of the flat curve at the weighted mean of each φx's theory curve |
 
 ### Reported alongside
@@ -102,9 +102,9 @@ The three variants differ in D or in D_ref:
 
 ## Benchmark value and verdict
 
-- The benchmark value is the `rmse` variant of S, dimensionless and **higher-is-better**. `analyze` returns it as `value` with its uncertainty, and the run scores it against the tree thresholds with `verdict_for` (QHC-1848). Its thresholds are plain numbers (ADR-0002, ADR-0003).
+- The benchmark value is provisionally the `rmse` variant of S, pending Andrés's confirmation (Open questions). It is dimensionless and **higher-is-better**. `analyze` returns it as `value` with its uncertainty, and the run scores it against the tree thresholds with `verdict_for` (QHC-1848). Its thresholds are plain numbers (ADR-0002, ADR-0003).
 - The report shows all three S, σ̂, `fit_r2`, the gap ratio per φx, and the measured curves against the theory curves.
-- The database stores `score_s` (the benchmark S) and `rmse` (its distance D), as decided by Natàlia Padilla. The fitted-parameter names of QHC-1497 may need an update for them.
+- The database stores `score_s` (the benchmark S) and `rmse`, as set by Natàlia Padilla, pending Andrés's confirmation of the variant. Whether `rmse` is the distance D or the `rmse` score is to be confirmed with Natàlia. The fitted-parameter names of QHC-1497 may need an update for them.
 - The benchmark writes nothing to the calibration file (ADR-0002).
 
 ## Considered options
@@ -128,4 +128,4 @@ The three variants differ in D or in D_ref:
 ## Open questions
 
 - **Confirmation of `rmse` as the benchmark variant.** Pending Andrés's confirmation. Owner: Natàlia Padilla, by 30 November 2026.
-- **Flux convention of the table.** cirqed's φz has the linear x → z crosstalk compensated, and puts the degeneracy point at φz = 0.5. Whoever seeds the table must write the values in the calibration file's `flux.z`/`flux.x` convention. How the two map is not yet written down. Owner: Natàlia Padilla with the experimentalists, by 30 November 2026.
+- **Flux convention of the table.** cirqed's φz has the linear x → z crosstalk compensated (`φz_local = φz − φx/2`), and puts the degeneracy point at φz = 0.5. Whoever seeds the table must write the values in the calibration file's `flux.z`/`flux.x` convention. How the two map is not yet written down. Owner: Natàlia Padilla with the experimentalists, by 30 November 2026.

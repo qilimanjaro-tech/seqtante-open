@@ -36,8 +36,8 @@ Goal: Seqtante-Open runs the EuroQCS 1q calibration tree unattended. That means 
 | D28 | `targets` narrows per pipeline and per step. **`simultaneous` removed**: parallel execution is not supported on fluxonium yet. | 0003, 0004 |
 | D29 | `check` command after the delivery. | 0003, 0005 |
 | O1 | **Open** (see Open questions). May an operating point park neighbours' fluxes? The simultaneous-conflict half is out of scope. | 0001 |
-| O2 | **Open** (see Open questions). Where the Landau-Zener theory curve comes from. Until it is configured, the verdict is "Not evaluated". | 0002 |
-| O3 | **Open** (see Open questions). Which metric measures Landau-Zener agreement with theory. | 0002 |
+| O2 | **Settled.** Where the Landau-Zener theory curve comes from: the closed form, computed from per-qubit simulated points in the calibration file. | 0002, 0012 |
+| O3 | **Settled.** Which metric measures Landau-Zener agreement with theory: the similarity score S, higher-is-better. | 0002, 0012 |
 
 Other points settled in review:
 
@@ -170,6 +170,6 @@ None blocks the approval. Each has one owner, a date it is needed by and the tas
 | Calibration-file contract (D3): Natàlia Padilla signs off that ADR-0001's shape — the operating-point / calibration-file format qili-experiments and qili-runtime read — is the one to code against (her earlier design-page agreement was on the superseded "Proposed shape" with readout settings on the point) | Natàlia Padilla | 4 Nov | Task 2 (calibration-file model), and task 15 which codes against it |
 | O1: may an operating point park neighbours' fluxes, such as the couplers around q4? Settled in its own ADR | Gonzalo Troncoso | 5 Nov | Task 2 (operating-point model) |
 | D10: does sweet-spot recalibration correct the crosstalk offset rather than store the absolute flux? Settled in its own ADR | Gonzalo Troncoso | 9 Nov | Task 7 (`sweet_spot_flux` writes the offset) and task 9 (whether the search writes an absolute `flux.z`, as the script does, or one relative to the corrected offset) |
-| O2: where the Landau-Zener theory curve comes from | Ameer Azzam | 12 Nov | Task 11 verdict; "Not evaluated" if unanswered |
-| O3: which number measures Landau-Zener agreement with theory | Ameer Azzam | 12 Nov | Task 11 verdict; "Not evaluated" if unanswered |
+| O2: where the Landau-Zener theory curve comes from *(settled 2026-11-27 by ADR-0012)* | Ameer Azzam | 12 Nov | Task 11 verdict; "Not evaluated" if unanswered |
+| O3: which number measures Landau-Zener agreement with theory *(settled 2026-11-27 by ADR-0012)* | Ameer Azzam | 12 Nov | Task 11 verdict; "Not evaluated" if unanswered |
 | Whether to rename "calibration tree" to something operators find more descriptive | Juanjo Martinez | 12 Nov | Task 13 (the EuroQCS tree file operators review) |
