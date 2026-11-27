@@ -53,7 +53,7 @@ Each row is one φx: where the ramp runs and the two numbers the formula needs. 
 ## The sweep
 
 - φx, `z_start` and `z_end` come from the table, not from the calibration tree. The tree sets only the ramp durations (and the usual averaging settings). It replaces the `flux_paths` parameter of the first node (QHC-1808).
-- φx is swept as a software loop: one QProgram per table row, each sweeping the ramp durations. φx is stored as a loop of the measurement, so the saved data is one φx × T surface.
+- φx and T are swept as software loops: one QProgram per (φx, T), since generalized_linear_ramps plays one path per QProgram. φx is the outer loop of the measurement and T the inner one, so the saved data is one φx × T surface.
 - A target whose calibration file has no table cannot be swept, so the step fails for that target and the rest of its pipeline is skipped (ADR-0003). The report says why.
 
 ## Normalisation
