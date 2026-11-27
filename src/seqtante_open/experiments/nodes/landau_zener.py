@@ -102,10 +102,11 @@ class SimulatedPoint(BaseModel):
     """One row of a target's ``simulated_points`` table (ADR-0012): where the ramp runs, and Δ and Δε for P_LZ.
 
     ``phi_x``, ``z_start`` and ``z_end`` are in Φ₀, in the calibration file's ``flux.x``/``flux.z``
-    convention; ``min_gap`` (Δ) and ``detuning_span`` (Δε) are in GHz.
+    convention; ``min_gap`` (Δ) and ``detuning_span`` (Δε) are in GHz. Every value must be finite: an
+    infinite Δ or Δε would still give a finite S, so a seeding mistake would read as a Failed verdict.
     """
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
     phi_x: float
     z_start: float

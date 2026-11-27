@@ -11,6 +11,7 @@ scores (higher is better).
 
 from __future__ import annotations
 
+import math
 from types import SimpleNamespace
 from typing import ClassVar
 
@@ -333,6 +334,11 @@ def test_an_unrunnable_step_fails_the_target_before_measuring(builds, params):
         pytest.param([{**SIMULATED_POINTS[0], "z_end": SIMULATED_POINTS[0]["z_start"]}], id="no_ramp"),
         pytest.param([{**SIMULATED_POINTS[0], "flux": 0.1}], id="unknown_key"),
         pytest.param([SIMULATED_POINTS[0], {**SIMULATED_POINTS[1], "phi_x": 0.25}], id="repeated_phi_x"),
+        pytest.param([{**SIMULATED_POINTS[0], "min_gap": math.inf}], id="infinite_gap"),
+        pytest.param([{**SIMULATED_POINTS[0], "detuning_span": math.inf}], id="infinite_span"),
+        pytest.param([{**SIMULATED_POINTS[0], "phi_x": math.nan}], id="nan_phi_x"),
+        pytest.param([{**SIMULATED_POINTS[0], "z_end": math.nan}], id="nan_z_end"),
+        pytest.param([{**SIMULATED_POINTS[0], "z_start": -math.inf}], id="infinite_z_start"),
     ],
 )
 def test_a_missing_or_malformed_table_fails_the_target_before_measuring(builds, simulated_points):
