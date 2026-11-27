@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Literal, TypedDict, get_args
 
 import numpy as np
 import plotly.graph_objects as go
@@ -50,8 +50,9 @@ _DECAY_PARAMETERS = 3
 #: How many residual standard deviations the decay amplitude must exceed for τ to count as measured.
 _MIN_DECAY_SIGNIFICANCE = 3
 
-VARIANTS = ("rmse", "rmse_excess", "shape")
-BENCHMARK_VARIANT = "rmse"
+Variant = Literal["rmse", "rmse_excess", "shape"]
+VARIANTS: tuple[Variant, ...] = get_args(Variant)
+BENCHMARK_VARIANT: Variant = "rmse"
 
 
 def lz_probability(durations: np.ndarray, min_gap: np.ndarray, detuning_span: np.ndarray) -> np.ndarray:
@@ -201,7 +202,7 @@ class Score:
 
 class _LandauZenerResults(TypedDict):
     #: S per variant (``rmse``, ``rmse_excess``, ``shape``).
-    scores: dict[str, Score]
+    scores: dict[Variant, Score]
     #: sigma_hat, the noise of the normalised data, pooled over φx.
     noise: float
     #: R² of the decay fits, pooled over φx.
@@ -293,7 +294,7 @@ class LandauZenerFit(FittingClass[_LandauZenerResults]):
             "shape": flat_reference(theory, weights),
         }
         distances = {"rmse": distance, "rmse_excess": excess, "shape": distance}
-        scores = {}
+        scores: dict[Variant, Score] = {}
         for variant in VARIANTS:
             d, d_ref = distances[variant], references[variant]
             # sigma_D is undefined at D = 0 (ADR-0012), and S at D_ref = 0 (a theory curve flat at its mean).
