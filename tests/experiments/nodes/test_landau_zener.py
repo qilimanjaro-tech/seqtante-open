@@ -1,15 +1,17 @@
-"""Tests for the ``landau_zener`` benchmark node (QHC-1808).
+"""Tests for the ``landau_zener`` benchmark node (QHC-1808, QHC-1921, ADR-0012).
 
 The node runs the full three-phase ``run`` with the real ``generalized_linear_ramps`` QProgram from
 ``qili-qprograms`` (a spy records its arguments), and a platform that executes nothing: ``StreamArray``,
-the normalising fit, the DB and the calibration save are stubbed. The tests check that the node builds one
-QProgram per flux path at the step's operating point, compiles them with the AC crosstalk of the fast-flux
-lines, sets the readout line, normalises with the operating point's readout levels and -- with no
-thresholds set yet -- leaves the benchmark unscored ("Not evaluated").
+the scoring fit, the DB and the calibration save are stubbed. The tests check that the node reads the
+target's simulated-points table, builds one QProgram per (phi_x, ramp duration) at the step's operating
+point, compiles them with the AC crosstalk of the fast-flux lines, sets the readout line, hands the fit
+the readout levels and each row's Delta and Delta-epsilon, and reports the ``rmse`` S as the value the run
+scores (higher is better).
 """
 
 from __future__ import annotations
 
+import math
 from types import SimpleNamespace
 from typing import ClassVar
 
@@ -32,6 +34,9 @@ from qililab import IQPair, Parameter, Square
 from qililab.qprogram.calibration import Calibration
 from qililab.qprogram.crosstalk_matrix import CrosstalkMatrix
 
+from seqtante_open.controllers.node_registry import BenchmarkDirection
+from seqtante_open.controllers.verdicts import BenchmarkThresholds, Verdict
+from seqtante_open.experiments.fitting.landau_zener_fit import Score
 from seqtante_open.experiments.nodes import LandauZenerNode
 from seqtante_open.experiments.nodes import landau_zener as lz_module
 from tests.experiments.nodes.harness import ExecutingPlatform, FakeStreamArray, build_context, stub_output_and_save
@@ -51,12 +56,17 @@ THRESHOLD = 0.25
 READOUT_PULSE = "readout-reset"
 AC_CROSSTALK = [[1.0, 0.1], [0.05, 1.0]]
 
+#: The table as it is seeded, out of phi_x order; the node sweeps it sorted. Neither ramp starts or ends
+#: at the reset point's flux, so both need the entry and exit ramps.
+SIMULATED_POINTS = [
+    {"phi_x": 0.25, "z_start": 0.15, "z_end": 0.3, "min_gap": 0.065, "detuning_span": 1.85},
+    {"phi_x": 0.2, "z_start": 0.12, "z_end": 0.28, "min_gap": 0.05, "detuning_span": 1.9},
+]
+RAMP_DURATIONS = [10, 20, 40, 80]
+SCORE = Score(value=0.9, uncertainty=0.02, distance=0.04, reference=0.4)
+
 PARAMS = {
-    # Two paths, the second walking further out; neither starts or ends at the reset point's flux.
-    "flux_paths": [
-        [[0.15, 0.25, 100], [0.2, 0.3, 100]],
-        [[0.15, 0.25, 100], [0.3, 0.4, 200]],
-    ],
+    "ramp_durations": RAMP_DURATIONS,
     "relax_duration": 1_000,
     "averages": 1_000,
     "entry_ramp_duration": [40, 60],
@@ -84,12 +94,27 @@ class LandauZenerPlatform(ExecutingPlatform):
 
 
 class FakeLandauZenerFit:
-    """Scripted stand-in for ``LandauZenerFit``: no DB load, records the readout levels it was given."""
+    """Scripted stand-in for ``LandauZenerFit``: no DB load, records its arguments, scores :data:`SCORE`."""
 
     last: ClassVar[dict] = {}
+    saves: ClassVar[int] = 0
+    score = SCORE
 
-    def __init__(self, measurement_id=None, target=None, level_0=None, level_1=None, path=None):
-        type(self).last = {"measurement_id": measurement_id, "target": target, "level_0": level_0, "level_1": level_1}
+    def __init__(self, measurement_id, target, level_0, level_1, min_gap, detuning_span, path=None):
+        type(self).last = {
+            "measurement_id": measurement_id,
+            "target": target,
+            "level_0": level_0,
+            "level_1": level_1,
+            "min_gap": list(min_gap),
+            "detuning_span": list(detuning_span),
+        }
+
+    def fit(self):
+        return {}
+
+    def save_fitting(self):
+        type(self).saves += 1
 
     def plot(self):
         return None
@@ -112,7 +137,9 @@ def _point(flux: tuple[float, float], levels_pulse: str = READOUT_PULSE) -> Oper
     )
 
 
-def _calibration(readout_levels_pulse: str = READOUT_PULSE) -> Calibration:
+def _calibration(
+    readout_levels_pulse: str = READOUT_PULSE, simulated_points: list | None = SIMULATED_POINTS
+) -> Calibration:
     calibration = Calibration()
     # The run needs a DC crosstalk matrix to set the slow flux (separate from the AC one on the fast lines).
     calibration.crosstalk_matrix = CrosstalkMatrix.from_array(buses=DC_FLUX_BUSES, matrix_array=np.eye(2))
@@ -132,21 +159,29 @@ def _calibration(readout_levels_pulse: str = READOUT_PULSE) -> Calibration:
                 },
             },
             experiments={
-                "landau_zener": {"q1": ExperimentSection(operating_point="reset", pulses={Role.readout: READOUT_PULSE})}
+                "landau_zener": {
+                    "q1": ExperimentSection(
+                        operating_point="reset",
+                        pulses={Role.readout: READOUT_PULSE},
+                        **({} if simulated_points is None else {"simulated_points": simulated_points}),
+                    )
+                }
             },
         ),
     )
     return calibration
 
 
-def _make(calibration: Calibration, platform: LandauZenerPlatform, **params) -> LandauZenerNode:
-    # No thresholds: the run leaves the benchmark unscored ("Not evaluated") until QHC-1921.
+def _make(
+    calibration: Calibration, platform: LandauZenerPlatform, thresholds: BenchmarkThresholds | None = None, **params
+) -> LandauZenerNode:
     return LandauZenerNode(
         name="lz",
         idx=0,
         targets=[Q1],
         parameters={Q1: {**PARAMS, **params}},
         context=build_context(calibration, platform),
+        thresholds={Q1: thresholds} if thresholds else None,
     )
 
 
@@ -163,11 +198,12 @@ def builds(monkeypatch) -> list[dict]:
     monkeypatch.setattr(lz_module, "generalized_linear_ramps", spy)
     monkeypatch.setattr(lz_module, "LandauZenerFit", FakeLandauZenerFit)
     monkeypatch.setattr(FakeLandauZenerFit, "last", {})
+    monkeypatch.setattr(FakeLandauZenerFit, "saves", 0)
     stub_output_and_save(monkeypatch)
     return recorded
 
 
-def test_runs_one_qprogram_per_path_and_leaves_the_benchmark_unscored(builds):
+def test_sweeps_each_phi_x_row_over_the_ramp_durations_and_reports_the_score(builds):
     calibration = _calibration()
     platform = LandauZenerPlatform()
     node = _make(calibration, platform)
@@ -175,9 +211,11 @@ def test_runs_one_qprogram_per_path_and_leaves_the_benchmark_unscored(builds):
     failed = node.run({})
 
     assert failed == []
-    # One QProgram per path, idle and read out at the step's operating point, reset there by default.
-    assert len(builds) == 2
-    for build, path in zip(builds, PARAMS["flux_paths"], strict=True):
+    # One QProgram per (phi_x, T): rows sorted by phi_x, durations inner, at the step's operating point.
+    rows = sorted(SIMULATED_POINTS, key=lambda row: row["phi_x"])
+    assert len(builds) == len(rows) * len(RAMP_DURATIONS)
+    expected = [(row, duration) for row in rows for duration in RAMP_DURATIONS]
+    for build, (row, duration) in zip(builds, expected, strict=True):
         assert build["calibration"] is calibration
         assert build["target"] == "q1"
         assert (build["idle_operating_point"], build["reset_point"], build["readout_point"]) == (
@@ -185,14 +223,20 @@ def test_runs_one_qprogram_per_path_and_leaves_the_benchmark_unscored(builds):
             "reset",
             "reset",
         )
-        assert build["flux_path"] == path
+        # The z ramp alone, from z_start to z_end at the row's phi_x, played in T (ADR-0012).
+        path = build["flux_path"]
+        assert (path.start, path.end, path.duration) == (
+            (row["z_start"], row["phi_x"]),
+            (row["z_end"], row["phi_x"]),
+            duration,
+        )
         assert (build["averages"], build["relax_duration"], build["readout_ringup_time"]) == (1_000, 1_000, 0)
         # A YAML [z, x] ramp duration reaches the QProgram as its (z, x) pair; the move order is defaulted.
         assert build["entry_ramp_duration"] == (40, 60)
         assert build["exit_ramp_duration"] == 50
         assert (build["entry_ramp_move_first"], build["exit_ramp_move_first"]) == ("z", "both")
     # Each QProgram ran with the step's AC crosstalk on the fast-flux lines, on a copy of the calibration.
-    assert platform.executions == 2
+    assert platform.executions == len(builds)
     for execution in platform.runs:
         compiled_with = execution["calibration"]
         assert compiled_with is not calibration
@@ -203,28 +247,50 @@ def test_runs_one_qprogram_per_path_and_leaves_the_benchmark_unscored(builds):
         assert execution["values"][READOUT_BUS, Parameter.OUT0_ATT] == int(READOUT_ATT)
         assert all(alias != "drive_q1" for alias, _ in execution["values"])
     assert calibration.crosstalk_matrix_ac is None
-    # The stream holds IQ and the threshold per annealing time.
+    # The stream is the phi_x-by-T surface: IQ and the threshold per point, phi_x the outer loop.
     stream = FakeStreamArray.last
     assert stream is not None
-    assert stream.kwargs["shape"] == (2, 3)
-    # Each path's total annealing time is its duration: 100 + 100 and 100 + 200 ns.
-    assert stream.kwargs["loops"]["total_annealing_time"]["array"] == [200, 300]
-    assert ((1, 2), THRESHOLD) in stream.writes
-    # analyze normalised with the operating point's readout levels, and reported no value.
+    assert stream.kwargs["shape"] == (2, 4, 3)
+    assert list(stream.kwargs["loops"]) == ["phi_x", "ramp_duration"]
+    assert stream.kwargs["loops"]["phi_x"]["array"] == [0.2, 0.25]
+    assert stream.kwargs["loops"]["ramp_duration"]["array"] == RAMP_DURATIONS
+    assert ((1, 3, 2), THRESHOLD) in stream.writes
+    # analyze scored with the operating point's readout levels and each row's Delta and Delta-epsilon, in sweep order.
     assert FakeLandauZenerFit.last == {
         "measurement_id": FakeStreamArray.measurement_id,
         "target": "q1",
         "level_0": LEVEL_0,
         "level_1": LEVEL_1,
+        "min_gap": [0.05, 0.065],
+        "detuning_span": [1.9, 1.85],
     }
-    assert node.benchmark_results == ()
+    assert FakeLandauZenerFit.saves == 1
+    # No thresholds in this step: the value is reported, but left unscored.
+    (unscored,) = node.unscored_benchmarks
+    assert (unscored.value, unscored.uncertainty, unscored.reason) == (SCORE.value, SCORE.uncertainty, "no thresholds")
+
+
+@pytest.mark.parametrize(
+    ("passed", "warning", "verdict"),
+    [(0.8, 0.5, Verdict.passed), (0.95, 0.85, Verdict.warning), (0.99, 0.95, Verdict.failed)],
+)
+def test_the_score_is_judged_higher_is_better(builds, passed, warning, verdict):
+    thresholds = BenchmarkThresholds(
+        passed=passed, warning=warning, unit=None, direction=BenchmarkDirection.higher_is_better
+    )
+    node = _make(_calibration(), LandauZenerPlatform(), thresholds=thresholds)
+
+    assert node.run({}) == []
+
+    (result,) = node.benchmark_results
+    assert result.verdict is verdict
 
 
 def test_the_reset_point_can_be_another_operating_point(builds):
     _make(_calibration(), LandauZenerPlatform(), reset_point="sweet_spot").run({})
 
-    assert [build["reset_point"] for build in builds] == ["sweet_spot", "sweet_spot"]
-    assert [build["readout_point"] for build in builds] == ["reset", "reset"]
+    assert {build["reset_point"] for build in builds} == {"sweet_spot"}
+    assert {build["readout_point"] for build in builds} == {"reset"}
 
 
 def test_without_a_step_matrix_the_calibrations_ac_crosstalk_is_used(builds):
@@ -242,15 +308,44 @@ def test_without_a_step_matrix_the_calibrations_ac_crosstalk_is_used(builds):
     "params",
     [
         pytest.param({"ac_crosstalk": None}, id="no_ac_crosstalk"),
-        pytest.param({"flux_paths": []}, id="no_paths"),
-        pytest.param({"flux_paths": [[[0.15, 0.25, 100], [0.2, 0.3]]]}, id="malformed_waypoint"),
-        pytest.param({"entry_ramp_duration": None}, id="path_needs_an_entry_ramp"),
+        pytest.param({"entry_ramp_duration": None}, id="ramp_needs_an_entry_ramp"),
+        pytest.param({"ramp_durations": [10, 20, 40]}, id="too_few_durations"),
+        pytest.param({"ramp_durations": [10, 40, 20, 80]}, id="durations_not_increasing"),
+        pytest.param({"ramp_durations": [10, 20.5, 40, 80]}, id="fractional_duration"),
+        pytest.param({"ramp_durations": [2, 20, 40, 80]}, id="duration_under_4_ns"),
     ],
 )
 def test_an_unrunnable_step_fails_the_target_before_measuring(builds, params):
     platform = LandauZenerPlatform()
 
     failed = _make(_calibration(), platform, **params).run({})
+
+    assert failed == ["q1"]
+    assert platform.executions == 0
+    assert FakeStreamArray.last is None
+
+
+@pytest.mark.parametrize(
+    "simulated_points",
+    [
+        pytest.param(None, id="no_table"),
+        pytest.param([], id="empty_table"),
+        pytest.param([{**SIMULATED_POINTS[0], "min_gap": -0.01}], id="negative_gap"),
+        pytest.param([{**SIMULATED_POINTS[0], "z_end": SIMULATED_POINTS[0]["z_start"]}], id="no_ramp"),
+        pytest.param([{**SIMULATED_POINTS[0], "flux": 0.1}], id="unknown_key"),
+        pytest.param([SIMULATED_POINTS[0], {**SIMULATED_POINTS[1], "phi_x": 0.25}], id="repeated_phi_x"),
+        pytest.param([{**SIMULATED_POINTS[0], "min_gap": math.inf}], id="infinite_gap"),
+        pytest.param([{**SIMULATED_POINTS[0], "detuning_span": math.inf}], id="infinite_span"),
+        pytest.param([{**SIMULATED_POINTS[0], "phi_x": math.nan}], id="nan_phi_x"),
+        pytest.param([{**SIMULATED_POINTS[0], "z_end": math.nan}], id="nan_z_end"),
+        pytest.param([{**SIMULATED_POINTS[0], "z_start": -math.inf}], id="infinite_z_start"),
+    ],
+)
+def test_a_missing_or_malformed_table_fails_the_target_before_measuring(builds, simulated_points):
+    """Without a usable table there is no ramp to sweep and no theory to score against (ADR-0012)."""
+    platform = LandauZenerPlatform()
+
+    failed = _make(_calibration(simulated_points=simulated_points), platform).run({})
 
     assert failed == ["q1"]
     assert platform.executions == 0
@@ -296,10 +391,9 @@ def test_a_step_naming_another_point_idles_reads_out_and_normalises_there(builds
     failed = _make(calibration, LandauZenerPlatform(), operating_point="sweet_spot").run({})
 
     assert failed == []
-    assert [(build["idle_operating_point"], build["readout_point"]) for build in builds] == [
-        ("sweet_spot", "sweet_spot"),
-        ("sweet_spot", "sweet_spot"),
-    ]
+    assert {(build["idle_operating_point"], build["readout_point"]) for build in builds} == {
+        ("sweet_spot", "sweet_spot")
+    }
     # Normalised with sweet_spot's levels, tagged readout-sweet_spot; reset's (readout-reset) would be refused.
     assert FakeLandauZenerFit.last["level_1"] == LEVEL_1
 

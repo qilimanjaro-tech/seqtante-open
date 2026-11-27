@@ -109,7 +109,7 @@ NODE_REGISTRY: dict[str, ExperimentSpec] = {
     ),
     "landau_zener": ExperimentSpec(
         analyses=("theory_agreement",),
-        benchmark=BenchmarkSpec(unit=None, direction=BenchmarkDirection.lower_is_better),
+        benchmark=BenchmarkSpec(unit=None, direction=BenchmarkDirection.higher_is_better),
     ),
 }
 

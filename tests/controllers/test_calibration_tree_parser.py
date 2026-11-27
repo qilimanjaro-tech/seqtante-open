@@ -22,7 +22,15 @@ import pytest
 from qili_qprograms.targets import CouplerTarget, QubitTarget
 from ruamel.yaml import YAML
 
-from seqtante_open.controllers import BenchmarkThresholds, CalibrationParser, Pipeline, Step, TreeParseError
+from seqtante_open.controllers import (
+    BenchmarkThresholds,
+    CalibrationParser,
+    Pipeline,
+    Step,
+    TreeParseError,
+    node_registry,
+)
+from seqtante_open.controllers.node_registry import BenchmarkSpec, ExperimentSpec
 from seqtante_open.controllers.verdicts import BenchmarkDirection
 
 HIGHER = BenchmarkDirection.higher_is_better
@@ -790,8 +798,21 @@ def t1_step(**keys: Any) -> dict[str, Any]:
     return make_step(experiment="t1", **keys)
 
 
+@pytest.fixture
+def lower_is_better() -> str:
+    """Registers a made-up dimensionless benchmark where lower is better; no real node is one today.
+
+    The controllers conftest restores ``NODE_REGISTRY`` after the test.
+    """
+    experiment = "lower_is_better_probe"
+    node_registry.NODE_REGISTRY[experiment] = ExperimentSpec(
+        analyses=("a",), benchmark=BenchmarkSpec(unit=None, direction=LOWER)
+    )
+    return experiment
+
+
 def lz_step(**keys: Any) -> dict[str, Any]:
-    """A ``landau_zener`` step, a dimensionless benchmark where lower is better; ``keys`` add to or replace its keys."""
+    """A ``landau_zener`` step, a dimensionless benchmark where higher is better (ADR-0012); ``keys`` add to or replace its keys."""
     return make_step(experiment="landau_zener", operating_point="reset", **keys)
 
 
@@ -819,12 +840,27 @@ class TestThresholds:
         step = only_step(single_step_tree(t1_step(thresholds=t1_thresholds(passed=passed))), platform)
         assert step.thresholds["q1"] == BenchmarkThresholds(passed=50.0, warning=20.0, unit="us", direction=HIGHER)
 
-    @pytest.mark.parametrize("passed", [1, 1.5])
+    @pytest.mark.parametrize("passed", [1, 0.8])
     def test_dimensionless_takes_a_plain_number(self, platform, passed):
-        step = only_step(single_step_tree(lz_step(thresholds={"passed": passed, "warning": 3})), platform)
+        step = only_step(single_step_tree(lz_step(thresholds={"passed": passed, "warning": 0.5})), platform)
         assert step.thresholds["q1"] == BenchmarkThresholds(
-            passed=float(passed), warning=3.0, unit=None, direction=LOWER
+            passed=float(passed), warning=0.5, unit=None, direction=HIGHER
         )
+
+    def test_lower_is_better_takes_passed_below_warning(self, platform, lower_is_better):
+        step = only_step(
+            single_step_tree(make_step(experiment=lower_is_better, thresholds={"passed": 1, "warning": 3})), platform
+        )
+        assert step.thresholds["q1"] == BenchmarkThresholds(passed=1.0, warning=3.0, unit=None, direction=LOWER)
+
+    def test_lower_is_better_reversed(self, platform, lower_is_better):
+        tree = single_step_tree(make_step(experiment=lower_is_better, thresholds={"passed": 3, "warning": 1}))
+        with pytest.raises(
+            TreeParseError,
+            match=r"^pipelines\.p\.steps\.s\.thresholds: passed \(3\) must be below warning \(1\), "
+            r"since lower is better for 'lower_is_better_probe'",
+        ):
+            parse(tree, platform)
 
     def test_zero_is_accepted(self, platform):
         step = only_step(single_step_tree(t1_step(thresholds=t1_thresholds(warning="0 us"))), platform)
@@ -995,10 +1031,10 @@ class TestThresholds:
                 id="higher_is_better_reversed",
             ),
             pytest.param(
-                single_step_tree(lz_step(thresholds={"passed": 3, "warning": 1})),
-                r"^pipelines\.p\.steps\.s\.thresholds: passed \(3\) must be below warning \(1\), "
-                r"since lower is better for 'landau_zener'",
-                id="lower_is_better_reversed",
+                single_step_tree(lz_step(thresholds={"passed": 0.5, "warning": 0.8})),
+                r"^pipelines\.p\.steps\.s\.thresholds: passed \(0.5\) must be above warning \(0.8\), "
+                r"since higher is better for 'landau_zener'",
+                id="dimensionless_reversed",
             ),
         ],
     )

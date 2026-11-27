@@ -95,6 +95,9 @@ class FittedParameter(StrEnum):
     SWEET_SPOT_FLUX_X = "sweet_spot_flux_x"
     THERMAL_POPULATION = "thermal_population"
     FIT_R2 = "fit_r2"
+    # The Landau-Zener benchmark (ADR-0012): the similarity score S and the distance D it came from.
+    SCORE_S = "score_s"
+    RMSE = "rmse"
     FIT_REDCHI = "fit_redchi"
 
 
