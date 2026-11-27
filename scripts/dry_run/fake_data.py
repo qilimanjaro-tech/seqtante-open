@@ -24,6 +24,7 @@ is a step of the tree or an experiment, from the most specific key to the least.
 
 from __future__ import annotations
 
+import math
 import os
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -63,6 +64,14 @@ PARAMETERS = {
 
 #: The values ``FAIL`` takes.
 FAIL_MODES = ("fit", "execution")
+
+#: What a parameter's value must satisfy beyond being a finite number, and how to say it.
+LIMITS: dict[str, tuple[Callable[[float], bool], str]] = {
+    "NOISE": (lambda value: value >= 0, "must be 0 or more"),
+    "T1": (lambda value: value > 0, "must be more than 0"),
+    "T2": (lambda value: value > 0, "must be more than 0"),
+    "PI_AMPLITUDE": (lambda value: value != 0, "must not be 0"),
+}
 
 #: The experiment of the legacy nodes, which stream outside ``CalibrationNode`` and so name none.
 LEGACY_EXPERIMENTS = {
@@ -123,8 +132,8 @@ def environment_errors(targets: Iterable[str], scopes: Iterable[str]) -> list[st
     """What is wrong with the ``DRY_RUN_*`` variables set, given the tree's targets and its steps and experiments.
 
     A key that is no ``DRY_RUN_[<TARGET>_][<SCOPE>_]<NAME>`` of the tree (a typo like ``DRY_RUN_Q1_TI``, or a
-    step the tree does not have), a ``FAIL`` that is not one of :data:`FAIL_MODES`, or another value that is
-    not a number.
+    step the tree does not have), a ``FAIL`` that is not one of :data:`FAIL_MODES`, another value that is
+    not a finite number, or one outside its :data:`LIMITS`.
     """
     targets = [target.upper() for target in targets]
     scopes = [scope.upper() for scope in scopes]
@@ -140,9 +149,14 @@ def environment_errors(targets: Iterable[str], scopes: Iterable[str]) -> list[st
                 errors.append(f"{key}={raw!r} is not one of {', '.join(FAIL_MODES)}")
         else:
             try:
-                float(raw)
+                value = float(raw)
             except ValueError:
                 errors.append(f"{key}={raw!r} is not a number")
+                continue
+            if not math.isfinite(value):
+                errors.append(f"{key}={raw!r} is not a finite number")
+            elif name in LIMITS and not LIMITS[name][0](value):
+                errors.append(f"{key}={raw!r} {LIMITS[name][1]}")
     return errors
 
 
@@ -151,18 +165,18 @@ def _at(axis: np.ndarray, fraction: float) -> float:
 
 
 Number = Callable[[str, float], float]
+Arguments = Callable[[Sequence[np.ndarray], Number], dict[str, Any]]
 
 
-def _two_tone(axes: Sequence[np.ndarray], number: Number) -> dict[str, Any]:
-    (frequencies,) = axes
-    feature_at = number("FEATURE_AT", FEATURE_AT)
-    return {"frequencies": frequencies, "qubit_if": number("QUBIT_IF", _at(frequencies, feature_at))}
+def _one_axis(axis: str, feature: str, parameter: str) -> Arguments:
+    """The arguments of a one-sweep builder: the sweep as ``axis``, and ``feature`` from ``parameter``,
+    at ``FEATURE_AT`` of the sweep when unset."""
 
+    def arguments(axes: Sequence[np.ndarray], number: Number) -> dict[str, Any]:
+        (sweep,) = axes
+        return {axis: sweep, feature: number(parameter, _at(sweep, number("FEATURE_AT", FEATURE_AT)))}
 
-def _single_tone(axes: Sequence[np.ndarray], number: Number) -> dict[str, Any]:
-    (frequencies,) = axes
-    feature_at = number("FEATURE_AT", FEATURE_AT)
-    return {"frequencies": frequencies, "resonance_if": number("RESONANCE_IF", _at(frequencies, feature_at))}
+    return arguments
 
 
 def _vs_flux(axes: Sequence[np.ndarray], number: Number) -> dict[str, Any]:
@@ -176,34 +190,17 @@ def _vs_flux(axes: Sequence[np.ndarray], number: Number) -> dict[str, Any]:
     }
 
 
-def _rabi(axes: Sequence[np.ndarray], number: Number) -> dict[str, Any]:
-    (amplitudes,) = axes
-    feature_at = number("FEATURE_AT", FEATURE_AT)
-    return {"amplitudes": amplitudes, "pi_amplitude": number("PI_AMPLITUDE", _at(amplitudes, feature_at))}
-
-
-def _t1(axes: Sequence[np.ndarray], number: Number) -> dict[str, Any]:
-    (wait,) = axes
-    return {"wait": wait, "t1": number("T1", _at(wait, number("FEATURE_AT", FEATURE_AT)))}
-
-
-def _t2(axes: Sequence[np.ndarray], number: Number) -> dict[str, Any]:
-    (wait,) = axes
-    return {"wait": wait, "t2": number("T2", _at(wait, number("FEATURE_AT", FEATURE_AT)))}
-
-
 Builder = Callable[..., tuple[np.ndarray, dict]]
-Arguments = Callable[[Sequence[np.ndarray], Number], dict[str, Any]]
 
 #: The builder and its arguments, by the experiment name a node streams its measurement under.
 FAKE_DATA: dict[str, tuple[Builder, Arguments]] = {
-    "two_tone_saturation": (make_lorentzian_data, _two_tone),
+    "two_tone_saturation": (make_lorentzian_data, _one_axis("frequencies", "qubit_if", "QUBIT_IF")),
     "two_tone_vs_flux_saturation": (make_two_tone_vs_flux_data, _vs_flux),
-    "single_tone__frequency_sweep": (make_single_tone_data, _single_tone),
+    "single_tone__frequency_sweep": (make_single_tone_data, _one_axis("frequencies", "resonance_if", "RESONANCE_IF")),
     "single_tone__frequency_vs_flux": (make_single_tone_vs_flux_data, _vs_flux),
-    "rabi_amplitude_drag": (make_rabi_data, _rabi),
-    "t1_pulsed_saturation": (make_t1_data, _t1),
-    "t2_drag": (make_t2_data, _t2),
+    "rabi_amplitude_drag": (make_rabi_data, _one_axis("amplitudes", "pi_amplitude", "PI_AMPLITUDE")),
+    "t1_pulsed_saturation": (make_t1_data, _one_axis("wait", "t1", "T1")),
+    "t2_drag": (make_t2_data, _one_axis("wait", "t2", "T2")),
 }
 
 

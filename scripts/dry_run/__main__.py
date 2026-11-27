@@ -29,6 +29,7 @@ import importlib
 import json
 import shutil
 import sys
+import tempfile
 from configparser import ConfigParser
 from datetime import datetime
 from pathlib import Path
@@ -45,11 +46,12 @@ from ruamel.yaml import YAML
 from sqlalchemy.exc import OperationalError
 
 from db_docker.create_tables import DATABASE_INI, SECTION, create_tables
-from scripts.dry_run.fake_calibration import collect, fake_calibration
+from scripts.dry_run.fake_calibration import fake_calibration
 from scripts.dry_run.fake_data import LEGACY_EXPERIMENTS, Scope, environment_errors, fake_data
 from scripts.dry_run.qdac_sim import attach_simulated_qdacs
 from seqtante_open import calibration_run
 from seqtante_open.controllers.calibration_node import CalibrationNode, write_per_point, write_whole
+from seqtante_open.controllers.calibration_tree_parser import CalibrationParser
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[1]
@@ -174,30 +176,34 @@ class DryRun:
         calibration_run.build_platform = self.build_platform
 
 
-def _run_database_ini(database_ini: str, section: str, folder: Path) -> tuple[Path, str]:
-    """The run's own ``.ini``, holding only ``section``, with the data written inside the run's folder.
-
-    Returns:
-        The ``.ini`` and the section's schema: its ``database_schema``, or ``autocal`` when it sets none.
-    """
-    source = ConfigParser()
+def _database_section(database_ini: str, section: str) -> dict[str, str]:
+    """The keys of ``section``, raw, with its ``database_schema`` (``autocal`` when it declares none)."""
+    source = ConfigParser(interpolation=None)
     if not source.read(database_ini):
         sys.exit(f"cannot read the database config {database_ini}")
     if not source.has_section(section):
         sys.exit(f"{database_ini} has no [{section}] section")
-    schema = source[section].get("database_schema", "autocal")
-    parser = ConfigParser()
-    parser[section] = {
-        **source[section],
-        "database_schema": schema,
-        "base_path_local": str(folder),
-        "base_path_shared": str(folder),
-        "data_write_folder": "measurements",
-    }
-    ini = folder / "database.ini"
-    with ini.open("w", encoding="utf-8") as stream:
+    return {**source[section], "database_schema": source[section].get("database_schema", "autocal")}
+
+
+def _write_ini(path: Path, section: str, keys: dict[str, str]) -> Path:
+    parser = ConfigParser(interpolation=None)
+    parser[section] = keys
+    with path.open("w", encoding="utf-8") as stream:
         parser.write(stream)
-    return ini, schema
+    return path
+
+
+def _write_tree(tree: dict, path: Path, database_ini: Path, section: str, schema: str, root_dir: Path) -> Path:
+    """Write ``tree`` with its ``storage`` replaced: the run's files under ``root_dir``, its entries in ``section``."""
+    tree["storage"] = {
+        "root_dir": str(root_dir),
+        "db_manager": {"path": str(database_ini), "database_name": section, "database_schema": schema},
+        "save_to_database": True,
+    }
+    with path.open("w", encoding="utf-8") as stream:
+        YAML().dump(tree, stream)
+    return path
 
 
 def _prepare_database(database_ini: Path, section: str, is_db_docker: bool) -> None:
@@ -206,23 +212,12 @@ def _prepare_database(database_ini: Path, section: str, is_db_docker: bool) -> N
         if is_db_docker:
             create_tables(database_ini, section)
         else:
-            with get_db_manager(path=str(database_ini), database_name=section).engine.connect():
-                pass
+            get_db_manager(path=str(database_ini), database_name=section).engine.connect().close()
     except OperationalError as error:
         sys.exit(
             f"cannot reach the database of [{section}] ({error.__class__.__name__}). "
             "For db_docker's: cd db_docker && docker compose up -d"
         )
-
-
-def _steps_and_experiments(tree: dict) -> list[str]:
-    """Every step name of the tree's pipelines and every experiment they run, legacy ones included."""
-    steps = [
-        (name, step.get("experiment", ""))
-        for pipeline in (tree.get("pipelines") or {}).values()
-        for name, step in (pipeline.get("steps") or {}).items()
-    ]
-    return list(dict.fromkeys([*(name for name, _ in steps), *(experiment for _, experiment in steps if experiment)]))
 
 
 def main() -> None:
@@ -238,49 +233,53 @@ def main() -> None:
     parser.add_argument("--no-report", dest="report", action="store_false")
     args = parser.parse_args()
 
-    yaml = YAML()
-    tree = yaml.load(Path(args.config_path).read_text(encoding="utf-8"))
-    errors = environment_errors(collect(tree, "targets"), _steps_and_experiments(tree))
+    tree = calibration_run.load_config(args.config_path)
+    platform = build_platform(runcard=args.platform_path)
+    pipelines = CalibrationParser(calibration_config=tree, platform=platform).parse()
+    steps = [step for pipeline in pipelines for step in pipeline.steps]
+    targets = sorted({str(target) for step in steps for target in step.targets})
+    scopes = list(dict.fromkeys([*(step.name for step in steps), *(step.experiment for step in steps)]))
+    errors = environment_errors(targets, scopes)
     if errors:
         sys.exit(f"fake-data parameters: {'; '.join(errors)}. See scripts/dry_run/README.md")
 
     folder = Path(args.data_root).resolve() / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     folder.mkdir(parents=True)
-    database_ini, schema = _run_database_ini(args.database_ini, args.database_section, folder)
-    is_db_docker = Path(args.database_ini).resolve() == DATABASE_INI.resolve()
-    _prepare_database(database_ini, args.database_section, is_db_docker)
-
-    tree["storage"] = {
-        "root_dir": str(folder / "seqtante"),
-        "db_manager": {"path": str(database_ini), "database_name": args.database_section, "database_schema": schema},
-        "save_to_database": True,
-    }
-    tree_path = folder / "tree.yml"
-    with tree_path.open("w", encoding="utf-8") as stream:
-        yaml.dump(tree, stream)
+    section = args.database_section
+    keys = _database_section(args.database_ini, section)
+    schema = keys["database_schema"]
+    data_paths = {"base_path_local": str(folder), "base_path_shared": str(folder), "data_write_folder": "measurements"}
+    record_keys = {key: value for key, value in {**keys, **data_paths}.items() if key != "passwd"}
+    record_ini = _write_ini(folder / "database.ini", section, record_keys)
+    _write_tree(tree, folder / "tree.yml", record_ini, section, schema, folder / "seqtante")
 
     calibration_path = folder / "calibration.yml"
     if args.calibration is not None:
         shutil.copyfile(args.calibration, calibration_path)
     else:
-        fake_calibration(tree, build_platform(runcard=args.platform_path), str(calibration_path))
+        fake_calibration(steps, platform, str(calibration_path))
 
-    np.random.seed(args.seed)
-    dry_run = DryRun(folder, args.seed)
-    dry_run.install()
-    logger.info(f"Dry run in {folder}")
-    try:
-        calibration_run.CalibrationRun(
-            args.platform_path,
-            str(tree_path),
-            pipelines=args.pipelines,
-            calibration=str(calibration_path),
-            report=args.report,
-        )
-    finally:
-        dry_run.save_scpi()
-        Instrument.close_all()
-        sys.stdout.write(f"Dry run in {folder}: {dry_run.executions} executions\n")
+    with tempfile.TemporaryDirectory(prefix="seqtante_dry_run_") as work:
+        database_ini = _write_ini(Path(work) / "database.ini", section, {**keys, **data_paths})
+        _prepare_database(database_ini, section, Path(args.database_ini).resolve() == DATABASE_INI.resolve())
+        tree_path = _write_tree(tree, Path(work) / "tree.yml", database_ini, section, schema, folder / "seqtante")
+
+        np.random.seed(args.seed)
+        dry_run = DryRun(folder, args.seed)
+        dry_run.install()
+        logger.info(f"Dry run in {folder}")
+        try:
+            calibration_run.CalibrationRun(
+                args.platform_path,
+                str(tree_path),
+                pipelines=args.pipelines,
+                calibration=str(calibration_path),
+                report=args.report,
+            )
+        finally:
+            dry_run.save_scpi()
+            Instrument.close_all()
+            sys.stdout.write(f"Dry run in {folder}: {dry_run.executions} executions\n")
 
 
 if __name__ == "__main__":

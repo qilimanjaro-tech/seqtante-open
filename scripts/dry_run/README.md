@@ -39,8 +39,9 @@ Run it from the repository root, so `tests` (the fake-data builders) is importab
 | `--no-report` | write the PDF report |
 
 The tree's `storage` section is replaced: the run writes to the database section given, and its files to
-its own folder. Only that section is copied into the run's `database.ini`, with the schema it declares, or
-`autocal` when it declares none.
+its own folder. Only that section is used, with the schema it declares, or `autocal` when it declares none.
+The run connects through a copy in a temporary folder, deleted when the run ends; the copy kept in the run
+folder has no `passwd`, so a run folder can be shared.
 
 Any database works, but the run writes a real calibration run with fake measurements and fits to it, which
 qompass shows like any other. Point it at a production database only to mean that. The tables are created
@@ -50,7 +51,8 @@ only in db_docker's database; any other database must already have them.
 
 Each run gets a folder `data/dry_runs/<date>_<time>/` with:
 
-- `tree.yml`, `calibration.yml`, `database.ini`: what the run used. The calibration holds what the run wrote.
+- `tree.yml`, `calibration.yml`, `database.ini`: what the run used, the database section without its password.
+  The calibration holds what the run wrote.
 - `seqtante/`: the run's outputs (plots, logs), as on hardware.
 - `measurements/`: the `.h5` of every measurement.
 - `executions/<n>_<experiment>_<target>/`: one folder per execution, with the Q1ASM of every bus, the SCPI
@@ -88,9 +90,12 @@ Names are upper case: target `q1` is `Q1`, step `rabi_reset` is `RABI_RESET`. Un
 | `FAIL` | force the measurement to fail: `fit` or `execution` | | no failure |
 
 The values are absolute, in the node's own sweep: a value outside the sweep gives data the fit should
-reject. A `DRY_RUN_*` variable that names no parameter, target, step or experiment of the tree, a `FAIL`
-that is neither `fit` nor `execution`, or another value that is not a number, stops the run before it
-starts, so a typo is not silently ignored.
+reject. These stop the run before it starts, so a typo is not silently ignored:
+
+- a `DRY_RUN_*` variable that names no parameter, target, step or experiment of the tree;
+- a `FAIL` that is neither `fit` nor `execution`;
+- another value that is not a finite number;
+- a negative `NOISE`, a `T1` or `T2` that is not positive, or a `PI_AMPLITUDE` of 0.
 
 ### Noise
 
@@ -105,8 +110,8 @@ starts, so a typo is not silently ignored.
 | `rabi` | a cosine of amplitude 1 | 0.02 |
 | `t1`, `t2` | a decay from 1 | 0.01 |
 
-A noise of the order of the signal makes the fit's R² or uncertainty checks reject the step, as a bad
-measurement would.
+Enough noise makes the fit's R² or uncertainty checks reject the step, as a bad measurement would. How much
+depends on the fit: `rabi` still passes its 0.9 minimum R² with a noise of 0.3.
 
 ### Forcing a failure
 
@@ -130,5 +135,8 @@ Unset them afterwards in PowerShell with `Remove-Item Env:DRY_RUN_*`.
 
 - **The data does not move with flux.** `reset_point_search` converges only if its first measurement is
   already inside the target window.
+- **The vs-flux arcs have a fixed curvature.** The `two_tone_vs_flux` and `offset_calibration` builders take
+  it from their tests' constants, not from the sweep they are given, so on a wide flux sweep the arc can leave
+  the IF window and the fit fails. A narrow sweep sees an almost flat arc.
 - **`landau_zener`** has no node yet, so a tree with that experiment does not run.
 - **Qblox** programs are compiled, never run: nothing is checked on the acquisition side.

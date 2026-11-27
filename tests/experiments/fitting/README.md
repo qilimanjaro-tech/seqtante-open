@@ -13,10 +13,11 @@ so its test goes in `tests/experiments/fitting/test_single_tone_vs_flux_fit.py`.
 **2. Write a builder for the data,** next to the case that uses it. It takes a
 seeded generator and returns the `(results, loops)` pair the acquisition would
 have written. Build the shape of the signal out of the model functions already on
-`FittingClass`; the harness supplies the noise and the IQ packing. The sweep axes
-and the value that places the feature (a centre, a sweet spot, a lifetime) are
-keyword-only arguments defaulting to the case's own, so the same builder can fake
-a measurement on any sweep.
+`FittingClass`; the harness supplies the noise and the IQ packing. The sweep axes,
+the value that places the feature (a centre, a sweet spot, a lifetime) and the
+noise `sigma` are keyword-only arguments defaulting to the case's own, so the same
+builder can fake a measurement on any sweep, as the dry run in `scripts/dry_run`
+does.
 
 **3. Declare the case.** In full:
 
@@ -46,19 +47,22 @@ def make_single_tone_vs_flux_data(
     fluxes: np.ndarray = FLUXES,
     frequencies: np.ndarray = FREQUENCIES,
     sweet_spot: float = SWEET_SPOT,
+    sweet_spot_if: float = -10.0e6,
+    sigma: float = 0.002,
 ) -> tuple[np.ndarray, dict]:
-    """A resonator dip tracing a parabola in flux, centred on ``sweet_spot``, over ``fluxes`` by ``frequencies``.
+    """A resonator dip tracing a parabola in flux, apex at ``sweet_spot`` and ``sweet_spot_if``, over ``fluxes``
+    by ``frequencies``.
 
     Every cut of the image at fixed frequency is symmetric about ``sweet_spot``,
     because the resonance depends on ``(flux - sweet_spot) ** 2``. That symmetry
     is what the auto-convolution inside the fit locates.
     """
-    resonance = -10.0e6 - 30.0e6 * ((fluxes - sweet_spot) / FLUX_HALF_SPAN) ** 2
+    resonance = sweet_spot_if - 30.0e6 * ((fluxes - sweet_spot) / FLUX_HALF_SPAN) ** 2
     width = 4.0e6
     detuning = (frequencies[None, :] - resonance[:, None]) / (0.5 * width)
     magnitude = 1.0 - 0.8 / (1.0 + detuning**2)
 
-    results = as_iq(magnitude, rng, sigma=0.002)
+    results = as_iq(magnitude, rng, sigma=sigma)
 
     loops = {
         "flux": loop(fluxes, units="V", bus="flux_z_q1", parameter="Flux"),
