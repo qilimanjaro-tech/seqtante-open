@@ -40,22 +40,32 @@ FLUX_STEP = 2 * FLUX_HALF_SPAN / (2 * FLUX_POINTS - 2)
 """Step of the auto-convolution axis the fit reports its answer on."""
 
 
-def make_single_tone_vs_flux_data(rng: np.random.Generator) -> tuple[np.ndarray, dict]:
-    """A resonator dip tracing a parabola in flux, centred on the sweet spot.
+FLUXES = np.linspace(SWEET_SPOT - FLUX_HALF_SPAN, SWEET_SPOT + FLUX_HALF_SPAN, FLUX_POINTS)
+FREQUENCIES = np.arange(-50_000_000, 10_000_001, 1_000_000)
 
-    Every cut of the image at fixed frequency is symmetric about ``SWEET_SPOT``,
+
+def make_single_tone_vs_flux_data(
+    rng: np.random.Generator,
+    *,
+    fluxes: np.ndarray = FLUXES,
+    frequencies: np.ndarray = FREQUENCIES,
+    sweet_spot: float = SWEET_SPOT,
+    sweet_spot_if: float = -10.0e6,
+    sigma: float = 0.002,
+) -> tuple[np.ndarray, dict]:
+    """A resonator dip tracing a parabola in flux, apex at ``sweet_spot`` and ``sweet_spot_if``, over ``fluxes``
+    by ``frequencies``.
+
+    Every cut of the image at fixed frequency is symmetric about ``sweet_spot``,
     because the resonance depends on ``(flux - sweet_spot) ** 2``. That symmetry
     is what the auto-convolution inside the fit locates.
     """
-    fluxes = np.linspace(SWEET_SPOT - FLUX_HALF_SPAN, SWEET_SPOT + FLUX_HALF_SPAN, FLUX_POINTS)
-    frequencies = np.arange(-50_000_000, 10_000_001, 1_000_000)
-
-    resonance = -10.0e6 - 30.0e6 * ((fluxes - SWEET_SPOT) / FLUX_HALF_SPAN) ** 2
+    resonance = sweet_spot_if - 30.0e6 * ((fluxes - sweet_spot) / FLUX_HALF_SPAN) ** 2
     width = 4.0e6
     detuning = (frequencies[None, :] - resonance[:, None]) / (0.5 * width)
     magnitude = 1.0 - 0.8 / (1.0 + detuning**2)
 
-    results = as_iq(magnitude, rng, sigma=0.002)
+    results = as_iq(magnitude, rng, sigma=sigma)
 
     loops = {
         "flux": loop(fluxes, units="V", bus="flux_z_q1", parameter="Flux"),

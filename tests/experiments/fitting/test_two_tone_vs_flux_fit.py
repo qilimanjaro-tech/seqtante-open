@@ -48,17 +48,27 @@ CENTER_TOLERANCE = 0.02
 """Flux, generous next to the 0.057 phi_0 step of the sweep itself."""
 
 
-def make_two_tone_vs_flux_data(rng: np.random.Generator) -> tuple[np.ndarray, dict]:
-    """A qubit peak tracing a downward parabola in flux, apex at the sweet spot."""
-    fluxes = np.linspace(SWEET_SPOT - FLUX_HALF_SPAN, SWEET_SPOT + FLUX_HALF_SPAN, FLUX_POINTS)
-    frequencies = np.arange(-30.0e6, 30.0e6 + FREQUENCY_STEP, FREQUENCY_STEP)
+FLUXES = np.linspace(SWEET_SPOT - FLUX_HALF_SPAN, SWEET_SPOT + FLUX_HALF_SPAN, FLUX_POINTS)
+FREQUENCIES = np.arange(-30.0e6, 30.0e6 + FREQUENCY_STEP, FREQUENCY_STEP)
 
-    qubit_if = -5.0e6 + CURVATURE * (fluxes - SWEET_SPOT) ** 2
+
+def make_two_tone_vs_flux_data(
+    rng: np.random.Generator,
+    *,
+    fluxes: np.ndarray = FLUXES,
+    frequencies: np.ndarray = FREQUENCIES,
+    sweet_spot: float = SWEET_SPOT,
+    sweet_spot_if: float = -5.0e6,
+    sigma: float = 0.01,
+) -> tuple[np.ndarray, dict]:
+    """A qubit peak tracing a downward parabola in flux, apex at ``sweet_spot`` and ``sweet_spot_if``,
+    over ``fluxes`` by ``frequencies``."""
+    qubit_if = sweet_spot_if + CURVATURE * (fluxes - sweet_spot) ** 2
     width = 4.0e6
     detuning = (frequencies[None, :] - qubit_if[:, None]) / (0.5 * width)
     magnitude = 1.0 / (1.0 + detuning**2)
 
-    results = as_iq(magnitude, rng, sigma=0.01)
+    results = as_iq(magnitude, rng, sigma=sigma)
 
     loops = {
         "flux": loop(fluxes, units="phi_0", bus="flux_z_q1", parameter="Flux"),

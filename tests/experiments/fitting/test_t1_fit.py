@@ -32,15 +32,19 @@ DECAY_RATE = -1.0 / T1_NS
 """``B`` of ``FittingClass.exponential``, which is what curve_fit reports."""
 
 
-def make_t1_data(rng: np.random.Generator) -> tuple[np.ndarray, dict]:
-    """Exponential relaxation, placed on a rotated axis of the IQ plane.
+WAIT = np.arange(0, 40_001, 500)
+
+
+def make_t1_data(
+    rng: np.random.Generator, *, wait: np.ndarray = WAIT, t1: float = T1_NS, sigma: float = 0.01
+) -> tuple[np.ndarray, dict]:
+    """Exponential relaxation with lifetime ``t1`` (ns) over ``wait``, placed on a rotated axis of the IQ plane.
 
     ``T1Fit`` rotates the trace back before fitting, so the decay constant has to
     survive that round trip. Wait times are integer ns, as the sequencer sweeps them.
     """
-    wait = np.arange(0, 40_001, 500)
-    decay = FittingClass.exponential(wait, 1.0, DECAY_RATE, 0.0)
-    results = as_iq(decay, rng, sigma=0.01)
+    decay = FittingClass.exponential(wait, 1.0, -1.0 / t1, 0.0)
+    results = as_iq(decay, rng, sigma=sigma)
 
     return results, {"wait": loop(wait, units="ns", bus="drive_q1", parameter="duration")}
 

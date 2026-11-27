@@ -29,13 +29,17 @@ FREQ_STEP = 0.4e6
 """Step of the IF sweep (the script's value)."""
 
 
-def make_lorentzian_data(rng: np.random.Generator) -> tuple[np.ndarray, dict]:
-    """A single qubit peak: a Lorentzian on one quadrature, centred on ``QUBIT_IF``."""
-    frequencies = np.arange(-1.3e8, -0.7e8 + 1, int(FREQ_STEP))
+FREQUENCIES = np.arange(-1.3e8, -0.7e8 + 1, int(FREQ_STEP))
+
+
+def make_lorentzian_data(
+    rng: np.random.Generator, *, frequencies: np.ndarray = FREQUENCIES, qubit_if: float = QUBIT_IF, sigma: float = 0.002
+) -> tuple[np.ndarray, dict]:
+    """A single qubit peak: a Lorentzian on one quadrature, centred on ``qubit_if``, over ``frequencies``."""
     linewidth = 4.0e6
     # A peak of height 0.4 and FWHM linewidth on a flat baseline.
-    signal = FittingClass.lorentzian(frequencies, 0.4, QUBIT_IF, linewidth, 0.2)
-    results = as_iq(signal, rng, sigma=0.002)
+    signal = FittingClass.lorentzian(frequencies, 0.4, qubit_if, linewidth, 0.2)
+    results = as_iq(signal, rng, sigma=sigma)
     loops = {"IF_frequency": loop(frequencies, units="Hz", bus="drive_q1", parameter="IF_frequency")}
     return results, loops
 

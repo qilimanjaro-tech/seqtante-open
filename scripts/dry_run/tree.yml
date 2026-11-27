@@ -1,0 +1,81 @@
+sample: dry-run-sample
+cooldown: dry-run-cooldown
+storage: {}  # replaced by the dry run: its own folder and the database it is given
+targets: [q1, q2]
+
+defaults:
+  two_tone_vs_flux:
+    drive_if_sweep: [-50e6, 50e6, 101]
+    drive_amplitude: 0.1
+    drive_duration: 2000
+    drive_gain: 1
+    relax_duration: 20000
+    averages: 1000
+  two_tone:
+    drive_if_sweep: [-10e6, 10e6, 101]
+  rabi:
+    drive_amplitude_sweep: [0.02, 0.8, 40]
+    relax_duration: 500000
+    averages: 2000
+  t1:
+    idle_duration_sweep: [0, 200000, 51]
+    drive_amplitude: 0.1
+    drive_duration: 2000
+    drive_gain: 1
+    relax_duration: 500000
+    averages: 2000
+  t2:
+    idle_duration_sweep: [0, 60000, 61]
+    drive_gain: 1
+    relax_duration: 500000
+    averages: 2000
+
+pipelines:
+  sweet_spot:
+    steps:
+      sweet_spot_flux:
+        experiment: two_tone_vs_flux
+        analysis: parabola_vertex
+        operating_point: sweet_spot
+        flux_axis: z
+        flux_sweep: [-0.3, 0.3, 11]
+      two_tone_sweet_spot:
+        experiment: two_tone
+        analysis: lorentzian_peak
+        operating_point: sweet_spot
+
+  t1:
+    after: two_tone_sweet_spot
+    steps:
+      t1_sweet_spot:
+        experiment: t1
+        operating_point: sweet_spot
+        thresholds: {passed: 50 us, warning: 20 us}
+
+  t2:
+    after: [two_tone_sweet_spot]
+    steps:
+      rabi_sweet_spot:
+        experiment: rabi
+        analysis: pi_amplitude
+        operating_point: sweet_spot
+        pulses: {drive: pi-sweet_spot}
+      t2_sweet_spot:
+        experiment: t2
+        operating_point: sweet_spot
+        pulses: {drive: pi-sweet_spot}
+        thresholds: {passed: 10 us, warning: 5 us}
+
+  reset:
+    after: sweet_spot_flux
+    steps:
+      reset_flux:
+        experiment: reset_point_search
+        operating_point: reset
+        target_freq_min: 4.59e9
+        target_freq_max: 4.61e9
+      rabi_reset:
+        experiment: rabi
+        analysis: readout_levels
+        operating_point: reset
+        pulses: {drive: pi-reset, readout: readout-reset}

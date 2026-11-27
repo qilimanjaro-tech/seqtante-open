@@ -1,0 +1,22 @@
+# A local Postgres for seqtante runs and dry runs. Local only: the login is not a secret.
+# The tables are created by `uv run python -m db_docker.create_tables`, from qililab's own models.
+services:
+  seqtante-db:
+    image: postgres:16
+    container_name: seqtante-open-db
+    environment:
+      POSTGRES_USER: seqtante
+      POSTGRES_PASSWORD: seqtante
+      POSTGRES_DB: seqtante
+    ports:
+      - "5436:5432"
+    volumes:
+      - seqtante-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seqtante -d seqtante"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  seqtante-db-data:

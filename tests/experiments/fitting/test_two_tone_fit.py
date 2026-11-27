@@ -38,18 +38,22 @@ FREQ_STEP = 0.5e6
 """Step of the IF sweep."""
 
 
-def make_two_tone_data(rng: np.random.Generator) -> tuple[np.ndarray, dict]:
-    """A single qubit peak: a Lorentzian centred on ``QUBIT_IF``.
+FREQUENCIES = np.arange(-30_000_000, 30_000_001, int(FREQ_STEP))
+
+
+def make_two_tone_data(
+    rng: np.random.Generator, *, frequencies: np.ndarray = FREQUENCIES, qubit_if: float = QUBIT_IF, sigma: float = 0.002
+) -> tuple[np.ndarray, dict]:
+    """A single qubit peak: a Lorentzian centred on ``qubit_if``, over ``frequencies``.
 
     The peak lives on one quadrature in the rotated IQ plane, which is what
     ``rotate_iq`` recovers before the Lorentzian fit locates its centre.
     """
-    frequencies = np.arange(-30_000_000, 30_000_001, int(FREQ_STEP))
     width = 4.0e6
-    detuning = (frequencies - QUBIT_IF) / (0.5 * width)
+    detuning = (frequencies - qubit_if) / (0.5 * width)
     signal = 0.8 / (1.0 + detuning**2)
 
-    results = as_iq(signal, rng, sigma=0.002)
+    results = as_iq(signal, rng, sigma=sigma)
 
     loops = {
         "frequency": loop(frequencies, units="Hz", bus="drive_q1", parameter="IF_frequency"),
