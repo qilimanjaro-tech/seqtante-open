@@ -93,6 +93,23 @@ class TestLandauZenerFit(FittingTestCase):
         with pytest.raises(ValueError, match="readout levels are equal"):
             LandauZenerFit(**{**self.INIT, "level_1": 0.0})
 
+    def test_fit_r2_comes_from_the_decay_fits_not_the_noise_fallback(self, environment) -> None:
+        """sigma_hat falls back to the scatter where a decay is unresolved; fit_r2 stays the fits' own R²."""
+        model = LandauZenerFit(**self.INIT)
+        surface = model.transition_probability.copy()
+        surface[0] = 0.5 + np.random.default_rng(11).normal(0, 0.02, surface.shape[1])  # no decay to see
+        model.transition_probability = surface
+        fits = [lz.fit_decay(model.durations, row) for row in surface]
+        assert not fits[0].resolved
+        assert all(fit.resolved for fit in fits[1:])
+
+        results = model.fit()
+
+        assert results["fit_r2"] == pytest.approx(1 - sum(f.ss_res for f in fits) / sum(f.ss_tot for f in fits))
+        dof = model.durations.size - 3
+        noise_ss = lz.successive_scatter(surface[0]) * dof + sum(f.ss_res for f in fits[1:])
+        assert results["noise"] == pytest.approx(math.sqrt(noise_ss / (dof * len(fits))))
+
     def test_a_wrong_gap_lowers_s_and_shows_in_the_gap_ratio(self, environment) -> None:
         """With Delta 20% too large in the data, the gap ratio reads it (tau ~ 1/Delta^2) and S drops."""
         measured = lz.lz_probability(DURATIONS, 1.2 * np.array(MIN_GAP), np.array(DETUNING_SPAN))
@@ -168,6 +185,18 @@ def test_the_decay_fit_recovers_tau_and_reports_an_unresolved_decay():
     flat = lz.fit_decay(durations, np.full(durations.size, 0.5))
     assert not flat.resolved
     assert math.isnan(flat.tau)
+
+
+def test_an_unresolved_decay_keeps_its_fit_residuals():
+    """A converged fit with no decay to see still has residuals: fit_r2 uses them; only tau is unknown."""
+    durations = np.geomspace(5, 400, 25)
+    flat = 0.5 + np.random.default_rng(5).normal(0, 0.02, durations.size)
+
+    decay = lz.fit_decay(durations, flat)
+
+    assert not decay.resolved
+    assert math.isnan(decay.tau)
+    assert math.isfinite(decay.ss_res)
 
 
 def test_the_successive_scatter_estimates_white_noise():

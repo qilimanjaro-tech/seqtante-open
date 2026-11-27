@@ -138,8 +138,9 @@ def _decay(durations: np.ndarray, floor: float, amplitude: float, tau: float, st
 class DecayFit:
     """``floor + A·exp(-(T - T₀)/τ)`` fitted to one φx's curve, T₀ fixed at the shortest duration.
 
-    ``resolved`` is false when the fit failed, τ ended on a bound, or the amplitude is not clear of the
-    fit's residual noise: then τ is not a measured decay time.
+    ``ss_res`` is the residual sum of squares of the converged fit, NaN when the fit failed. ``resolved``
+    is false when the fit failed, τ ended on a bound, or the amplitude is not clear of the fit's residual
+    noise: then τ is not a measured decay time, and is NaN.
     """
 
     tau: float
@@ -151,7 +152,7 @@ class DecayFit:
 def fit_decay(durations: np.ndarray, values: np.ndarray) -> DecayFit:
     """Fit the LZ decay to one φx's curve (ADR-0012), τ bounded to [a tenth of the shortest step, 100 spans].
 
-    The sums of squares are of the fitted curve; for an unresolved decay they are NaN and τ is NaN.
+    The sums of squares are of the fitted curve, whether or not the decay is resolved.
     """
     durations = np.asarray(durations, dtype=float)
     values = np.asarray(values, dtype=float)
@@ -175,9 +176,11 @@ def fit_decay(durations: np.ndarray, values: np.ndarray) -> DecayFit:
     ss_res = float(np.sum((values - _decay(durations, floor, amplitude, tau, start)) ** 2))
     # With no decay to see, τ is free and stays wherever the fit left it.
     residual_noise = math.sqrt(ss_res / max(durations.size - _DECAY_PARAMETERS, 1))
-    no_decay = not abs(amplitude) > _MIN_DECAY_SIGNIFICANCE * residual_noise
-    if on_bound or no_decay or not math.isfinite(ss_res):
+    if not math.isfinite(ss_res):
         return DecayFit(tau=nan, ss_res=nan, ss_tot=ss_tot, resolved=False)
+    no_decay = abs(amplitude) <= _MIN_DECAY_SIGNIFICANCE * residual_noise
+    if on_bound or no_decay:
+        return DecayFit(tau=nan, ss_res=ss_res, ss_tot=ss_tot, resolved=False)
     return DecayFit(tau=float(tau), ss_res=ss_res, ss_tot=ss_tot, resolved=True)
 
 
@@ -264,13 +267,16 @@ class LandauZenerFit(FittingClass[_LandauZenerResults]):
         fits = [fit_decay(self.durations, row) for row in measured]
         theory_fits = [fit_decay(self.durations, row) for row in theory]
         dof = self.durations.size - _DECAY_PARAMETERS
-        ss_res = sum(
+        # sigma_hat falls back to the successive-point scatter where the decay is not resolved (ADR-0012).
+        noise_ss = sum(
             fit.ss_res if fit.resolved else successive_scatter(row) * dof
             for fit, row in zip(fits, measured, strict=True)
         )
-        ss_tot = sum(fit.ss_tot for fit in fits)
-        noise = math.sqrt(ss_res / (dof * len(fits)))
-        fit_r2 = 1 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+        noise = math.sqrt(noise_ss / (dof * len(fits)))
+        # fit_r2 is the decay fits' own quality: every converged fit, and nothing from the fallback.
+        converged = [fit for fit in fits if math.isfinite(fit.ss_res)]
+        fit_ss_tot = sum(fit.ss_tot for fit in converged)
+        fit_r2 = 1 - sum(fit.ss_res for fit in converged) / fit_ss_tot if fit_ss_tot > 0 else float("nan")
         gap_ratio = np.array(
             [
                 math.sqrt(model.tau / fit.tau) if fit.resolved and model.resolved else float("nan")

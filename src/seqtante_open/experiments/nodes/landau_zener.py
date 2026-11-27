@@ -350,8 +350,8 @@ class LandauZenerNode(FixedFluxNode[None]):
         score never reaches the DB.
 
         Raises:
-            AnalysisError: when the ``rmse`` S is undefined (a zero reference distance). The target then
-                fails the step.
+            AnalysisError: when the ``rmse`` S is undefined: a non-finite point in the data, or a zero
+                reference distance. The target then fails the step.
         """
         levels, points = self._levels[target], self._points[target]
         model = LandauZenerFit(
@@ -366,7 +366,10 @@ class LandauZenerNode(FixedFluxNode[None]):
         model.fit()
         score = model.score
         if not math.isfinite(score.value):
-            raise AnalysisError(f"{target}: the Landau-Zener score is undefined (reference distance {score.reference})")
+            raise AnalysisError(
+                f"{target}: the Landau-Zener score is undefined (S = {score.value}, D = {score.distance}, "
+                f"D_ref = {score.reference}); a non-finite point in the data or a zero reference distance"
+            )
         model.save_fitting()
         plot = model.plot()
         uncertainty = score.uncertainty if math.isfinite(score.uncertainty) else None
