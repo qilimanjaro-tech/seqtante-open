@@ -26,7 +26,6 @@ from seqtante_open.controllers import BenchmarkThresholds, CalibrationParser, Pi
 from seqtante_open.controllers.verdicts import BenchmarkDirection
 
 HIGHER = BenchmarkDirection.higher_is_better
-LOWER = BenchmarkDirection.lower_is_better
 
 
 @pytest.fixture
@@ -791,7 +790,7 @@ def t1_step(**keys: Any) -> dict[str, Any]:
 
 
 def lz_step(**keys: Any) -> dict[str, Any]:
-    """A ``landau_zener`` step, a dimensionless benchmark where lower is better; ``keys`` add to or replace its keys."""
+    """A ``landau_zener`` step, a dimensionless benchmark where higher is better (ADR-0012); ``keys`` add to or replace its keys."""
     return make_step(experiment="landau_zener", operating_point="reset", **keys)
 
 
@@ -819,11 +818,11 @@ class TestThresholds:
         step = only_step(single_step_tree(t1_step(thresholds=t1_thresholds(passed=passed))), platform)
         assert step.thresholds["q1"] == BenchmarkThresholds(passed=50.0, warning=20.0, unit="us", direction=HIGHER)
 
-    @pytest.mark.parametrize("passed", [1, 1.5])
+    @pytest.mark.parametrize("passed", [1, 0.8])
     def test_dimensionless_takes_a_plain_number(self, platform, passed):
-        step = only_step(single_step_tree(lz_step(thresholds={"passed": passed, "warning": 3})), platform)
+        step = only_step(single_step_tree(lz_step(thresholds={"passed": passed, "warning": 0.5})), platform)
         assert step.thresholds["q1"] == BenchmarkThresholds(
-            passed=float(passed), warning=3.0, unit=None, direction=LOWER
+            passed=float(passed), warning=0.5, unit=None, direction=HIGHER
         )
 
     def test_zero_is_accepted(self, platform):
@@ -995,10 +994,10 @@ class TestThresholds:
                 id="higher_is_better_reversed",
             ),
             pytest.param(
-                single_step_tree(lz_step(thresholds={"passed": 3, "warning": 1})),
-                r"^pipelines\.p\.steps\.s\.thresholds: passed \(3\) must be below warning \(1\), "
-                r"since lower is better for 'landau_zener'",
-                id="lower_is_better_reversed",
+                single_step_tree(lz_step(thresholds={"passed": 0.5, "warning": 0.8})),
+                r"^pipelines\.p\.steps\.s\.thresholds: passed \(0.5\) must be above warning \(0.8\), "
+                r"since higher is better for 'landau_zener'",
+                id="dimensionless_reversed",
             ),
         ],
     )
