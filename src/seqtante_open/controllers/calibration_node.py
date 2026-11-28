@@ -467,16 +467,13 @@ class CalibrationNode(ABC, Generic[ResultT]):
             raise ValueError(f"{target} {self.experiment}: repetitions must be at least 1, not {repetitions}")
         platform = self.context.platform
         readout_bus = bus_alias(target, Role.readout)
-        stream_array = StreamArray(
-            shape=shape,
-            loops=loops,
-            platform=platform,
+        stream_array = self._stream_array(
+            target,
+            qprogram,
             experiment_name=experiment_name,
-            db_manager=output_controller.db_manager,
-            qprogram=qprogram,
-            calibration=self.context.calibration,
+            loops=loops,
+            shape=shape,
             optional_identifier=optional_identifier,
-            qubit_idx=str(target),
         )
         total: list[np.ndarray] = []
         with stream_array:
@@ -489,6 +486,39 @@ class CalibrationNode(ABC, Generic[ResultT]):
                     arrays if execution == 1 else [summed + array for summed, array in zip(total, arrays, strict=True)]
                 )
                 write(stream_array, [summed / execution for summed in total])
+        return self._measurement_id(stream_array)
+
+    def _stream_array(
+        self,
+        target: Target,
+        qprogram: "QProgram",
+        *,
+        experiment_name: str,
+        loops: Mapping[str, Any],
+        shape: tuple[int, ...],
+        calibration: Calibration | None = None,
+        optional_identifier: str | None = None,
+    ) -> StreamArray:
+        """The stream array a measurement of ``target`` is saved through.
+
+        It stores the run's calibration unless ``calibration`` is given. :meth:`_stream` builds it here, and so does a node that executes its QPrograms itself (``landau_zener``
+        runs one QProgram per row, compiled with its own AC crosstalk), so every measurement is stored alike.
+        """
+        return StreamArray(
+            shape=shape,
+            loops=loops,
+            platform=self.context.platform,
+            experiment_name=experiment_name,
+            db_manager=output_controller.db_manager,
+            qprogram=qprogram,
+            calibration=self.context.calibration if calibration is None else calibration,
+            optional_identifier=optional_identifier,
+            qubit_idx=str(target),
+        )
+
+    @staticmethod
+    def _measurement_id(stream_array: StreamArray) -> int:
+        """The database id of the measurement ``stream_array`` saved, once its ``with`` block has closed."""
         return cast("Measurement | AutocalMeasurement", stream_array.measurement).measurement_id
 
     def _drive_source_writes(self, target: Target) -> list[tuple[Parameter, ParameterValue]]:
@@ -521,11 +551,11 @@ class CalibrationNode(ABC, Generic[ResultT]):
     def _set_operating_point_hardware(self, target: Target) -> None:
         """Set ``target``'s line at its operating point, then arm its drive, through the restore handle (ADR-0006).
 
-        The QProgram sets the IFs and plays the pulses; this sets what it does not: the drive and readout
-        LOs and the readout attenuation from the operating point, then the drive source
-        (:meth:`_set_drive_source`). Every write goes through :attr:`restore`, so ``run`` puts the line
-        back as it was after each target and nothing leaks into the next node. The drive level is
-        checked before the first write, so a missing one leaves the line untouched.
+        The QProgram sets the IFs and plays the pulses; this sets what it does not: the readout line
+        (:meth:`_set_readout_line`), then the drive LO from the operating point and the drive source
+        (:meth:`_drive_source_writes`). Every write goes through :attr:`restore`, so ``run`` puts the line
+        back as it was after each target and nothing leaks into the next node. The drive level and the
+        readout attenuation are checked before the first write, so a bad one leaves the line untouched.
 
         Raises:
             TypeError: if called on a node that sets no ``experiment`` (a spine, not a leaf).
@@ -533,19 +563,30 @@ class CalibrationNode(ABC, Generic[ResultT]):
                 level is neither set in the step nor defaulted.
         """
         point = self._operating_point(target)
+        drive_writes = self._drive_source_writes(target)
+        self._set_readout_line(target)
+        drive_bus = bus_alias(target, Role.drive)
+        self.restore.set(drive_bus, Parameter.LO_FREQUENCY, round(point.drive.lo))
+        for parameter, value in drive_writes:
+            self.restore.set(drive_bus, parameter, value)
+
+    def _set_readout_line(self, target: Target) -> None:
+        """Set ``target``'s readout LO and attenuation at the step's operating point, through the restore handle.
+
+        The readout half of :meth:`_set_operating_point_hardware`, for a node that plays no drive (the
+        ``landau_zener`` flux path) and so has no drive source to arm.
+
+        Raises:
+            TypeError: if called on a node that sets no ``experiment`` (a spine, not a leaf).
+            ValueError: if the readout attenuation is not a whole number of dB.
+        """
+        point = self._operating_point(target)
         attenuation = point.readout.attenuation
         if not float(attenuation).is_integer():
             raise ValueError(f"{target}: readout attenuation {attenuation} dB is not a whole number of dB")
-        drive_writes = self._drive_source_writes(target)
-        drive_bus = bus_alias(target, Role.drive)
         readout_bus = bus_alias(target, Role.readout)
-
-        restore = self.restore
-        restore.set(drive_bus, Parameter.LO_FREQUENCY, round(point.drive.lo))
-        restore.set(readout_bus, Parameter.LO_FREQUENCY, round(point.readout.lo))
-        restore.set(readout_bus, Parameter.OUT0_ATT, int(attenuation))
-        for parameter, value in drive_writes:
-            restore.set(drive_bus, parameter, value)
+        self.restore.set(readout_bus, Parameter.LO_FREQUENCY, round(point.readout.lo))
+        self.restore.set(readout_bus, Parameter.OUT0_ATT, int(attenuation))
 
     def run(self, dead_targets: dict[str, str]) -> list[str]:
         """Run the three phases for every live target and return the ones that failed (ADR-0006).

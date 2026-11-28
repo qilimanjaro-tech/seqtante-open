@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from .fit_base import FittingClass
+from .landau_zener_fit import LandauZenerFit
 from .lorentzian_peak_fit import LorentzianPeakModel
 from .rabi_fit import RabiAmplitudeModel
 from .single_tone_fit import FluxoniumSingleToneModel
@@ -29,6 +30,7 @@ __all__ = [
     "FluxoniumSingleToneModel",
     "FluxoniumTwoToneFluxModel",
     "FluxoniumTwoToneModel",
+    "LandauZenerFit",
     "LorentzianPeakModel",
     "RabiAmplitudeModel",
     "T1Fit",
